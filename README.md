@@ -8,7 +8,7 @@ LiftAssistant is currently an early architecture and simulation project. **It is
 
 ## Current target: M1 — Interactive Simulator
 
-The bootstrap is complete. The next target is one complete developer-facing simulation loop:
+The interactive simulator connects the developer-facing simulation loop:
 
 ~~~text
 interactive hall call
@@ -32,6 +32,24 @@ developer TUI
 M1 is deliberately narrow: two cars, eight floors, an interactive hall call, deterministic stepping/replay, and one out-of-service fallback scenario.
 
 The TUI is a composition/debugging client, not the architecture.
+
+## Run the simulator
+
+Requires Rust stable (minimum 1.85) and a terminal at least 70 columns by 24 rows.
+
+~~~bash
+cargo run -p liftassistant-tui
+~~~
+
+- Up/Down select a floor; U/D create an UP/DOWN hall call.
+- 1F permits UP only; 8F permits DOWN only. Start with the selected **7F UP**.
+- Space pauses/resumes; `.` advances exactly one 500 ms step while paused.
+- R resets the two-car simulator and UI; Q, Esc, or Ctrl-C quits.
+
+The building shows nearest-floor positions; car details show exact positions,
+mode, target, door state, and serve-floor capability. The latest 100 trace entries
+show calls, dispatch, intents, runtime events, and errors. Dispatch is currently
+one-shot: a new call can replace a car's target; pending-call lifecycle is M2 work.
 
 ## Repository layout
 

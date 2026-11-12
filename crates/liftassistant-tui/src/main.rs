@@ -1,66 +1,70 @@
 #![forbid(unsafe_code)]
 
-use std::{collections::BTreeMap, time::Duration};
+mod app;
+mod ui;
 
-use liftassistant_core::dispatch;
-use liftassistant_model::{Capabilities, CarId, Direction, Floor, HallCall};
-use liftassistant_runtime::{ElevatorRuntime, RuntimeEvent};
-use liftassistant_sim::SimRuntime;
+use std::{io, time::Instant};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut runtime = SimRuntime::reference_two_car();
-    let call = HallCall {
-        floor: Floor::new(8),
-        direction: Direction::Up,
-    };
+use crossterm::{
+    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    execute,
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+};
+use ratatui::{Terminal, backend::CrosstermBackend};
 
-    let states = runtime.car_states();
-    let capabilities: BTreeMap<CarId, Capabilities> = states
-        .iter()
-        .filter_map(|car| {
-            runtime
-                .capabilities(&car.id)
-                .map(|caps| (car.id.clone(), caps))
-        })
-        .collect();
+use app::{App, FIXED_STEP};
 
-    let Some(intent) = dispatch(&call, &states, &capabilities) else {
-        eprintln!("No eligible car for {call:?}");
-        return Ok(());
-    };
+// Construct before setup so partial initialization and ordinary errors restore the terminal.
+struct TerminalGuard;
 
-    println!("LiftAssistant bootstrap demo");
-    println!("runtime: {}", runtime.runtime_name());
-    println!("hall call: {call:?}");
-    println!("decision: {intent:?}");
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
+    }
+}
 
-    runtime.submit_intent(intent)?;
+fn main() -> io::Result<()> {
+    let _guard = TerminalGuard;
+    enable_raw_mode()?;
+    execute!(io::stdout(), EnterAlternateScreen)?;
+    let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+    let mut app = App::new();
+    let mut next_step = Instant::now() + FIXED_STEP;
 
-    for tick in 0..40 {
-        let events = runtime.tick(Duration::from_millis(500));
-
-        println!();
-        println!("tick {tick:02}");
-        for car in runtime.car_states() {
-            println!(
-                "  car {}: {:>4.2}F  {:?}  door={:?} target={:?}",
-                car.id, car.position.floor_position, car.motion, car.door, car.target
-            );
+    loop {
+        terminal.draw(|frame| ui::render(frame, &app))?;
+        if event::poll(next_step.saturating_duration_since(Instant::now()))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Release {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('q' | 'Q') => break,
+                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            break;
+                        }
+                        KeyCode::Up => app.select_floor(1),
+                        KeyCode::Down => app.select_floor(-1),
+                        KeyCode::Char('u' | 'U') => app.call(liftassistant_model::Direction::Up),
+                        KeyCode::Char('d' | 'D') => app.call(liftassistant_model::Direction::Down),
+                        KeyCode::Char(' ') => {
+                            app.paused = !app.paused;
+                            next_step = Instant::now() + FIXED_STEP;
+                        }
+                        KeyCode::Char('.') if app.paused => app.step(),
+                        KeyCode::Char('r' | 'R') => {
+                            app.reset();
+                            next_step = Instant::now() + FIXED_STEP;
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
-
-        for event in &events {
-            println!("    event: {event:?}");
-        }
-
-        if events.iter().any(|event| {
-            matches!(
-                event,
-                RuntimeEvent::Arrived { floor, .. } if *floor == Floor::new(8)
-            )
-        }) {
-            break;
+        if Instant::now() >= next_step {
+            app.advance();
+            // No elapsed wall time in physics and no burst catch-up steps after a stall.
+            next_step = Instant::now() + FIXED_STEP;
         }
     }
-
     Ok(())
 }

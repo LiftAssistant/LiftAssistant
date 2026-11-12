@@ -12,7 +12,7 @@ initial state:
   car B at 1F
 
 input:
-  hall call 8F UP
+  hall call 8F DOWN
 
 expected semantic flow:
   dispatch chooses an eligible car

@@ -7,6 +7,8 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+crossterm = "0.28"
 liftassistant-core = { path = "../liftassistant-core" }
 liftassistant-model = { path = "../liftassistant-model" }
 liftassistant-runtime = { path = "../liftassistant-runtime" }

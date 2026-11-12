@@ -53,7 +53,7 @@ mod tests {
         ];
         let call = HallCall {
             floor: Floor::new(8),
-            direction: Direction::Up,
+            direction: Direction::Down,
         };
 
         let decision = dispatch(&call, &cars, &capabilities(&cars));
@@ -74,7 +74,7 @@ mod tests {
         let cars = vec![a, CarState::new("B", Floor::new(1))];
         let call = HallCall {
             floor: Floor::new(8),
-            direction: Direction::Up,
+            direction: Direction::Down,
         };
 
         let decision = dispatch(&call, &cars, &capabilities(&cars));

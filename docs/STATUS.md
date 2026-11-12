@@ -17,29 +17,34 @@ Working today:
 - deterministic fixed-duration simulator tick;
 - simulated movement, arrival, and door-open state;
 - out-of-service filtering in dispatch;
-- bootstrap console program that runs the 8F-UP vertical slice;
+- interactive TUI with valid hall calls, fixed stepping, car details, and bounded event trace;
 - minimal CI as a compile/lint/regression gate.
 
-The current console program proves the modules connect, but it is not yet the intended developer experience.
+The interactive loop is implemented; deterministic replay is the next READY slice.
 
 ## M1.1 — Interactive loop
 
-Next implementation work, in order:
+**Completed.**
 
-1. Replace the hard-coded bootstrap run with an interactive TUI.
-2. Render two cars across eight floors.
-3. Show position, motion, door state, target, mode, and capabilities needed for the current decision.
-4. Let the user create a valid hall call without editing source.
-5. Show the dispatch decision and generated high-level intent.
-6. Drive simulation through an explicit fixed step.
-7. Add pause, single-step, resume, reset, and quit.
-8. Keep a bounded visible decision/runtime-event trace.
+- Two-car/eight-floor building and exact car detail views.
+- Valid floor/direction selection (1F UP only, 8F DOWN only).
+- Calls flow through existing dispatch and runtime submission.
+- Running/paused state, explicit 500 ms single step, reset, quit.
+- Last decision plus a bounded 100-entry trace of decisions/runtime events/errors.
+- Alternate screen/raw mode restored on normal exit and ordinary error returns.
 
-UI timing may use wall-clock time to request simulation steps. Core and simulator results must depend only on explicit inputs and the supplied simulation duration.
+Validation: formatting, Clippy, six workspace tests, and a PTY smoke test of calls,
+pause/single-step, arrival/open door, reset, boundary rejection, and terminal restoration.
+
+UI timing only requests fixed steps; wall-clock elapsed never enters simulator physics.
+
+HUMAN_PENDING: optional TUI usability/visual feedback; does not block replay or fallback.
 
 ## M1.2 — Deterministic replay
 
-After M1.1 works:
+**READY — next implementation slice.**
+
+After M1.1:
 - represent scenario input as explicit developer/simulator commands;
 - replay the same command sequence against a fresh simulator;
 - compare the resulting semantic event sequence;

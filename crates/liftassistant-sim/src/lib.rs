@@ -116,10 +116,7 @@ impl ElevatorRuntime for SimRuntime {
     }
 
     fn car_states(&self) -> Vec<CarState> {
-        self.cars
-            .values()
-            .map(|car| car.state.clone())
-            .collect()
+        self.cars.values().map(|car| car.state.clone()).collect()
     }
 
     fn capabilities(&self, car: &CarId) -> Option<Capabilities> {

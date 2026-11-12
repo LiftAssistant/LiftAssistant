@@ -14,7 +14,7 @@ Repository principles, memory/status, Rust workspace, model/core/runtime/sim/TUI
 - deterministic/replayable tests
 
 Acceptance:
-1. 8F up call is assigned and served.
+1. 8F down call is assigned and served.
 2. With car A out of service, eligible car B is selected.
 
 ## M2 — LiftAssistant semantics
