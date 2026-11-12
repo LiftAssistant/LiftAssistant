@@ -6,28 +6,45 @@ use std::fmt;
 pub struct CarId(String);
 
 impl CarId {
-    pub fn new(value: impl Into<String>) -> Self { Self(value.into()) }
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 impl fmt::Display for CarId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Floor(i16);
 
 impl Floor {
-    pub const fn new(index: i16) -> Self { Self(index) }
-    pub const fn index(self) -> i16 { self.0 }
+    pub const fn new(index: i16) -> Self {
+        Self(index)
+    }
+
+    pub const fn index(self) -> i16 {
+        self.0
+    }
 }
 
 impl fmt::Display for Floor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}F", self.0) }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}F", self.0)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Direction { Up, Down }
+pub enum Direction {
+    Up,
+    Down,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Position {
@@ -37,18 +54,37 @@ pub struct Position {
 
 impl Position {
     pub fn at_floor(floor: Floor) -> Self {
-        Self { floor_position: f64::from(floor.index()), nearest_floor: floor }
+        Self {
+            floor_position: f64::from(floor.index()),
+            nearest_floor: floor,
+        }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MotionState { Stopped, Moving(Direction) }
+pub enum MotionState {
+    Stopped,
+    Moving(Direction),
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DoorState { Closed, Opening, Open, Closing, Obstructed, Fault }
+pub enum DoorState {
+    Closed,
+    Opening,
+    Open,
+    Closing,
+    Obstructed,
+    Fault,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum OperatingMode { Normal, Independent, Inspection, FireService, OutOfService }
+pub enum OperatingMode {
+    Normal,
+    Independent,
+    Inspection,
+    FireService,
+    OutOfService,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Capabilities {
@@ -60,7 +96,12 @@ pub struct Capabilities {
 
 impl Capabilities {
     pub const fn reference_defaults() -> Self {
-        Self { observe_position: true, observe_door: true, serve_floor: true, park: true }
+        Self {
+            observe_position: true,
+            observe_door: true,
+            serve_floor: true,
+            park: true,
+        }
     }
 }
 
@@ -88,7 +129,10 @@ impl CarState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct HallCall { pub floor: Floor, pub direction: Direction }
+pub struct HallCall {
+    pub floor: Floor,
+    pub direction: Direction,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Intent {
