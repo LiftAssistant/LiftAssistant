@@ -1,0 +1,11 @@
+[package]
+name = "liftassistant-sim"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+liftassistant-model = { path = "../liftassistant-model" }
+liftassistant-runtime = { path = "../liftassistant-runtime" }

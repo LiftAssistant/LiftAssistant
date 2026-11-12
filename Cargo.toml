@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/liftassistant-model",
+    "crates/liftassistant-core",
+    "crates/liftassistant-runtime",
+    "crates/liftassistant-sim",
+    "crates/liftassistant-tui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+repository = "https://github.com/LiftAssistant/LiftAssistant"
+publish = false
