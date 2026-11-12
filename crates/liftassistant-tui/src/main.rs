@@ -47,6 +47,8 @@ fn main() -> io::Result<()> {
                         KeyCode::Down => app.select_floor(-1),
                         KeyCode::Char('u' | 'U') => app.call(liftassistant_model::Direction::Up),
                         KeyCode::Char('d' | 'D') => app.call(liftassistant_model::Direction::Down),
+                        KeyCode::Char('a' | 'A') => app.toggle_availability("A"),
+                        KeyCode::Char('b' | 'B') => app.toggle_availability("B"),
                         KeyCode::Char(' ') => {
                             app.paused = !app.paused;
                             next_step = Instant::now() + FIXED_STEP;

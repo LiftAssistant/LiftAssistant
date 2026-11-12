@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, time::Duration};
 
 use liftassistant_core::dispatch;
-use liftassistant_model::{Direction, Floor, HallCall, Intent};
+use liftassistant_model::{CarId, Direction, Floor, HallCall, Intent, OperatingMode};
 use liftassistant_runtime::{ElevatorRuntime, RuntimeEvent};
 use liftassistant_sim::SimRuntime;
 
@@ -67,6 +67,10 @@ impl App {
         }
         let events = match command {
             Command::HallCall(call) => self.submit_call(call),
+            Command::SetMode { car, mode } => match self.runtime.set_mode(&car, mode) {
+                Ok(()) => vec![SemanticEvent::ModeChanged { car, mode }],
+                Err(error) => vec![SemanticEvent::RuntimeError(error.to_string())],
+            },
             Command::Step => {
                 self.steps += 1;
                 self.runtime
@@ -148,6 +152,23 @@ impl App {
         }
     }
 
+    pub fn toggle_availability(&mut self, id: &str) {
+        let car = CarId::new(id);
+        let mode = self
+            .runtime
+            .car_states()
+            .iter()
+            .find(|state| state.id == car)
+            .map_or(OperatingMode::OutOfService, |state| {
+                if state.mode == OperatingMode::Normal {
+                    OperatingMode::OutOfService
+                } else {
+                    OperatingMode::Normal
+                }
+            });
+        self.execute(Command::SetMode { car, mode });
+    }
+
     pub fn step(&mut self) {
         self.execute(Command::Step);
     }
@@ -189,6 +210,7 @@ fn semantic_label(event: &SemanticEvent) -> String {
         SemanticEvent::NoEligibleCar => "No eligible car".into(),
         SemanticEvent::DispatchSelected(car) => format!("Dispatch -> {car}"),
         SemanticEvent::IntentGenerated(intent) => format!("Intent -> {}", intent_label(intent)),
+        SemanticEvent::ModeChanged { car, mode } => format!("Car {car} -> {mode:?}"),
         SemanticEvent::RuntimeError(error) => format!("Runtime error: {error}"),
         SemanticEvent::Runtime(event) => event_label(event),
     }

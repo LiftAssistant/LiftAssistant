@@ -4,7 +4,7 @@ Updated: 2026-11-12
 
 ## Current milestone
 
-**M1 — Interactive Simulator**
+**M1 — Interactive Simulator: functional acceptance complete**
 
 M0 bootstrap is complete. Stop polishing bootstrap infrastructure unless it blocks M1.
 
@@ -20,7 +20,8 @@ Working today:
 - interactive TUI with valid hall calls, fixed stepping, car details, and bounded event trace;
 - minimal CI as a compile/lint/regression gate.
 
-The interactive loop and deterministic replay are implemented; availability fallback is next READY.
+M1.1, M1.2, and M1.3 are implemented. All scoped AUTO work is complete;
+remaining UI adjustments depend on hands-on usability feedback.
 
 ## M1.1 — Interactive loop
 
@@ -38,7 +39,7 @@ pause/single-step, arrival/open door, reset, boundary rejection, and terminal re
 
 UI timing only requests fixed steps; wall-clock elapsed never enters simulator physics.
 
-HUMAN_PENDING: optional TUI usability/visual feedback; does not block replay or fallback.
+HUMAN_PENDING: hands-on TUI usability/visual review. All independent M1 implementation work is complete.
 
 ## M1.2 — Deterministic replay
 
@@ -56,24 +57,30 @@ negative check, replay continuation, and recording overflow) and PTY replay smok
 
 ## M1.3 — Availability fallback
 
-**READY — next implementation slice.**
+**Completed.**
 
-Make the existing out-of-service behavior visible end to end:
-- mark the normally preferred car out of service using simulator/developer controls;
-- create the hall call;
-- show that dispatch selects another eligible car;
-- expose the decision and resulting event trace in the TUI.
+- A/B toggle each simulated car between Normal and OutOfService using SimRuntime::set_mode.
+- Mode changes are shown in car detail/trace and included in replay commands.
+- With A unavailable, 7F UP dispatches to B and completes arrival/open-door flow.
+- Both unavailable: No eligible car, no submitted intent; restoring A recovers dispatch.
+- Reset restores both cars to Normal and clears targets, decisions, trace, and recording.
+- Existing accepted trips continue if availability changes; these controls affect new dispatch only.
 
-## M1 acceptance criteria
+## M1 validation and remaining review
 
-M1 is done when:
-- `cargo run -p liftassistant-tui` opens an interactive simulator;
-- hall calls can be created from the UI;
-- dispatch -> intent -> movement -> arrival -> door state is visible in one flow;
-- pause/single-step is deterministic;
-- replaying identical inputs produces identical semantic events;
-- the out-of-service fallback works visibly;
-- no real elevator protocol or low-level actuator control has been introduced.
+- cargo fmt --all -- --check: passed.
+- cargo clippy --workspace --all-targets --locked -- -D warnings: passed.
+- cargo test --workspace --locked: 12 passed, no failures or skipped tests.
+- Rust 1.85 all-target workspace check with the committed lockfile: passed.
+- PTY run via cargo run -p liftassistant-tui: calls, fixed-step pause/resume,
+  arrival/open door, reset, invalid call, replay, availability fallback, no-eligible
+  recovery, and Q exit passed. Esc/Ctrl-C and a broken-output error restore terminal settings.
+- All three M1 slices preserve the five-package architecture; no real elevator integration added.
+
+No remaining READY implementation items in this M1 cycle. Human check: run the
+TUI in a preferred terminal, assess visual hierarchy/key usability, and report
+specific adjustments if desired. This does not block any unfinished replay or
+fallback work; those have both completed. M2 remains the subsequent roadmap phase.
 
 ## After M1
 

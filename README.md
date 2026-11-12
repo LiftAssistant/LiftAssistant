@@ -44,6 +44,7 @@ cargo run -p liftassistant-tui
 - Up/Down select a floor; U/D create an UP/DOWN hall call.
 - 1F permits UP only; 8F permits DOWN only. Start with the selected **7F UP**.
 - Space pauses/resumes; `.` advances exactly one 500 ms step while paused.
+- A/B toggle the corresponding simulated car between Normal and OutOfService.
 - P replays the recorded session twice from fresh simulators, verifies identical
   semantic output and the live state, and leaves the result paused.
 - R resets the two-car simulator and UI; Q, Esc, or Ctrl-C quits.
@@ -51,9 +52,19 @@ cargo run -p liftassistant-tui
 The building shows nearest-floor positions; car details show exact positions,
 mode, target, door state, and serve-floor capability. The latest 100 trace entries
 show calls, dispatch, intents, runtime events, and errors. Recording is capped at
-2,048 commands (calls and fixed steps); if full, reset before replaying. Pauses and
+2,048 commands (calls, mode changes, and fixed steps); if full, reset before replaying. Pauses and
 floor selection do not affect physics and are not scenario commands. Dispatch is currently
 one-shot: a new call can replace a car's target; pending-call lifecycle is M2 work.
+
+To observe availability fallback: R, Space (pause), A (out of service), U
+(selected 7F UP), then eight single steps with `.`. The trace shows
+`Car A -> OutOfService`, `Dispatch -> B`, `ServeFloor(B, 7F)`, arrival and door open.
+P verifies the same scenario by replay. Toggle B out of service too to see
+`No eligible car`; toggle A back to Normal to recover dispatch.
+
+Availability controls change future dispatch eligibility. They do not cancel an
+already accepted trip in this simulator. They are developer controls, not a
+real-elevator safety or emergency-stop interface.
 
 ## Repository layout
 

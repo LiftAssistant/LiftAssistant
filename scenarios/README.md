@@ -22,12 +22,20 @@ expected semantic flow:
   -> door open
 ~~~
 
-The second target marks the normally preferred car out of service and verifies that another eligible car is selected.
+## Availability fallback
+
+From a reset, pause, toggle A OutOfService, and submit 7F UP. Dispatch selects B
+instead of the nearer A. Eight fixed steps bring B from 1F to 7F with its door open;
+A stays at 3F. P reproduces the same mode/decision/runtime event sequence.
+
+Marking both cars OutOfService produces No eligible car without submitting an
+intent. Returning A to Normal restores eligibility. Mode changes affect future
+dispatch; they do not cancel a previously accepted trip.
 
 ## In-memory replay
 
 The TUI crate owns a minimal developer-only command representation: a valid or invalid
-hall-call attempt, or one fixed 500 ms simulation step. Both live input and the replay
+hall-call attempt, a simulator operating-mode change, or one fixed 500 ms simulation step. Both live input and the replay
 runner use the same path. P runs the recording twice without sleeping, compares the
 complete semantic event sequences and final states, verifies the live state, and leaves
 the replayed session paused. Continue stepping/calling afterward, or R to reset.

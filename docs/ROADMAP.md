@@ -3,7 +3,7 @@
 ## M0 — Bootstrap
 Repository principles, memory/status, Rust workspace, model/core/runtime/sim/TUI boundaries, CI.
 
-## M1 — Core + deterministic simulator + TUI
+## M1 — Core + deterministic simulator + TUI (implemented)
 - 2 cars / 8 floors
 - hall calls
 - nearest eligible-car dispatch

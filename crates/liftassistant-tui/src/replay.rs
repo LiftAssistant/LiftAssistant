@@ -1,5 +1,5 @@
 //! Developer-only, in-memory simulator inputs; not a public elevator schema.
-use liftassistant_model::{CarId, HallCall, Intent};
+use liftassistant_model::{CarId, HallCall, Intent, OperatingMode};
 use liftassistant_runtime::RuntimeEvent;
 
 use crate::app::App;
@@ -7,6 +7,10 @@ use crate::app::App;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     HallCall(HallCall),
+    SetMode {
+        car: CarId,
+        mode: OperatingMode,
+    },
     /// Exactly one application FIXED_STEP, with no wall-clock dependency.
     Step,
 }
@@ -18,6 +22,7 @@ pub enum SemanticEvent {
     NoEligibleCar,
     DispatchSelected(CarId),
     IntentGenerated(Intent),
+    ModeChanged { car: CarId, mode: OperatingMode },
     RuntimeError(String),
     Runtime(RuntimeEvent),
 }
@@ -103,5 +108,125 @@ mod tests {
         assert_eq!(app.steps, 3);
         app.reset();
         assert!(app.recording.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod availability_tests {
+    use super::*;
+    use liftassistant_model::{Direction, DoorState, Floor, OperatingMode};
+    use liftassistant_runtime::ElevatorRuntime;
+
+    #[test]
+    fn unavailable_preferred_car_falls_back_end_to_end_and_replays() {
+        let mut app = App::new();
+        app.paused = true;
+        app.toggle_availability("A");
+        app.call(Direction::Up);
+        let intent = Intent::ServeFloor {
+            car: CarId::new("B"),
+            floor: Floor::new(7),
+        };
+        assert_eq!(app.decision, Some(intent.clone()));
+        for _ in 0..8 {
+            app.step();
+        }
+        let states = app.runtime.car_states();
+        assert_eq!(states[0].mode, OperatingMode::OutOfService);
+        assert_eq!(states[0].position.floor_position, 3.0);
+        assert_eq!(states[1].position.floor_position, 7.0);
+        assert_eq!(states[1].door, DoorState::Open);
+        let first = run(&app.recording);
+        let second = run(&app.recording);
+        assert_eq!(first.events, second.events);
+        assert!(first.events.contains(&SemanticEvent::ModeChanged {
+            car: CarId::new("A"),
+            mode: OperatingMode::OutOfService
+        }));
+        assert!(
+            first
+                .events
+                .contains(&SemanticEvent::DispatchSelected(CarId::new("B")))
+        );
+        assert!(
+            first
+                .events
+                .contains(&SemanticEvent::IntentGenerated(intent.clone()))
+        );
+        assert!(
+            first
+                .events
+                .contains(&SemanticEvent::Runtime(RuntimeEvent::IntentAccepted(
+                    intent
+                )))
+        );
+        assert!(
+            first
+                .events
+                .contains(&SemanticEvent::Runtime(RuntimeEvent::Arrived {
+                    car: CarId::new("B"),
+                    floor: Floor::new(7)
+                }))
+        );
+        app.replay();
+        assert_eq!(app.runtime.car_states(), states);
+        assert!(app.trace.back().unwrap().contains("REPLAY verified"));
+        app.reset();
+        assert!(
+            app.runtime
+                .car_states()
+                .iter()
+                .all(|car| car.mode == OperatingMode::Normal && car.target.is_none())
+        );
+    }
+
+    #[test]
+    fn no_eligible_car_submits_nothing_and_restoring_availability_recovers() {
+        let mut app = App::new();
+        app.toggle_availability("A");
+        app.toggle_availability("B");
+        let events = app.execute(Command::HallCall(HallCall {
+            floor: Floor::new(7),
+            direction: Direction::Up,
+        }));
+        assert!(events.contains(&SemanticEvent::NoEligibleCar));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, SemanticEvent::IntentGenerated(_)))
+        );
+        assert!(app.decision.is_none());
+        assert!(
+            app.runtime
+                .car_states()
+                .iter()
+                .all(|car| car.target.is_none())
+        );
+        app.toggle_availability("A");
+        app.call(Direction::Up);
+        assert_eq!(
+            app.decision,
+            Some(Intent::ServeFloor {
+                car: CarId::new("A"),
+                floor: Floor::new(7)
+            })
+        );
+    }
+
+    #[test]
+    fn runtime_errors_leave_the_application_usable() {
+        let mut app = App::new();
+        let events = app.execute(Command::SetMode {
+            car: CarId::new("missing"),
+            mode: OperatingMode::OutOfService,
+        });
+        assert!(
+            matches!(&events[..], [SemanticEvent::RuntimeError(message)] if message.contains("unknown car"))
+        );
+        assert!(app.trace.back().unwrap().contains("Runtime error"));
+        app.call(Direction::Up);
+        assert!(app.decision.is_some());
+        app.step();
+        assert_eq!(app.runtime.car_states()[0].position.floor_position, 3.75);
     }
 }
