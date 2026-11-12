@@ -44,11 +44,15 @@ cargo run -p liftassistant-tui
 - Up/Down select a floor; U/D create an UP/DOWN hall call.
 - 1F permits UP only; 8F permits DOWN only. Start with the selected **7F UP**.
 - Space pauses/resumes; `.` advances exactly one 500 ms step while paused.
+- P replays the recorded session twice from fresh simulators, verifies identical
+  semantic output and the live state, and leaves the result paused.
 - R resets the two-car simulator and UI; Q, Esc, or Ctrl-C quits.
 
 The building shows nearest-floor positions; car details show exact positions,
 mode, target, door state, and serve-floor capability. The latest 100 trace entries
-show calls, dispatch, intents, runtime events, and errors. Dispatch is currently
+show calls, dispatch, intents, runtime events, and errors. Recording is capped at
+2,048 commands (calls and fixed steps); if full, reset before replaying. Pauses and
+floor selection do not affect physics and are not scenario commands. Dispatch is currently
 one-shot: a new call can replace a car's target; pending-call lifecycle is M2 work.
 
 ## Repository layout

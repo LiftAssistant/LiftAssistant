@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod app;
+mod replay;
 mod ui;
 
 use std::{io, time::Instant};
@@ -51,6 +52,10 @@ fn main() -> io::Result<()> {
                             next_step = Instant::now() + FIXED_STEP;
                         }
                         KeyCode::Char('.') if app.paused => app.step(),
+                        KeyCode::Char('p' | 'P') => {
+                            app.replay();
+                            next_step = Instant::now() + FIXED_STEP;
+                        }
                         KeyCode::Char('r' | 'R') => {
                             app.reset();
                             next_step = Instant::now() + FIXED_STEP;

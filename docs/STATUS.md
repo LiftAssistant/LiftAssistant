@@ -20,7 +20,7 @@ Working today:
 - interactive TUI with valid hall calls, fixed stepping, car details, and bounded event trace;
 - minimal CI as a compile/lint/regression gate.
 
-The interactive loop is implemented; deterministic replay is the next READY slice.
+The interactive loop and deterministic replay are implemented; availability fallback is next READY.
 
 ## M1.1 — Interactive loop
 
@@ -42,19 +42,23 @@ HUMAN_PENDING: optional TUI usability/visual feedback; does not block replay or 
 
 ## M1.2 — Deterministic replay
 
-**READY — next implementation slice.**
+**Completed.**
 
-After M1.1:
-- represent scenario input as explicit developer/simulator commands;
-- replay the same command sequence against a fresh simulator;
-- compare the resulting semantic event sequence;
-- introduce a small scenario file format only when replay code needs one.
+- Developer-only in-memory commands represent hall calls and individual fixed steps.
+- Live input and replay share the same deterministic application execution path.
+- P runs the recorded session twice from fresh reference simulators; compares complete
+  semantic outputs and final states, checks against the live state, and pauses the result.
+- Recording is bounded at 2,048 commands; incomplete recordings cannot be replayed.
+- Reset starts a fresh recording. No file format or public schema was needed.
 
-Do not build a generic conformance framework yet.
+Validation: nine workspace tests (including nonempty semantic replay, a changed-step
+negative check, replay continuation, and recording overflow) and PTY replay smoke passed.
 
 ## M1.3 — Availability fallback
 
-Then make the existing out-of-service behavior visible end to end:
+**READY — next implementation slice.**
+
+Make the existing out-of-service behavior visible end to end:
 - mark the normally preferred car out of service using simulator/developer controls;
 - create the hall call;
 - show that dispatch selects another eligible car;

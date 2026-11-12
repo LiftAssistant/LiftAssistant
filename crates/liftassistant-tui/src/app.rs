@@ -5,8 +5,11 @@ use liftassistant_model::{Direction, Floor, HallCall, Intent};
 use liftassistant_runtime::{ElevatorRuntime, RuntimeEvent};
 use liftassistant_sim::SimRuntime;
 
+use crate::replay::{Command, SemanticEvent, run};
+
 pub const FIXED_STEP: Duration = Duration::from_millis(500);
 const TRACE_LIMIT: usize = 100;
+const RECORDING_LIMIT: usize = 2048;
 
 pub fn valid_call(call: HallCall) -> bool {
     (1..=8).contains(&call.floor.index())
@@ -24,6 +27,8 @@ pub struct App {
     pub last_call: Option<HallCall>,
     pub decision: Option<Intent>,
     pub trace: VecDeque<String>,
+    pub recording: Vec<Command>,
+    pub recording_full: bool,
 }
 
 impl App {
@@ -36,6 +41,8 @@ impl App {
             last_call: None,
             decision: None,
             trace: VecDeque::new(),
+            recording: Vec::new(),
+            recording_full: false,
         }
     }
 
@@ -44,20 +51,44 @@ impl App {
     }
 
     pub fn call(&mut self, direction: Direction) {
-        let call = HallCall {
+        self.execute(Command::HallCall(HallCall {
             floor: self.selected_floor,
             direction,
+        }));
+    }
+
+    // Both live input and replay use this deterministic path; UI scheduling stays in main.rs.
+    pub fn execute(&mut self, command: Command) -> Vec<SemanticEvent> {
+        if self.recording.len() < RECORDING_LIMIT {
+            self.recording.push(command.clone());
+        } else if !self.recording_full {
+            self.recording_full = true;
+            self.log("Recording full: replay unavailable until R reset".into());
+        }
+        let events = match command {
+            Command::HallCall(call) => self.submit_call(call),
+            Command::Step => {
+                self.steps += 1;
+                self.runtime
+                    .tick(FIXED_STEP)
+                    .into_iter()
+                    .map(SemanticEvent::Runtime)
+                    .collect()
+            }
         };
+        for event in &events {
+            self.log(semantic_label(event));
+        }
+        events
+    }
+
+    fn submit_call(&mut self, call: HallCall) -> Vec<SemanticEvent> {
+        let mut events = vec![SemanticEvent::HallCall(call)];
         self.last_call = Some(call);
         self.decision = None;
-        self.log(format!(
-            "HallCall {} {}",
-            call.floor,
-            direction_name(direction)
-        ));
         if !valid_call(call) {
-            self.log("Invalid hall call: 1F only UP; 8F only DOWN".into());
-            return;
+            events.push(SemanticEvent::InvalidCall);
+            return events;
         }
         let states = self.runtime.car_states();
         let capabilities = states
@@ -69,18 +100,46 @@ impl App {
             })
             .collect();
         let Some(intent) = dispatch(&call, &states, &capabilities) else {
-            self.log("No eligible car".into());
-            return;
+            events.push(SemanticEvent::NoEligibleCar);
+            return events;
         };
-        let Intent::ServeFloor { car, .. } = &intent else {
-            return;
-        };
-        self.log(format!("Dispatch -> {car}"));
-        self.log(format!("Intent -> {}", intent_label(&intent)));
+        let (Intent::ServeFloor { car, .. } | Intent::ParkAt { car, .. }) = &intent;
+        events.push(SemanticEvent::DispatchSelected(car.clone()));
+        events.push(SemanticEvent::IntentGenerated(intent.clone()));
         self.decision = Some(intent.clone());
         if let Err(error) = self.runtime.submit_intent(intent) {
-            self.log(format!("Runtime error: {error}"));
+            events.push(SemanticEvent::RuntimeError(error.to_string()));
         }
+        events
+    }
+
+    pub fn replay(&mut self) {
+        if self.recording_full {
+            self.log("Replay unavailable: recording full; R reset to record a new session".into());
+            return;
+        }
+        let first = run(&self.recording);
+        let second = run(&self.recording);
+        if first.events != second.events
+            || first.app.runtime.car_states() != second.app.runtime.car_states()
+            || first.app.runtime.car_states() != self.runtime.car_states()
+            || first.app.steps != self.steps
+            || first.app.last_call != self.last_call
+            || first.app.decision != self.decision
+        {
+            self.log("REPLAY mismatch: live state preserved".into());
+            return;
+        }
+        let message = format!(
+            "REPLAY verified: {} commands / {} semantic events",
+            self.recording.len(),
+            first.events.len()
+        );
+        let selected = self.selected_floor;
+        *self = first.app;
+        self.selected_floor = selected;
+        self.paused = true;
+        self.log(message);
     }
 
     pub fn advance(&mut self) {
@@ -90,10 +149,7 @@ impl App {
     }
 
     pub fn step(&mut self) {
-        self.steps += 1;
-        for event in self.runtime.tick(FIXED_STEP) {
-            self.log(event_label(&event));
-        }
+        self.execute(Command::Step);
     }
 
     pub fn reset(&mut self) {
@@ -124,6 +180,20 @@ pub fn intent_label(intent: &Intent) -> String {
     }
 }
 
+fn semantic_label(event: &SemanticEvent) -> String {
+    match event {
+        SemanticEvent::HallCall(call) => {
+            format!("HallCall {} {}", call.floor, direction_name(call.direction))
+        }
+        SemanticEvent::InvalidCall => "Invalid hall call: 1F only UP; 8F only DOWN".into(),
+        SemanticEvent::NoEligibleCar => "No eligible car".into(),
+        SemanticEvent::DispatchSelected(car) => format!("Dispatch -> {car}"),
+        SemanticEvent::IntentGenerated(intent) => format!("Intent -> {}", intent_label(intent)),
+        SemanticEvent::RuntimeError(error) => format!("Runtime error: {error}"),
+        SemanticEvent::Runtime(event) => event_label(event),
+    }
+}
+
 fn event_label(event: &RuntimeEvent) -> String {
     match event {
         RuntimeEvent::IntentAccepted(intent) => format!("IntentAccepted {}", intent_label(intent)),
@@ -141,7 +211,7 @@ fn event_label(event: &RuntimeEvent) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::DoorState;
+    use liftassistant_model::{CarId, DoorState};
 
     #[test]
     fn hall_calls_respect_building_boundaries() {
@@ -170,7 +240,7 @@ mod tests {
         assert_eq!(
             app.decision,
             Some(Intent::ServeFloor {
-                car: liftassistant_model::CarId::new("A"),
+                car: CarId::new("A"),
                 floor: Floor::new(7)
             })
         );
@@ -201,6 +271,7 @@ mod tests {
         assert_eq!(app.steps, 0);
         assert_eq!(app.trace.len(), 1);
         assert_eq!(app.selected_floor, Floor::new(7));
+        assert!(app.recording.is_empty());
     }
 
     #[test]
@@ -218,5 +289,26 @@ mod tests {
                 .all(|car| car.target.is_none())
         );
         assert_eq!(app.trace.len(), TRACE_LIMIT);
+    }
+}
+
+#[cfg(test)]
+mod recording_tests {
+    use super::*;
+
+    #[test]
+    fn a_truncated_recording_cannot_be_silently_replayed() {
+        let mut app = App::new();
+        for _ in 0..=RECORDING_LIMIT {
+            app.step();
+        }
+        assert_eq!(app.recording.len(), RECORDING_LIMIT);
+        assert!(app.recording_full);
+        let steps = app.steps;
+        app.replay();
+        assert_eq!(app.steps, steps);
+        assert!(app.trace.back().unwrap().contains("Replay unavailable"));
+        app.reset();
+        assert!(!app.recording_full);
     }
 }

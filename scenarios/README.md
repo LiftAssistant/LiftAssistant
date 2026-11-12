@@ -2,7 +2,7 @@
 
 Scenarios are deterministic simulator inputs, not a second implementation of LiftAssistant semantics.
 
-During M1, scenario support should grow out of the interactive simulator rather than being designed in advance.
+The interactive simulator records developer commands in memory and can replay them with P.
 
 ## First replay target
 
@@ -24,12 +24,16 @@ expected semantic flow:
 
 The second target marks the normally preferred car out of service and verifies that another eligible car is selected.
 
-## Format policy
+## In-memory replay
 
-Do not freeze a general scenario schema before M1.1 works.
+The TUI crate owns a minimal developer-only command representation: a valid or invalid
+hall-call attempt, or one fixed 500 ms simulation step. Both live input and the replay
+runner use the same path. P runs the recording twice without sleeping, compares the
+complete semantic event sequences and final states, verifies the live state, and leaves
+the replayed session paused. Continue stepping/calling afterward, or R to reset.
 
-For M1.2:
-1. define the minimal command representation needed by the running simulator;
-2. replay it in memory;
-3. only then add a small human-readable file representation if useful;
-4. keep simulator-only developer controls out of the future public elevator specification.
+Recording stops at 2,048 commands. The simulator continues, but P refuses incomplete
+recordings; reset to begin recording again. The visible trace separately retains 100 entries.
+
+No file format or normative public schema is defined. Developer UI scheduling and
+floor selection are not simulation inputs; calls include their explicit floor/direction.

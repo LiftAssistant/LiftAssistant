@@ -118,7 +118,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         rows[2],
     );
     frame.render_widget(Paragraph::new(format!(
-        "Selected: {} | 1F: UP only; 8F: DOWN only\nUp/Down select | U/D call | Space pause/resume | . step (paused)\nR reset | Q / Esc quit", app.selected_floor
+        "Selected: {} | 1F: UP only; 8F: DOWN only | rec={}\nUp/Down select | U/D call | Space pause/resume | . step (paused)\nP replay since reset | R reset | Q / Esc quit", app.selected_floor, if app.recording_full { "FULL".into() } else { app.recording.len().to_string() }
     )).style(Style::default().fg(Color::Gray)), rows[3]);
 }
 
