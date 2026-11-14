@@ -178,15 +178,30 @@ Implemented behavior:
 - replay compares semantic events, Core state, topology, and physical simulator state;
 - M2 added no crate, dependency, framework, public schema, or vendor branch;
 - targeted prior-art findings and deliberate vocabulary/model divergences are recorded in `docs/PRIOR_ART.md`;
-- formatting, all-target linting, 27 workspace tests, and PTY reference flows passed at the checkpoint.
+- formatting, all-target linting, 25 workspace tests, and PTY reference flows passed at the checkpoint.
 
 **HUMAN_PENDING (non-blocking):** review M2 semantic architecture and terminology before any normative public schema is frozen. The implemented model remains internal and reversible, so independent M3 work may continue.
 
 ## M3.1 — Executable reference scenario and trace inspection
 
+**Implemented.**
+
+Implemented behavior:
+- `cargo run -p liftassistant-tui -- --scenario m2-call-lifecycle` runs without a TTY through the existing App/Core/Runtime/Simulator composition;
+- the built-in scenario submits `7F UP`, `5F DOWN`, and `2F UP`, then advances 13 explicit fixed steps;
+- two fresh executions must match in semantic events, Core call state, topology, recorded commands, step count, and physical simulator state;
+- the scenario also checks its expected outcome: all three calls completed, A open at 2F, and B open at 5F;
+- output includes the complete semantic trace and final call/car state;
+- unknown scenario names fail before terminal initialization;
+- the representation remains internal Rust code: no scenario file format, public schema, new crate, or conformance/certification claim was introduced.
+
+Validation: formatting, all-target linting, 27 workspace tests, and the real non-interactive scenario/help/list commands passed.
+
+## M3.2 — Controlled simulator fault injection
+
 **READY.**
 
-Add a developer-only, non-interactive entry point for the demonstrated three-call lifecycle scenario. It should execute through the same composition path, verify deterministic replay, and print inspectable semantic/final-state output without introducing a scenario file format, a new crate, or a conformance claim.
+Add the smallest deterministic simulator-only failure control needed to exercise an actual runtime rejection/recovery path through executable scenario tooling. Keep fault controls out of Core semantics and do not generalize a fault DSL.
 
 ## Explicit non-goals in M2 and current M3 work
 

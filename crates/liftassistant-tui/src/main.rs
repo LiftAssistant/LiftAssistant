@@ -2,9 +2,10 @@
 
 mod app;
 mod replay;
+mod scenario;
 mod ui;
 
-use std::{io, time::Instant};
+use std::{env, io, time::Instant};
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
@@ -26,6 +27,39 @@ impl Drop for TerminalGuard {
 }
 
 fn main() -> io::Result<()> {
+    let args: Vec<_> = env::args().skip(1).collect();
+    match args.as_slice() {
+        [] => run_tui(),
+        [flag, name] if flag == "--scenario" => {
+            let report = scenario::run(name)
+                .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+            print!("{report}");
+            Ok(())
+        }
+        [flag] if flag == "--list-scenarios" => {
+            println!("{}", scenario::REFERENCE_SCENARIO);
+            Ok(())
+        }
+        [flag] if flag == "--help" || flag == "-h" => {
+            println!(
+                "LiftAssistant developer simulator\n\n\
+                 Usage:\n  liftassistant-tui\n  liftassistant-tui --scenario {}\n  \
+                 liftassistant-tui --list-scenarios",
+                scenario::REFERENCE_SCENARIO
+            );
+            Ok(())
+        }
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "unsupported arguments; use --scenario {} or --help",
+                scenario::REFERENCE_SCENARIO
+            ),
+        )),
+    }
+}
+
+fn run_tui() -> io::Result<()> {
     let _guard = TerminalGuard;
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen)?;

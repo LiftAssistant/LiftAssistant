@@ -48,6 +48,14 @@ Requires Rust stable (minimum 1.85) and a terminal at least 70 columns by 24 row
 cargo run -p liftassistant-tui
 ~~~
 
+Run the built-in M2 lifecycle reference scenario without a TTY:
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario m2-call-lifecycle
+~~~
+
+The command executes the same developer composition path twice, rejects a deterministic or expected-outcome mismatch, and prints the semantic trace plus final call/car state. It is a research tool, not a conformance or certification claim.
+
 Controls:
 
 - Up/Down select a floor; U/D create an UP/DOWN hall call.

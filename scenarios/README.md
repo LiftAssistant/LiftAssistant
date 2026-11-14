@@ -4,7 +4,13 @@ Scenarios are deterministic simulator inputs, not a second implementation of Lif
 
 The interactive simulator records developer commands in memory and can replay them with P.
 
-## First replay target
+## Executable lifecycle reference
+
+Run the current built-in scenario without a terminal UI:
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario m2-call-lifecycle
+~~~
 
 ~~~text
 initial state:
@@ -12,15 +18,24 @@ initial state:
   car B at 1F
 
 input:
-  hall call 8F DOWN
+  hall call 7F UP
+  hall call 5F DOWN
+  hall call 2F UP
+  13 fixed 500 ms steps
 
 expected semantic flow:
-  dispatch chooses an eligible car
-  -> ServeFloor intent
-  -> fixed-step simulated movement
-  -> arrival at 8F
-  -> door open
+  #1 -> A
+  #2 -> B
+  #3 remains pending
+  -> A/B arrival and door-open feedback completes #1/#2
+  -> released A receives #3
+  -> arrival and door-open feedback completes #3
 ~~~
+
+The command executes the same input twice, compares semantic and physical results,
+checks the expected final call/car state, and prints an inspectable trace. It exits
+with an error on a mismatch. This is a developer research scenario, not a
+conformance/certification result.
 
 ## Availability fallback
 
@@ -43,5 +58,6 @@ the replayed session paused. Continue stepping/calling afterward, or R to reset.
 Recording stops at 2,048 commands. The simulator continues, but P refuses incomplete
 recordings; reset to begin recording again. The visible trace separately retains 100 entries.
 
-No file format or normative public schema is defined. Developer UI scheduling and
-floor selection are not simulation inputs; calls include their explicit floor/direction.
+No file format or normative public schema is defined. The built-in command list is
+ordinary internal Rust code. Developer UI scheduling and floor selection are not
+simulation inputs; calls include their explicit floor/direction.
