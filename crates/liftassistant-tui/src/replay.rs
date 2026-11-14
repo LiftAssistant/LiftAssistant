@@ -17,6 +17,8 @@ pub enum Command {
         car: CarId,
         mode: OperatingMode,
     },
+    /// Simulator-only, one-shot developer failure control.
+    RejectNextIntent,
     /// Exactly one application FIXED_STEP, with no wall-clock dependency.
     Step,
 }
@@ -48,6 +50,7 @@ pub enum SemanticEvent {
         car: CarId,
         mode: OperatingMode,
     },
+    SimulatorIntentRejectionArmed,
     RuntimeError(String),
     Runtime(RuntimeEvent),
 }

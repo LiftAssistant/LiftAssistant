@@ -147,3 +147,9 @@ LiftAssistant therefore keeps M2 dispatch explanations separate from normalized 
 BACnet defines a universal floor number as a bottom-up contiguous building index and uses it for floor text, positions, stops, and landing calls. SAREF4LIFT separately models car-stop spaces, building spaces, door connection points, and car services, which can express topology beyond a flat floor range. CiA 417 keeps call/input/position functions behind implementation-independent virtual-device interfaces.
 
 LiftAssistant M2 needs only the demonstrated common denominator: a canonical ordered nonempty set of served `Floor` values. Core validates membership and terminal hall-call direction from that set. It intentionally does not yet model public floor names, doors, car-specific service maps, spatial graphs, or BACnet array indexes; those require real adapter/integration evidence.
+
+## M3 simulator rejection-injection finding
+
+BACnet elevator `Fault_Signals` and SAREF4LIFT `FaultSignal`/fault-state concepts represent observed lift or equipment fault conditions, while SAREF4LIFT models commands separately. Open-RMF likewise separates lift requests from reported lift state. A deliberately rejected simulator intent is therefore not evidence of a controller, drive, door, safety-chain, or other equipment fault.
+
+LiftAssistant keeps the M3 control as an explicit one-shot simulator-only intent rejection. It surfaces through the existing runtime submission error path, leaves Core call state pending for deterministic retry, and never produces a normalized equipment fault/alarm. The control and its developer trace event remain internal and reversible; they are not a public diagnostic schema or protocol mapping.

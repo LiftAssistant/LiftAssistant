@@ -37,6 +37,17 @@ checks the expected final call/car state, and prints an inspectable trace. It ex
 with an error on a mismatch. This is a developer research scenario, not a
 conformance/certification result.
 
+## Intent-rejection recovery
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario intent-rejection-recovery
+~~~
+
+This scenario arms a simulator-only one-shot rejection, submits `7F UP`, verifies
+that the runtime error leaves call `#1` Pending, retries the same active call, and
+advances to completion. The injected rejection leaves car state unchanged and does
+not claim to represent an elevator equipment fault or alarm.
+
 ## Availability fallback
 
 From a reset, pause, toggle A OutOfService, and submit 7F UP. Dispatch selects B

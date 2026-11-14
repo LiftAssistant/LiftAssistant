@@ -87,6 +87,10 @@ impl App {
                 }
                 Err(error) => vec![SemanticEvent::RuntimeError(error.to_string())],
             },
+            Command::RejectNextIntent => {
+                self.runtime.reject_next_intent();
+                vec![SemanticEvent::SimulatorIntentRejectionArmed]
+            }
             Command::Step => {
                 self.steps += 1;
                 let runtime_events = self.runtime.tick(FIXED_STEP);
@@ -364,6 +368,9 @@ fn semantic_label(event: &SemanticEvent) -> String {
             format!("Call {id}: intent -> {}", intent_label(intent))
         }
         SemanticEvent::ModeChanged { car, mode } => format!("Car {car} -> {mode:?}"),
+        SemanticEvent::SimulatorIntentRejectionArmed => {
+            "Simulator armed: reject next intent once".into()
+        }
         SemanticEvent::RuntimeError(error) => format!("Runtime error: {error}"),
         SemanticEvent::Runtime(event) => event_label(event),
     }

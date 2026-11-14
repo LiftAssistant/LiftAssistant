@@ -199,9 +199,22 @@ Validation: formatting, all-target linting, 27 workspace tests, and the real non
 
 ## M3.2 — Controlled simulator fault injection
 
+**Implemented.**
+
+Implemented behavior:
+- `SimRuntime::reject_next_intent` deterministically rejects exactly one subsequent intent without changing car state or queuing acceptance feedback;
+- the control is recorded/replayed as a simulator-only developer command and is not exposed as a Core semantic, equipment fault, alarm, or fault DSL;
+- `cargo run -p liftassistant-tui -- --scenario intent-rejection-recovery` arms rejection, submits `7F UP`, observes the runtime error while call `#1` remains Pending, then retries the same active call identity and completes service;
+- two executions must match, and the scenario checks exactly one injected error, duplicate reuse of `#1`, final completion, and A open at 7F;
+- targeted BACnet, SAREF4LIFT, and Open-RMF review confirmed that this integration-path control must remain distinct from reported equipment fault semantics.
+
+Validation: formatting, 29 workspace tests, both real non-interactive scenarios, and final all-target linting passed. The first all-target clippy attempt found one `useless_format` in the new CLI error path; it was corrected, and the subsequent all-target clippy run passed.
+
+## M3 review checkpoint
+
 **READY.**
 
-Add the smallest deterministic simulator-only failure control needed to exercise an actual runtime rejection/recovery path through executable scenario tooling. Keep fault controls out of Core semantics and do not generalize a fault DSL.
+Review the executable scenario/trace/failure vertical slice as a small research laboratory. Explicitly defer generic backend conformance machinery until a second backend exists, and defer protocol mappings until a concrete recorded/read-only bridge provides evidence.
 
 ## Explicit non-goals in M2 and current M3 work
 

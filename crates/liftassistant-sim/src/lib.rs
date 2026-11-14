@@ -19,6 +19,7 @@ pub struct SimRuntime {
     cars: BTreeMap<CarId, SimCar>,
     speed_floors_per_second: f64,
     pending_events: Vec<RuntimeEvent>,
+    reject_next_intent: bool,
 }
 
 impl SimRuntime {
@@ -43,6 +44,7 @@ impl SimRuntime {
             cars,
             speed_floors_per_second,
             pending_events: Vec::new(),
+            reject_next_intent: false,
         }
     }
 
@@ -69,6 +71,14 @@ impl SimRuntime {
             .ok_or_else(|| RuntimeError::new(format!("unknown car {car}")))?;
         sim_car.state.mode = mode;
         Ok(())
+    }
+
+    /// Arms a one-shot developer control at the simulator boundary.
+    ///
+    /// The next submitted intent is rejected without changing car state. This models an
+    /// integration failure for deterministic scenarios; it is not an equipment fault signal.
+    pub fn reject_next_intent(&mut self) {
+        self.reject_next_intent = true;
     }
 
     fn set_target(&mut self, intent: Intent) -> Result<(), RuntimeError> {
@@ -126,6 +136,11 @@ impl ElevatorRuntime for SimRuntime {
     }
 
     fn submit_intent(&mut self, intent: Intent) -> Result<(), RuntimeError> {
+        if std::mem::take(&mut self.reject_next_intent) {
+            return Err(RuntimeError::new(
+                "simulator injected one-shot intent rejection",
+            ));
+        }
         self.set_target(intent)
     }
 
@@ -210,5 +225,35 @@ mod tests {
         }
 
         assert!(arrived);
+    }
+
+    #[test]
+    fn one_shot_intent_rejection_preserves_state_and_then_recovers() {
+        let mut runtime = SimRuntime::reference_two_car();
+        let initial = runtime.car_states();
+        let intent = Intent::ServeFloor {
+            car: CarId::new("A"),
+            floor: Floor::new(7),
+        };
+
+        runtime.reject_next_intent();
+        assert_eq!(
+            runtime.submit_intent(intent.clone()),
+            Err(RuntimeError::new(
+                "simulator injected one-shot intent rejection"
+            ))
+        );
+        assert_eq!(runtime.car_states(), initial);
+        assert!(runtime.tick(Duration::ZERO).is_empty());
+
+        runtime
+            .submit_intent(intent.clone())
+            .expect("one-shot rejection should be consumed");
+        assert_eq!(runtime.car_states()[0].target, Some(Floor::new(7)));
+        assert!(
+            runtime
+                .tick(Duration::from_millis(500))
+                .contains(&RuntimeEvent::IntentAccepted(intent))
+        );
     }
 }

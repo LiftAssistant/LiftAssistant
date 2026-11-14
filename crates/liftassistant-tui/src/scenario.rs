@@ -11,20 +11,46 @@ use crate::{
 };
 
 pub const REFERENCE_SCENARIO: &str = "m2-call-lifecycle";
+pub const REJECTION_SCENARIO: &str = "intent-rejection-recovery";
+pub const SCENARIOS: [&str; 2] = [REFERENCE_SCENARIO, REJECTION_SCENARIO];
 
 pub fn run(name: &str) -> Result<String, String> {
-    if name != REFERENCE_SCENARIO {
-        return Err(format!(
-            "unknown scenario {name:?}; available scenario: {REFERENCE_SCENARIO}"
-        ));
+    match name {
+        REFERENCE_SCENARIO => run_reference_scenario(),
+        REJECTION_SCENARIO => run_rejection_scenario(),
+        _ => Err(format!(
+            "unknown scenario {name:?}; available scenarios: {}",
+            SCENARIOS.join(", ")
+        )),
     }
+}
 
+fn run_reference_scenario() -> Result<String, String> {
     let commands = reference_commands();
     let first = run_with_topology(&commands, BuildingTopology::reference_eight_floor());
     let second = run_with_topology(&commands, BuildingTopology::reference_eight_floor());
     verify_determinism(&first, &second)?;
-    verify_expected_outcome(&first)?;
-    Ok(render_report(&commands, &first))
+    verify_reference_outcome(&first)?;
+    Ok(render_report(
+        REFERENCE_SCENARIO,
+        "3 calls completed",
+        &commands,
+        &first,
+    ))
+}
+
+fn run_rejection_scenario() -> Result<String, String> {
+    let commands = rejection_commands();
+    let first = run_with_topology(&commands, BuildingTopology::reference_eight_floor());
+    let second = run_with_topology(&commands, BuildingTopology::reference_eight_floor());
+    verify_determinism(&first, &second)?;
+    verify_rejection_outcome(&first)?;
+    Ok(render_report(
+        REJECTION_SCENARIO,
+        "one injected rejection recovered; call #1 completed",
+        &commands,
+        &first,
+    ))
 }
 
 fn reference_commands() -> Vec<Command> {
@@ -46,6 +72,16 @@ fn reference_commands() -> Vec<Command> {
     commands
 }
 
+fn rejection_commands() -> Vec<Command> {
+    let call = Command::HallCall(HallCall {
+        floor: Floor::new(7),
+        direction: Direction::Up,
+    });
+    let mut commands = vec![Command::RejectNextIntent, call.clone(), call];
+    commands.extend(std::iter::repeat_n(Command::Step, 6));
+    commands
+}
+
 fn verify_determinism(first: &Replay, second: &Replay) -> Result<(), String> {
     if first.events != second.events
         || first.app.runtime.car_states() != second.app.runtime.car_states()
@@ -61,7 +97,7 @@ fn verify_determinism(first: &Replay, second: &Replay) -> Result<(), String> {
     Ok(())
 }
 
-fn verify_expected_outcome(replay: &Replay) -> Result<(), String> {
+fn verify_reference_outcome(replay: &Replay) -> Result<(), String> {
     let expected_calls = [
         (
             CallId::new(1),
@@ -131,12 +167,79 @@ fn verify_expected_outcome(replay: &Replay) -> Result<(), String> {
     Ok(())
 }
 
-fn render_report(commands: &[Command], replay: &Replay) -> String {
+fn verify_rejection_outcome(replay: &Replay) -> Result<(), String> {
+    let expected_call = HallCall {
+        floor: Floor::new(7),
+        direction: Direction::Up,
+    };
+    if replay.app.calls.calls().count() != 1
+        || replay.app.calls.get(CallId::new(1)).is_none_or(|record| {
+            record.call != expected_call || record.state != CallState::Completed
+        })
+    {
+        return Err("rejection scenario did not recover and complete call #1".into());
+    }
+    let runtime_errors: Vec<_> = replay
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            SemanticEvent::RuntimeError(error) => Some(error.as_str()),
+            _ => None,
+        })
+        .collect();
+    if runtime_errors != ["simulator injected one-shot intent rejection"] {
+        return Err(format!(
+            "rejection scenario emitted unexpected runtime errors: {runtime_errors:?}"
+        ));
+    }
+    let Some(rejection_index) = replay
+        .events
+        .iter()
+        .position(|event| matches!(event, SemanticEvent::RuntimeError(_)))
+    else {
+        return Err("rejection scenario did not trace the injected rejection".into());
+    };
+    let Some(retry_index) = replay
+        .events
+        .iter()
+        .position(|event| *event == SemanticEvent::CallDeduplicated(CallId::new(1)))
+    else {
+        return Err("rejection scenario did not retry the same call identity".into());
+    };
+    if !replay
+        .events
+        .contains(&SemanticEvent::SimulatorIntentRejectionArmed)
+        || rejection_index >= retry_index
+        || replay.events[..retry_index]
+            .iter()
+            .any(|event| matches!(event, SemanticEvent::CallStateChanged { .. }))
+    {
+        return Err(
+            "rejection scenario did not leave the call pending until its traced same-call retry"
+                .into(),
+        );
+    }
+    let states = replay.app.runtime.car_states();
+    let recovered = states.iter().any(|state| {
+        state.id.as_str() == "A"
+            && state.position.nearest_floor == Floor::new(7)
+            && state.position.floor_position == 7.0
+            && state.motion == MotionState::Stopped
+            && state.door == DoorState::Open
+            && state.target.is_none()
+    });
+    if !recovered {
+        return Err("rejection scenario ended before recovered service completed".into());
+    }
+    Ok(())
+}
+
+fn render_report(name: &str, outcome: &str, commands: &[Command], replay: &Replay) -> String {
     let mut lines = vec![
-        format!("scenario: {REFERENCE_SCENARIO}"),
+        format!("scenario: {name}"),
         "scope: developer-only simulator research; not conformance or certification".into(),
         "determinism: PASS (2 identical executions)".into(),
-        "outcome: PASS (3 calls completed)".into(),
+        format!("outcome: PASS ({outcome})"),
         format!("commands: {}", commands.len()),
         format!("semantic events: {}", replay.events.len()),
         String::new(),
@@ -191,11 +294,26 @@ mod tests {
     }
 
     #[test]
+    fn rejection_scenario_traces_one_failure_and_deterministic_recovery() {
+        let report = run(REJECTION_SCENARIO).expect("rejection scenario should recover");
+
+        assert!(report.contains("determinism: PASS (2 identical executions)"));
+        assert!(
+            report.contains("outcome: PASS (one injected rejection recovered; call #1 completed)")
+        );
+        assert!(report.contains("Simulator armed: reject next intent once"));
+        assert!(report.contains("Runtime error: simulator injected one-shot intent rejection"));
+        assert!(report.contains("Active duplicate -> #1"));
+        assert!(report.contains("#1 7F UP -> Completed"));
+    }
+
+    #[test]
     fn unknown_scenario_is_rejected_without_starting_the_tui() {
         assert_eq!(
             run("missing"),
             Err(format!(
-                "unknown scenario \"missing\"; available scenario: {REFERENCE_SCENARIO}"
+                "unknown scenario \"missing\"; available scenarios: {}",
+                SCENARIOS.join(", ")
             ))
         );
     }

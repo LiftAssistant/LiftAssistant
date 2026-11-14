@@ -37,24 +37,22 @@ fn main() -> io::Result<()> {
             Ok(())
         }
         [flag] if flag == "--list-scenarios" => {
-            println!("{}", scenario::REFERENCE_SCENARIO);
+            for name in scenario::SCENARIOS {
+                println!("{name}");
+            }
             Ok(())
         }
         [flag] if flag == "--help" || flag == "-h" => {
             println!(
                 "LiftAssistant developer simulator\n\n\
-                 Usage:\n  liftassistant-tui\n  liftassistant-tui --scenario {}\n  \
-                 liftassistant-tui --list-scenarios",
-                scenario::REFERENCE_SCENARIO
+                 Usage:\n  liftassistant-tui\n  liftassistant-tui --scenario <name>\n  \
+                 liftassistant-tui --list-scenarios"
             );
             Ok(())
         }
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!(
-                "unsupported arguments; use --scenario {} or --help",
-                scenario::REFERENCE_SCENARIO
-            ),
+            "unsupported arguments; use --scenario <name> or --help",
         )),
     }
 }
