@@ -385,7 +385,7 @@ fn rejection_label(rejection: &DispatchRejection) -> &'static str {
     }
 }
 
-fn event_label(event: &RuntimeEvent) -> String {
+pub(crate) fn event_label(event: &RuntimeEvent) -> String {
     match event {
         RuntimeEvent::IntentAccepted(intent) => format!("IntentAccepted {}", intent_label(intent)),
         RuntimeEvent::PositionChanged(car) => format!(

@@ -1,28 +1,50 @@
 //! Executable developer scenarios; internal and intentionally not a public file format.
 
+use std::time::Duration;
+
 use liftassistant_model::{
-    BuildingTopology, CallId, CallState, Direction, DoorState, Floor, HallCall, MotionState,
+    BuildingTopology, CallId, CallState, Capabilities, CarId, CarState, Direction, DoorState,
+    Floor, HallCall, Intent, MotionState, OperatingMode, Position,
 };
-use liftassistant_runtime::ElevatorRuntime;
+use liftassistant_runtime::{ElevatorRuntime, RuntimeEvent};
+use liftassistant_sim::{RecordedFrame, RecordedRuntime};
 
 use crate::{
-    app::{call_state_label, direction_name},
+    app::{call_state_label, direction_name, event_label},
     replay::{Command, Replay, SemanticEvent, run_with_topology},
 };
 
 pub const REFERENCE_SCENARIO: &str = "m2-call-lifecycle";
 pub const REJECTION_SCENARIO: &str = "intent-rejection-recovery";
-pub const SCENARIOS: [&str; 2] = [REFERENCE_SCENARIO, REJECTION_SCENARIO];
+pub const RECORDED_SCENARIO: &str = "recorded-read-only-observation";
+pub const SCENARIOS: [&str; 3] = [REFERENCE_SCENARIO, REJECTION_SCENARIO, RECORDED_SCENARIO];
 
 pub fn run(name: &str) -> Result<String, String> {
     match name {
         REFERENCE_SCENARIO => run_reference_scenario(),
         REJECTION_SCENARIO => run_rejection_scenario(),
+        RECORDED_SCENARIO => run_recorded_scenario(),
         _ => Err(format!(
             "unknown scenario {name:?}; available scenarios: {}",
             SCENARIOS.join(", ")
         )),
     }
+}
+
+#[derive(Debug, PartialEq)]
+struct RecordedBatch {
+    elapsed_total: Duration,
+    events: Vec<RuntimeEvent>,
+    states: Vec<CarState>,
+}
+
+#[derive(Debug, PartialEq)]
+struct RecordedPlayback {
+    runtime_name: String,
+    write_error: String,
+    capabilities: Capabilities,
+    batches: Vec<RecordedBatch>,
+    remaining_frames: usize,
 }
 
 fn run_reference_scenario() -> Result<String, String> {
@@ -53,6 +75,16 @@ fn run_rejection_scenario() -> Result<String, String> {
     ))
 }
 
+fn run_recorded_scenario() -> Result<String, String> {
+    let first = play_recording()?;
+    let second = play_recording()?;
+    if first != second {
+        return Err("recorded runtime produced different observations on replay".into());
+    }
+    verify_recorded_outcome(&first)?;
+    Ok(render_recorded_report(&first))
+}
+
 fn reference_commands() -> Vec<Command> {
     let mut commands = vec![
         Command::HallCall(HallCall {
@@ -80,6 +112,85 @@ fn rejection_commands() -> Vec<Command> {
     let mut commands = vec![Command::RejectNextIntent, call.clone(), call];
     commands.extend(std::iter::repeat_n(Command::Step, 6));
     commands
+}
+
+fn play_recording() -> Result<RecordedPlayback, String> {
+    let mut runtime = recorded_runtime()?;
+    let runtime_name = runtime.runtime_name().to_owned();
+    let capabilities = runtime
+        .capabilities(&CarId::new("A"))
+        .ok_or_else(|| "recorded car A has no capabilities".to_owned())?;
+    let initial = runtime.car_states();
+    let write_error = match runtime.submit_intent(Intent::ServeFloor {
+        car: CarId::new("A"),
+        floor: Floor::new(7),
+    }) {
+        Ok(()) => return Err("recorded runtime unexpectedly accepted an intent".into()),
+        Err(error) => error.to_string(),
+    };
+    if runtime.car_states() != initial {
+        return Err("recorded runtime changed state after rejecting an intent".into());
+    }
+
+    let mut elapsed_total = Duration::ZERO;
+    let mut batches = Vec::new();
+    for elapsed in [
+        Duration::from_millis(250),
+        Duration::from_millis(250),
+        Duration::from_millis(499),
+        Duration::from_millis(1),
+    ] {
+        elapsed_total += elapsed;
+        batches.push(RecordedBatch {
+            elapsed_total,
+            events: runtime.tick(elapsed),
+            states: runtime.car_states(),
+        });
+    }
+    Ok(RecordedPlayback {
+        runtime_name,
+        write_error,
+        capabilities,
+        batches,
+        remaining_frames: runtime.remaining_frames(),
+    })
+}
+
+fn recorded_runtime() -> Result<RecordedRuntime, String> {
+    let moving = CarState {
+        id: CarId::new("A"),
+        position: Position {
+            floor_position: 3.5,
+            nearest_floor: Floor::new(4),
+        },
+        motion: MotionState::Moving(Direction::Up),
+        door: DoorState::Closed,
+        mode: OperatingMode::Normal,
+        target: Some(Floor::new(4)),
+    };
+    RecordedRuntime::new(
+        [CarState::new("A", Floor::new(3))],
+        [
+            RecordedFrame::after(
+                Duration::from_millis(500),
+                vec![RuntimeEvent::PositionChanged(moving)],
+            ),
+            RecordedFrame::after(
+                Duration::from_millis(500),
+                vec![
+                    RuntimeEvent::Arrived {
+                        car: CarId::new("A"),
+                        floor: Floor::new(4),
+                    },
+                    RuntimeEvent::DoorStateChanged {
+                        car: CarId::new("A"),
+                        state: DoorState::Open,
+                    },
+                ],
+            ),
+        ],
+    )
+    .map_err(|error| error.to_string())
 }
 
 fn verify_determinism(first: &Replay, second: &Replay) -> Result<(), String> {
@@ -234,6 +345,44 @@ fn verify_rejection_outcome(replay: &Replay) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_recorded_outcome(playback: &RecordedPlayback) -> Result<(), String> {
+    if playback.runtime_name != "recorded-read-only"
+        || playback.write_error != "recorded runtime is read-only and rejects all intents"
+        || !playback.capabilities.observe_position
+        || !playback.capabilities.observe_door
+        || playback.capabilities.serve_floor
+        || playback.capabilities.park
+    {
+        return Err("recorded runtime did not preserve its explicit read-only boundary".into());
+    }
+    if playback.batches.len() != 4
+        || !playback.batches[0].events.is_empty()
+        || playback.batches[1].events.len() != 1
+        || !playback.batches[2].events.is_empty()
+        || playback.batches[3].events.len() != 2
+        || playback.remaining_frames != 0
+    {
+        return Err("recorded frames were not released at their explicit elapsed times".into());
+    }
+    let partial = &playback.batches[1].states;
+    if partial.len() != 1
+        || partial[0].position.floor_position != 3.5
+        || partial[0].motion != MotionState::Moving(Direction::Up)
+    {
+        return Err("first recorded observation did not update the intermediate state".into());
+    }
+    let final_states = &playback.batches[3].states;
+    if final_states.len() != 1
+        || final_states[0].position != Position::at_floor(Floor::new(4))
+        || final_states[0].motion != MotionState::Stopped
+        || final_states[0].door != DoorState::Open
+        || final_states[0].target.is_some()
+    {
+        return Err("recorded observation did not reach the expected final state".into());
+    }
+    Ok(())
+}
+
 fn render_report(name: &str, outcome: &str, commands: &[Command], replay: &Replay) -> String {
     let mut lines = vec![
         format!("scenario: {name}"),
@@ -277,6 +426,45 @@ fn render_report(name: &str, outcome: &str, commands: &[Command], replay: &Repla
     lines.join("\n")
 }
 
+fn render_recorded_report(playback: &RecordedPlayback) -> String {
+    let mut lines = vec![
+        format!("scenario: {RECORDED_SCENARIO}"),
+        "scope: native semantic recording; read-only; no protocol or hardware I/O".into(),
+        "determinism: PASS (2 identical executions)".into(),
+        format!("write boundary: PASS ({})", playback.write_error),
+        "outcome: PASS (2 frames observed at explicit elapsed times)".into(),
+        String::new(),
+        "timeline:".into(),
+    ];
+    for batch in &playback.batches {
+        let milliseconds = batch.elapsed_total.as_millis();
+        if batch.events.is_empty() {
+            lines.push(format!("  [{milliseconds:04} ms] no events"));
+        } else {
+            lines.extend(
+                batch
+                    .events
+                    .iter()
+                    .map(|event| format!("  [{milliseconds:04} ms] {}", event_label(event))),
+            );
+        }
+        lines.extend(batch.states.iter().map(|state| {
+            format!(
+                "             state {} position={:.2}F motion={:?} door={:?} target={}",
+                state.id,
+                state.position.floor_position,
+                state.motion,
+                state.door,
+                state
+                    .target
+                    .map_or_else(|| "-".into(), |floor| floor.to_string())
+            )
+        }));
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,6 +493,21 @@ mod tests {
         assert!(report.contains("Runtime error: simulator injected one-shot intent rejection"));
         assert!(report.contains("Active duplicate -> #1"));
         assert!(report.contains("#1 7F UP -> Completed"));
+    }
+
+    #[test]
+    fn recorded_scenario_proves_timing_state_and_no_write_boundary() {
+        let report = run(RECORDED_SCENARIO).expect("recorded scenario should pass");
+
+        assert!(report.contains("determinism: PASS (2 identical executions)"));
+        assert!(report.contains(
+            "write boundary: PASS (recorded runtime is read-only and rejects all intents)"
+        ));
+        assert!(report.contains("[0250 ms] no events"));
+        assert!(report.contains("[0500 ms] PositionChanged A 3.50F"));
+        assert!(report.contains("[0999 ms] no events"));
+        assert!(report.contains("[1000 ms] Arrived A at 4F"));
+        assert!(report.contains("state A position=4.00F motion=Stopped door=Open target=-"));
     }
 
     #[test]

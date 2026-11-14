@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod recorded;
+
 use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_model::{
@@ -7,6 +9,8 @@ use liftassistant_model::{
     Position,
 };
 use liftassistant_runtime::{ElevatorRuntime, RuntimeError, RuntimeEvent};
+
+pub use recorded::{RecordedFrame, RecordedRuntime};
 
 #[derive(Debug)]
 struct SimCar {

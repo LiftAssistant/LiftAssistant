@@ -56,6 +56,14 @@ cargo run -p liftassistant-tui -- --scenario m2-call-lifecycle
 
 The command executes the same developer composition path twice, rejects a deterministic or expected-outcome mismatch, and prints the semantic trace plus final call/car state. It is a research tool, not a conformance or certification claim.
 
+Inspect the recorded/read-only runtime boundary:
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario recorded-read-only-observation
+~~~
+
+This scenario replays native semantic observations at explicit elapsed times and proves that the backend rejects every submitted intent without disturbing playback. It performs no protocol, network, device, or hardware I/O.
+
 Controls:
 
 - Up/Down select a floor; U/D create an UP/DOWN hall call.

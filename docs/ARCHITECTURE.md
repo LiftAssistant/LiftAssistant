@@ -23,7 +23,7 @@ Simulator
                                   Developer TUI
 ~~~
 
-The simulator is the first runtime backend. Future real-world runtimes should implement the same semantic boundary.
+The simulator is the first active runtime backend. M4 adds a second, recorded/read-only backend for deterministic playback of native semantic observations. Future real-world runtimes should implement the same semantic boundary.
 
 The TUI currently performs the small amount of application composition needed to connect core and runtime. Do not extract an application/service layer until another frontend or composition target creates real duplication.
 
@@ -66,7 +66,7 @@ A runtime may expose observed state, capabilities, semantic events, and acceptan
 - `liftassistant-model`: canonical domain types.
 - `liftassistant-core`: deterministic vendor-neutral semantic decisions/state transitions.
 - `liftassistant-runtime`: semantic execution contract and runtime events.
-- `liftassistant-sim`: deterministic reference backend.
+- `liftassistant-sim`: deterministic active simulator plus native-semantic recorded/read-only research backend.
 - `liftassistant-tui`: developer UI and current composition root.
 
 These five packages remain sufficient for the current work. New packages require demonstrated ownership/lifecycle pressure, not speculative layering.

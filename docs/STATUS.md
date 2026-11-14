@@ -225,9 +225,25 @@ Review result:
 
 ## M4.1 — Native-semantic recorded/read-only runtime
 
+**Implemented.**
+
+Implemented behavior:
+- `RecordedRuntime` is a second `ElevatorRuntime` implementation that plays in-memory native `RuntimeEvent` frames according to explicit elapsed durations;
+- partial ticks preserve remaining frame time, and one tick may deterministically release every frame whose delay is covered;
+- position/arrival/door observations update the backend's canonical observed car state;
+- construction rejects events for unknown cars rather than silently manufacturing state;
+- capabilities advertise position/door observation while `serve_floor` and `park` are false;
+- every submitted intent is rejected without changing state or disturbing later playback;
+- `cargo run -p liftassistant-tui -- --scenario recorded-read-only-observation` runs the recording twice, checks identical batches/states, verifies the no-write boundary, and shows that frames release at 500 ms and 1000 ms but not at 250 ms or 999 ms;
+- the recording is internal Rust data: no file schema, protocol mapping, network transport, hardware access, or write path was added.
+
+Validation: formatting, final all-target linting, 34 workspace tests, and the real recorded/read-only command passed. The first all-target clippy attempt found the new playback loop could use `while let`; it was corrected before the final workspace gate.
+
+## M4.2 — Recorded external-state mapping experiment
+
 **READY.**
 
-Add a deterministic runtime backend that replays in-memory native semantic observations according to explicit elapsed durations and rejects every submitted intent. Exercise it through a non-interactive scenario that proves partial-step timing, final observed state, deterministic replay, and the no-write boundary. Do not define a file format, protocol mapping, network transport, or hardware control path.
+Use one official, public, read-only elevator-state representation as a concrete recorded input and map only unambiguous observations into LiftAssistant semantics. Preserve or reject ambiguous fields instead of guessing, keep the fixture in memory, and do not add live middleware/network dependencies or any command path.
 
 ## Explicit non-goals in completed M2/M3 and current M4 work
 

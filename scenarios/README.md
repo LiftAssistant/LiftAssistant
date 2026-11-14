@@ -48,6 +48,19 @@ that the runtime error leaves call `#1` Pending, retries the same active call, a
 advances to completion. The injected rejection leaves car state unchanged and does
 not claim to represent an elevator equipment fault or alarm.
 
+## Recorded/read-only observation
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario recorded-read-only-observation
+~~~
+
+The native-semantic recording contains one car and two frames, due after 500 ms
+each. The scenario advances by 250 ms, 250 ms, 499 ms, and 1 ms to prove that
+frames are released only when their explicit delays are covered. It also attempts
+`ServeFloor` and verifies that the recorded backend rejects the intent without
+changing state or interrupting later observations. The input is internal Rust data,
+not a file format or external protocol capture.
+
 ## Availability fallback
 
 From a reset, pause, toggle A OutOfService, and submit 7F UP. Dispatch selects B
