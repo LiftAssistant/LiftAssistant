@@ -40,13 +40,14 @@ It is not primarily a new elevator brand and not merely a monitoring dashboard.
 
 ## Agent workflow decisions
 
-- `AGENTS.md` at repository root is the authoritative agent workflow file.
+- `AGENTS.md` at repository root is the single authoritative agent workflow file.
 - Default mode is SELF-ITERATION.
 - HUMAN-REVIEW is required for safety/authority, normative public spec freezes, license, foundational infrastructure/ABI changes, major rewrites, release/security policy, and certification/conformance claims.
 - A HUMAN_PENDING item blocks only dependent work; independent READY work continues.
 - Green CI is a gate, not a milestone.
 - Tests primarily protect implemented behavior and concrete regressions.
-- `agent.md` and tool-specific instruction files are compatibility entry points; they must not fork the authoritative rules.
+- `agent.md` is a generic compatibility/navigation pointer only and must not fork the authoritative rules.
+- Project context should remain tool-agnostic and live in repository documentation rather than vendor-specific agent files.
 - Intended GitHub commit identity is the project owner's primary account `Axiaobo7788`, not alternate account `xiaobo-kipfel`.
 
 ## Documentation roles
