@@ -24,7 +24,7 @@ The roadmap is ordered by demonstrated need. Do not implement later milestones m
 
 M1 acceptance was confirmed by automated checks and hands-on TUI use.
 
-## M2 — Semantic Core — current
+## M2 — Semantic Core — complete; human semantic review pending (non-blocking)
 
 Goal: evolve from one-shot dispatch into persistent, observable elevator-call semantics.
 
@@ -46,7 +46,7 @@ For new M2 semantics, use targeted prior-art research from `docs/PRIOR_ART.md` b
 - semantic runtime events drive call lifecycle;
 - replay validates semantic lifecycle and physical state.
 
-### M2.4 — Decision reasons / normalized diagnostics
+### M2.4 — Decision explanations
 - structured selected/rejected reasons;
 - capability/mode/distance/tie-break evidence;
 - no large policy DSL.
@@ -56,7 +56,7 @@ For new M2 semantics, use targeted prior-art research from `docs/PRIOR_ART.md` b
 - refine topology/capability/configuration vocabulary against existing standards;
 - HUMAN-REVIEW before changing safety/authority semantics or freezing normative public schemas.
 
-## M3 — Research and conformance laboratory
+## M3 — Research and conformance laboratory — current
 
 - reusable scenario representation only when real use requires it;
 - trace inspection;

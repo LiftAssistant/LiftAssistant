@@ -6,7 +6,7 @@ The long-term goal is to make elevator controllers, protocols, capabilities, pol
 
 LiftAssistant is an early semantic-core and simulation project. **It is not approved for controlling passenger elevators or any safety-critical equipment.**
 
-## Current target: M2 — Semantic Core
+## Current target: M3 — Research and Conformance Laboratory
 
 M1 Interactive Simulator is implemented and human-accepted.
 
@@ -34,7 +34,9 @@ state + semantic event trace
 developer TUI
 ~~~
 
-M2 now evolves this from one-shot dispatch into persistent call semantics: call identity/lifecycle, multiple pending calls, runtime-feedback-driven completion, and explainable decisions.
+M2 evolved this from one-shot dispatch into persistent call semantics: call identity/lifecycle, multiple pending calls, runtime-feedback-driven completion, explainable decisions, and explicit served-floor topology. That semantic vertical path is implemented and machine-reviewed.
+
+M3 now turns the deterministic simulator and replay path into a small research laboratory, starting with executable built-in scenarios and trace inspection. It does not imply certification or conformance claims.
 
 The TUI is a composition/debugging client, not the architecture.
 
@@ -60,7 +62,7 @@ The building shows nearest-floor positions; car details show exact positions, mo
 
 Recording is capped at 2,048 commands. Pauses and floor selection do not affect physics and are not scenario commands.
 
-Calls now have deterministic identity and persistent Core-owned state. Multiple calls can coexist: idle cars receive pending work deterministically, while excess work remains pending rather than replacing an active target. Runtime acceptance, arrival, and door-open feedback advance calls through serving/completion and release cars for deterministic pending-work reevaluation. Each dispatch reports per-car mode, busy/capability constraints, distance, rejection reasons, and the deterministic selection basis. An explicit served-floor topology drives call validation, TUI selection/rendering, reset, and replay. M2 semantic implementation is complete pending an architecture review checkpoint.
+Calls now have deterministic identity and persistent Core-owned state. Multiple calls can coexist: idle cars receive pending work deterministically, while excess work remains pending rather than replacing an active target. Runtime acceptance, arrival, and door-open feedback advance calls through serving/completion and release cars for deterministic pending-work reevaluation. Each dispatch reports per-car mode, busy/capability constraints, distance, rejection reasons, and the deterministic selection basis. An explicit served-floor topology drives call validation, TUI selection/rendering, reset, and replay. M2 semantic implementation and machine review are complete. Human review of the internal terminology remains welcome before any normative public schema is frozen, but it does not block independent M3 work.
 
 ## Repository layout
 

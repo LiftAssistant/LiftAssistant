@@ -4,7 +4,7 @@ Updated: 2026-11-14
 
 ## Current milestone
 
-**M2 — Semantic Core**
+**M3 — Research and Conformance Laboratory**
 
 M1 Interactive Simulator is closed and human-accepted.
 
@@ -40,7 +40,7 @@ Human validation on 2026-11-14:
 
 No remaining M1 HUMAN_PENDING item.
 
-## Current limitation driving M2
+## M2 completion summary
 
 M1 call handling was one-shot:
 
@@ -51,9 +51,7 @@ HallCall
   -> runtime target
 ~~~
 
-M2.1 through M2.5 now provide persistent call identity/lifecycle, multiple pending calls without target replacement, runtime-feedback-driven serving/completion/reassignment, structured dispatch explanations, and explicit served-floor topology. M2 implementation is complete; the architecture review checkpoint is next.
-
-This is the primary M2 problem.
+M2.1 through M2.5 now provide persistent call identity/lifecycle, multiple pending calls without target replacement, runtime-feedback-driven serving/completion/reassignment, structured dispatch explanations, and explicit served-floor topology. M2 implementation and machine review are complete.
 
 ## M2.1 — Call identity and lifecycle
 
@@ -170,11 +168,27 @@ Implemented behavior:
 - runtime-provided per-car capabilities remain the dispatch input; no speculative building/door/capability DSL was introduced;
 - the deliberate boundary from BACnet floor indexes and SAREF4LIFT service/space graphs is recorded in `docs/PRIOR_ART.md`.
 
-## M2 review checkpoint
+## M2 completion review
 
-**READY — review M2 as a complete semantic vertical path before advancing the milestone.**
+**AUTO review complete.**
 
-## Explicit non-goals in M2
+- Core owns call identity, lifecycle, arrival evidence, deterministic scheduling, and decision explanations;
+- the TUI remains the only composition root and does not own semantic state;
+- runtime feedback remains correct across event-batch boundaries rather than relying on simulator grouping;
+- replay compares semantic events, Core state, topology, and physical simulator state;
+- M2 added no crate, dependency, framework, public schema, or vendor branch;
+- targeted prior-art findings and deliberate vocabulary/model divergences are recorded in `docs/PRIOR_ART.md`;
+- formatting, all-target linting, 27 workspace tests, and PTY reference flows passed at the checkpoint.
+
+**HUMAN_PENDING (non-blocking):** review M2 semantic architecture and terminology before any normative public schema is frozen. The implemented model remains internal and reversible, so independent M3 work may continue.
+
+## M3.1 — Executable reference scenario and trace inspection
+
+**READY.**
+
+Add a developer-only, non-interactive entry point for the demonstrated three-call lifecycle scenario. It should execute through the same composition path, verify deterministic replay, and print inspectable semantic/final-state output without introducing a scenario file format, a new crate, or a conformance claim.
+
+## Explicit non-goals in M2 and current M3 work
 
 - real passenger-elevator control;
 - real CAN/CANopen/BACnet controller writes;

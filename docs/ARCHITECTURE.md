@@ -39,7 +39,7 @@ New Semantic State + High-level Effects/Intents
 
 The implementation should grow into this shape from demonstrated behavior rather than through a repository-wide rewrite.
 
-M1 established deterministic one-shot dispatch. M2.1 through M2.5 added persistent call identity/lifecycle, multiple pending calls, runtime-feedback-driven state, explainable dispatch decisions, and explicit served-floor topology. The M2 semantic vertical path is implemented pending its architecture review checkpoint.
+M1 established deterministic one-shot dispatch. M2.1 through M2.5 added persistent call identity/lifecycle, multiple pending calls, runtime-feedback-driven state, explainable dispatch decisions, and explicit served-floor topology. The M2 semantic vertical path is implemented and machine-reviewed. Its model remains internal and reversible; human semantic/terminology review is non-blocking for M3 but required before any normative public schema freeze.
 
 Core must not own networking, field buses, wall-clock time, persistence, terminal/UI frameworks, or vendor SDKs.
 
@@ -67,7 +67,7 @@ A runtime may expose observed state, capabilities, semantic events, and acceptan
 - `liftassistant-sim`: deterministic reference backend.
 - `liftassistant-tui`: developer UI and current composition root.
 
-These five packages remain sufficient for M2. New packages require demonstrated ownership/lifecycle pressure, not speculative layering.
+These five packages remain sufficient for the current work. New packages require demonstrated ownership/lifecycle pressure, not speculative layering.
 
 ## Determinism boundary
 
