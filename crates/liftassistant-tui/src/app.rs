@@ -79,11 +79,8 @@ impl App {
             },
             Command::Step => {
                 self.steps += 1;
-                self.runtime
-                    .tick(FIXED_STEP)
-                    .into_iter()
-                    .map(SemanticEvent::Runtime)
-                    .collect()
+                let runtime_events = self.runtime.tick(FIXED_STEP);
+                self.consume_runtime_events(runtime_events)
             }
         };
         for event in &events {
@@ -126,7 +123,12 @@ impl App {
         let mut events = Vec::new();
 
         for (id, call) in pending {
-            let states = self.runtime.car_states();
+            let states: Vec<_> = self
+                .runtime
+                .car_states()
+                .into_iter()
+                .filter(|car| !self.calls.car_is_occupied(&car.id))
+                .collect();
             let capabilities = states
                 .iter()
                 .filter_map(|car| {
@@ -160,6 +162,44 @@ impl App {
                     });
                 }
                 Err(error) => events.push(SemanticEvent::RuntimeError(error.to_string())),
+            }
+        }
+        events
+    }
+
+    fn consume_runtime_events(&mut self, runtime_events: Vec<RuntimeEvent>) -> Vec<SemanticEvent> {
+        let mut events = Vec::new();
+
+        for runtime_event in runtime_events {
+            events.push(SemanticEvent::Runtime(runtime_event.clone()));
+            match &runtime_event {
+                RuntimeEvent::IntentAccepted(Intent::ServeFloor { car, floor }) => {
+                    if let Some(id) = self.calls.assigned_call(car, *floor) {
+                        assert!(self.calls.mark_serving(id, car));
+                        events.push(SemanticEvent::CallStateChanged {
+                            id,
+                            state: CallState::Serving(car.clone()),
+                        });
+                    }
+                }
+                RuntimeEvent::IntentAccepted(Intent::ParkAt { .. }) => {}
+                RuntimeEvent::Arrived { car, floor } => {
+                    self.calls.note_arrival(car, *floor);
+                }
+                RuntimeEvent::DoorStateChanged {
+                    car,
+                    state: liftassistant_model::DoorState::Open,
+                } => {
+                    let Some(id) = self.calls.complete_open_call(car) else {
+                        continue;
+                    };
+                    events.push(SemanticEvent::CallStateChanged {
+                        id,
+                        state: CallState::Completed,
+                    });
+                    events.extend(self.dispatch_pending());
+                }
+                RuntimeEvent::PositionChanged(_) | RuntimeEvent::DoorStateChanged { .. } => {}
             }
         }
         events
@@ -346,7 +386,7 @@ mod tests {
         assert_eq!(a.door, DoorState::Open);
         assert_eq!(
             app.calls.get(CallId::new(1)).map(|record| &record.state),
-            Some(&CallState::Assigned(CarId::new("A")))
+            Some(&CallState::Completed)
         );
         assert!(
             app.trace

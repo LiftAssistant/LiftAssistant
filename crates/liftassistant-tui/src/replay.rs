@@ -84,6 +84,14 @@ mod tests {
                     state: DoorState::Open,
                 }))
         );
+        assert!(first.events.contains(&SemanticEvent::CallStateChanged {
+            id: CallId::new(1),
+            state: CallState::Serving(CarId::new("A")),
+        }));
+        assert!(first.events.contains(&SemanticEvent::CallStateChanged {
+            id: CallId::new(1),
+            state: CallState::Completed,
+        }));
         // One fewer explicit step has not arrived: equality isn't just two empty traces.
         let shorter = run(&commands[..commands.len() - 1]);
         assert_ne!(first.events, shorter.events);
@@ -165,6 +173,68 @@ mod tests {
                 .events
                 .contains(&SemanticEvent::NoEligibleCar(CallId::new(3)))
         );
+    }
+
+    #[test]
+    fn runtime_feedback_completes_calls_and_reassigns_pending_work() {
+        let mut app = App::new();
+        for command in [
+            Command::HallCall(HallCall {
+                floor: Floor::new(7),
+                direction: Direction::Up,
+            }),
+            Command::HallCall(HallCall {
+                floor: Floor::new(5),
+                direction: Direction::Down,
+            }),
+            Command::HallCall(HallCall {
+                floor: Floor::new(2),
+                direction: Direction::Up,
+            }),
+        ] {
+            app.execute(command);
+        }
+
+        let mut lifecycle_events = Vec::new();
+        for _ in 0..6 {
+            lifecycle_events.extend(app.execute(Command::Step));
+        }
+
+        assert_eq!(
+            app.calls.get(CallId::new(1)).map(|record| &record.state),
+            Some(&CallState::Completed)
+        );
+        assert_eq!(
+            app.calls.get(CallId::new(2)).map(|record| &record.state),
+            Some(&CallState::Completed)
+        );
+        assert_eq!(
+            app.calls.get(CallId::new(3)).map(|record| &record.state),
+            Some(&CallState::Assigned(CarId::new("A")))
+        );
+        assert_eq!(app.runtime.car_states()[0].target, Some(Floor::new(2)));
+        assert!(lifecycle_events.contains(&SemanticEvent::CallStateChanged {
+            id: CallId::new(1),
+            state: CallState::Completed,
+        }));
+        assert!(lifecycle_events.contains(&SemanticEvent::DispatchSelected {
+            id: CallId::new(3),
+            car: CarId::new("A"),
+        }));
+
+        for _ in 0..7 {
+            app.execute(Command::Step);
+        }
+        assert_eq!(
+            app.calls.get(CallId::new(3)).map(|record| &record.state),
+            Some(&CallState::Completed)
+        );
+
+        let first = run(&app.recording);
+        let second = run(&app.recording);
+        assert_eq!(first.events, second.events);
+        assert_eq!(first.app.calls, app.calls);
+        assert_eq!(first.app.runtime.car_states(), app.runtime.car_states());
     }
 }
 

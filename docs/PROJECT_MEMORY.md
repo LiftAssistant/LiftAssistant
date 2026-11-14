@@ -86,7 +86,15 @@ HallCall
 
 The developer TUI also validates fixed-step pause/single-step behavior, deterministic replay, availability fallback, no-eligible-car behavior, and bounded event tracing.
 
-The key limitation intentionally left for M2 is that calls are still one-shot and can replace a car's current target; persistent call lifecycle/multiple pending calls are not yet modeled.
+The key limitation intentionally left at M1 close was that calls were one-shot and could replace a car's current target; the M2 section below records the implemented replacement.
+
+## Validated M2 call semantics
+
+M2 uses deterministic sequential `CallId` values and a Core-owned internal lifecycle: `Pending -> Assigned(car) -> Serving(car) -> Completed`. Active duplicate floor+direction calls share identity; a later request after completion receives a new identity.
+
+Pending calls are considered in identity order. Only Normal, capable, semantically idle cars are eligible, so a later call cannot replace an Assigned/Serving trip. Runtime intent acceptance starts service; matching arrival plus door-open feedback completes service and releases the car for immediate pending-work reevaluation. Core retains arrival evidence across event batches rather than relying on simulator-specific event grouping.
+
+These call semantics remain an internal, reversible model informed by CiA 417, BACnet, SAREF4LIFT, and Open-RMF prior art. They are not a frozen normative public schema.
 
 ## License
 

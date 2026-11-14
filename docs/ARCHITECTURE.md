@@ -39,7 +39,7 @@ New Semantic State + High-level Effects/Intents
 
 The implementation should grow into this shape from demonstrated behavior rather than through a repository-wide rewrite.
 
-M1 established deterministic one-shot dispatch. M2 evolves Core toward persistent call identity/lifecycle, multiple pending calls, runtime-feedback-driven state, and explainable decisions.
+M1 established deterministic one-shot dispatch. M2.1 through M2.3 added persistent call identity/lifecycle, multiple pending calls, and runtime-feedback-driven state. Explainable decisions remain the next M2 step.
 
 Core must not own networking, field buses, wall-clock time, persistence, terminal/UI frameworks, or vendor SDKs.
 
@@ -94,11 +94,9 @@ Before introducing durable domain semantics or reusable external boundaries:
 
 Existing standards are inputs and constraints, not a requirement to copy any one architecture wholesale.
 
-## Call semantics direction
+## Current call semantics
 
-Current M1 behavior is one-shot and may replace a car target.
-
-M2 should introduce the smallest persistent call model needed for:
+Core owns deterministic call identity and the lifecycle:
 
 ~~~text
 Pending
@@ -107,9 +105,9 @@ Pending
   -> Completed
 ~~~
 
-Multiple calls should coexist without requiring an early complex group-control algorithm.
+Multiple calls coexist without a complex group-control algorithm. Pending calls are considered in `CallId` order and cannot overwrite an Assigned/Serving car target.
 
-Runtime feedback should eventually advance lifecycle state; developer UI should observe that state rather than own it.
+Runtime intent acceptance advances Assigned to Serving. Arrival evidence followed by an open door completes the matching call and immediately reevaluates pending work. Arrival evidence is Core-owned so feedback may span runtime event batches. The developer UI observes this state; it does not own the lifecycle.
 
 ## Future backends
 

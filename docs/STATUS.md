@@ -51,13 +51,13 @@ HallCall
   -> runtime target
 ~~~
 
-M2.1 and M2.2 now provide persistent call identity/lifecycle plus multiple pending calls without target replacement. Runtime feedback still needs to advance assignment through serving/completion and release the car for deterministic pending-work reevaluation.
+M2.1 through M2.3 now provide persistent call identity/lifecycle, multiple pending calls without target replacement, and runtime-feedback-driven serving/completion/reassignment. Structured dispatch diagnostics are the next semantic-core gap.
 
 This is the primary M2 problem.
 
 ## M2.1 — Call identity and lifecycle
 
-**Implemented through deterministic pending assignment; completion-triggered reevaluation is the M2.3 dependency.**
+**Implemented.**
 
 Introduce the smallest durable call model needed to represent active hall calls.
 
@@ -84,7 +84,7 @@ Implemented behavior:
 - duplicate active floor+direction calls reuse the existing identity; a still-pending duplicate may retry assignment, while an assigned/serving duplicate is not resubmitted;
 - completed calls remain distinguishable and a later same floor+direction request receives a new identity;
 - the developer TUI observes Core call records and semantic call-state events;
-- current application integration advances a successfully submitted call through `Assigned`; runtime-feedback-driven `Serving`/`Completed` transitions remain M2.3 work.
+- runtime feedback now advances successfully submitted calls through `Assigned`, `Serving`, and `Completed` as described in M2.3.
 
 Targeted prior-art findings and the deliberate internal lifecycle divergence are recorded in `docs/PRIOR_ART.md`.
 
@@ -101,17 +101,17 @@ Targeted prior-art findings and the deliberate internal lifecycle divergence are
 
 Implemented behavior:
 - Pending calls are considered in deterministic `CallId` order;
-- dispatch only selects Normal, capable cars without an active runtime target;
+- dispatch only selects Normal, capable cars without an active runtime target or an Assigned/Serving Core call;
 - successful assignment immediately makes a car busy for later calls in the same scheduling pass;
 - multiple calls coexist and excess work stays Pending without replacing either active target;
 - availability changes trigger pending-work reevaluation;
 - dispatch/no-eligible/intent trace events identify the relevant `CallId`;
 - deterministic replay covers the `7F UP -> A`, `5F DOWN -> B`, `2F UP -> Pending` scenario.
-- arrival does not yet release an assignment; M2.3 must consume runtime feedback, complete the served call, and invoke the existing pending scheduler.
+- completion feedback releases the assignment and invokes the pending scheduler through M2.3.
 
 ## M2.3 — Runtime feedback drives lifecycle
 
-**READY — next implementation slice.**
+**Implemented.**
 
 Use semantic runtime feedback to advance call state rather than treating runtime events as display-only logs.
 
@@ -120,7 +120,17 @@ At minimum:
 - arrival/service completion marks the relevant call completed;
 - replay verifies call lifecycle as well as physical car state.
 
+Implemented behavior:
+- `IntentAccepted(ServeFloor)` advances the matching Core call from Assigned to Serving;
+- matching `Arrived(car, floor)` records Core-owned arrival evidence, including when door feedback arrives in a later event batch;
+- `DoorStateChanged(Open)` completes only an arrived Serving call for that car;
+- each completion immediately reevaluates Pending calls while still excluding cars whose Core calls remain Assigned/Serving;
+- the three-call scenario deterministically completes #1, assigns #3 to newly released A, and later completes #3;
+- replay verifies identical call identities, lifecycle events, assignments, Core state, and physical simulator state.
+
 ## M2.4 — Decision reasons / diagnostics
+
+**READY — next implementation slice.**
 
 Evolve opaque `Option<Intent>`-style outcomes toward structured, explainable decisions without building a policy DSL.
 
