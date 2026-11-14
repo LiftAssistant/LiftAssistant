@@ -60,7 +60,7 @@ The building shows nearest-floor positions; car details show exact positions, mo
 
 Recording is capped at 2,048 commands. Pauses and floor selection do not affect physics and are not scenario commands.
 
-Current known semantic limitation: dispatch is still one-shot; a later call can replace a car's target. Persistent call lifecycle and multiple pending calls are M2 work.
+Calls now have deterministic identity and persistent Core-owned state. Multiple calls can coexist: idle cars receive pending work deterministically, while excess work remains pending rather than replacing an active target. Runtime feedback does not yet advance assigned calls through serving/completion or automatically release cars for the next pending call; that is the next M2 slice.
 
 ## Repository layout
 

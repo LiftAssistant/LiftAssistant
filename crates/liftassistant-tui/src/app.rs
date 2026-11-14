@@ -70,7 +70,11 @@ impl App {
         let events = match command {
             Command::HallCall(call) => self.submit_call(call),
             Command::SetMode { car, mode } => match self.runtime.set_mode(&car, mode) {
-                Ok(()) => vec![SemanticEvent::ModeChanged { car, mode }],
+                Ok(()) => {
+                    let mut events = vec![SemanticEvent::ModeChanged { car, mode }];
+                    events.extend(self.dispatch_pending());
+                    events
+                }
                 Err(error) => vec![SemanticEvent::RuntimeError(error.to_string())],
             },
             Command::Step => {
@@ -91,15 +95,15 @@ impl App {
     fn submit_call(&mut self, call: HallCall) -> Vec<SemanticEvent> {
         let mut events = vec![SemanticEvent::HallCall(call)];
         self.last_call = Some(call);
-        self.decision = None;
         if !valid_call(call) {
+            self.decision = None;
             events.push(SemanticEvent::InvalidCall);
             return events;
         }
-        let id = match self.calls.register(call) {
+        match self.calls.register(call) {
             CallRegistration::Created(id) => {
+                self.decision = None;
                 events.push(SemanticEvent::CallRegistered(id));
-                id
             }
             CallRegistration::Duplicate(id) => {
                 events.push(SemanticEvent::CallDeduplicated(id));
@@ -110,37 +114,53 @@ impl App {
                 {
                     return events;
                 }
-                id
+                self.decision = None;
             }
-        };
-        let states = self.runtime.car_states();
-        let capabilities = states
-            .iter()
-            .filter_map(|car| {
-                self.runtime
-                    .capabilities(&car.id)
-                    .map(|caps| (car.id.clone(), caps))
-            })
-            .collect();
-        let Some(intent) = dispatch(&call, &states, &capabilities) else {
-            events.push(SemanticEvent::NoEligibleCar);
-            return events;
-        };
-        let (Intent::ServeFloor { car, .. } | Intent::ParkAt { car, .. }) = &intent;
-        let car = car.clone();
-        events.push(SemanticEvent::DispatchSelected(car.clone()));
-        events.push(SemanticEvent::IntentGenerated(intent.clone()));
-        self.decision = Some(intent.clone());
-        match self.runtime.submit_intent(intent) {
-            Ok(()) => {
-                let assigned = CallState::Assigned(car.clone());
-                assert!(self.calls.assign(id, car));
-                events.push(SemanticEvent::CallStateChanged {
-                    id,
-                    state: assigned,
-                });
+        }
+        events.extend(self.dispatch_pending());
+        events
+    }
+
+    fn dispatch_pending(&mut self) -> Vec<SemanticEvent> {
+        let pending: Vec<_> = self.calls.pending_calls().collect();
+        let mut events = Vec::new();
+
+        for (id, call) in pending {
+            let states = self.runtime.car_states();
+            let capabilities = states
+                .iter()
+                .filter_map(|car| {
+                    self.runtime
+                        .capabilities(&car.id)
+                        .map(|caps| (car.id.clone(), caps))
+                })
+                .collect();
+            let Some(intent) = dispatch(&call, &states, &capabilities) else {
+                events.push(SemanticEvent::NoEligibleCar(id));
+                continue;
+            };
+            let (Intent::ServeFloor { car, .. } | Intent::ParkAt { car, .. }) = &intent;
+            let car = car.clone();
+            events.push(SemanticEvent::DispatchSelected {
+                id,
+                car: car.clone(),
+            });
+            events.push(SemanticEvent::IntentGenerated {
+                id,
+                intent: intent.clone(),
+            });
+            self.decision = Some(intent.clone());
+            match self.runtime.submit_intent(intent) {
+                Ok(()) => {
+                    let assigned = CallState::Assigned(car.clone());
+                    assert!(self.calls.assign(id, car));
+                    events.push(SemanticEvent::CallStateChanged {
+                        id,
+                        state: assigned,
+                    });
+                }
+                Err(error) => events.push(SemanticEvent::RuntimeError(error.to_string())),
             }
-            Err(error) => events.push(SemanticEvent::RuntimeError(error.to_string())),
         }
         events
     }
@@ -250,9 +270,11 @@ fn semantic_label(event: &SemanticEvent) -> String {
         SemanticEvent::CallStateChanged { id, state } => {
             format!("Call {id} -> {}", call_state_label(state))
         }
-        SemanticEvent::NoEligibleCar => "No eligible car".into(),
-        SemanticEvent::DispatchSelected(car) => format!("Dispatch -> {car}"),
-        SemanticEvent::IntentGenerated(intent) => format!("Intent -> {}", intent_label(intent)),
+        SemanticEvent::NoEligibleCar(id) => format!("Call {id}: no eligible idle car"),
+        SemanticEvent::DispatchSelected { id, car } => format!("Call {id}: dispatch -> {car}"),
+        SemanticEvent::IntentGenerated { id, intent } => {
+            format!("Call {id}: intent -> {}", intent_label(intent))
+        }
         SemanticEvent::ModeChanged { car, mode } => format!("Car {car} -> {mode:?}"),
         SemanticEvent::RuntimeError(error) => format!("Runtime error: {error}"),
         SemanticEvent::Runtime(event) => event_label(event),

@@ -42,7 +42,7 @@ No remaining M1 HUMAN_PENDING item.
 
 ## Current limitation driving M2
 
-Current call handling is still one-shot:
+M1 call handling was one-shot:
 
 ~~~text
 HallCall
@@ -51,13 +51,13 @@ HallCall
   -> runtime target
 ~~~
 
-A later call can replace an already accepted target. There is no persistent call identity/lifecycle or queue of pending calls.
+M2.1 and M2.2 now provide persistent call identity/lifecycle plus multiple pending calls without target replacement. Runtime feedback still needs to advance assignment through serving/completion and release the car for deterministic pending-work reevaluation.
 
 This is the primary M2 problem.
 
 ## M2.1 — Call identity and lifecycle
 
-**Implemented.**
+**Implemented through deterministic pending assignment; completion-triggered reevaluation is the M2.3 dependency.**
 
 Introduce the smallest durable call model needed to represent active hall calls.
 
@@ -90,7 +90,7 @@ Targeted prior-art findings and the deliberate internal lifecycle divergence are
 
 ## M2.2 — Multiple pending calls
 
-**READY — next implementation slice.**
+**Implemented.**
 
 - multiple hall calls may coexist;
 - one active trip must not be overwritten by a later call;
@@ -99,7 +99,19 @@ Targeted prior-art findings and the deliberate internal lifecycle divergence are
 - after service completion, pending work is reevaluated deterministically;
 - keep dispatch policy intentionally simple before optimizing group control.
 
+Implemented behavior:
+- Pending calls are considered in deterministic `CallId` order;
+- dispatch only selects Normal, capable cars without an active runtime target;
+- successful assignment immediately makes a car busy for later calls in the same scheduling pass;
+- multiple calls coexist and excess work stays Pending without replacing either active target;
+- availability changes trigger pending-work reevaluation;
+- dispatch/no-eligible/intent trace events identify the relevant `CallId`;
+- deterministic replay covers the `7F UP -> A`, `5F DOWN -> B`, `2F UP -> Pending` scenario.
+- arrival does not yet release an assignment; M2.3 must consume runtime feedback, complete the served call, and invoke the existing pending scheduler.
+
 ## M2.3 — Runtime feedback drives lifecycle
+
+**READY — next implementation slice.**
 
 Use semantic runtime feedback to advance call state rather than treating runtime events as display-only logs.
 

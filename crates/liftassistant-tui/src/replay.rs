@@ -22,9 +22,9 @@ pub enum SemanticEvent {
     CallRegistered(CallId),
     CallDeduplicated(CallId),
     CallStateChanged { id: CallId, state: CallState },
-    NoEligibleCar,
-    DispatchSelected(CarId),
-    IntentGenerated(Intent),
+    NoEligibleCar(CallId),
+    DispatchSelected { id: CallId, car: CarId },
+    IntentGenerated { id: CallId, intent: Intent },
     ModeChanged { car: CarId, mode: OperatingMode },
     RuntimeError(String),
     Runtime(RuntimeEvent),
@@ -64,11 +64,10 @@ mod tests {
             first.app.runtime.car_states(),
             second.app.runtime.car_states()
         );
-        assert!(
-            first
-                .events
-                .contains(&SemanticEvent::DispatchSelected(CarId::new("A")))
-        );
+        assert!(first.events.contains(&SemanticEvent::DispatchSelected {
+            id: CallId::new(1),
+            car: CarId::new("A"),
+        }));
         assert!(
             first
                 .events
@@ -112,6 +111,61 @@ mod tests {
         app.reset();
         assert!(app.recording.is_empty());
     }
+
+    #[test]
+    fn multiple_calls_use_idle_cars_and_keep_excess_work_pending() {
+        let commands = vec![
+            Command::HallCall(HallCall {
+                floor: Floor::new(7),
+                direction: Direction::Up,
+            }),
+            Command::HallCall(HallCall {
+                floor: Floor::new(5),
+                direction: Direction::Down,
+            }),
+            Command::HallCall(HallCall {
+                floor: Floor::new(2),
+                direction: Direction::Up,
+            }),
+        ];
+
+        let first = run(&commands);
+        let second = run(&commands);
+        let states = first.app.runtime.car_states();
+
+        assert_eq!(first.events, second.events);
+        assert_eq!(states[0].target, Some(Floor::new(7)));
+        assert_eq!(states[1].target, Some(Floor::new(5)));
+        assert_eq!(
+            first
+                .app
+                .calls
+                .get(CallId::new(1))
+                .map(|record| &record.state),
+            Some(&CallState::Assigned(CarId::new("A")))
+        );
+        assert_eq!(
+            first
+                .app
+                .calls
+                .get(CallId::new(2))
+                .map(|record| &record.state),
+            Some(&CallState::Assigned(CarId::new("B")))
+        );
+        assert_eq!(
+            first
+                .app
+                .calls
+                .get(CallId::new(3))
+                .map(|record| &record.state),
+            Some(&CallState::Pending)
+        );
+        assert!(
+            first
+                .events
+                .contains(&SemanticEvent::NoEligibleCar(CallId::new(3)))
+        );
+    }
 }
 
 #[cfg(test)]
@@ -146,16 +200,14 @@ mod availability_tests {
             car: CarId::new("A"),
             mode: OperatingMode::OutOfService
         }));
-        assert!(
-            first
-                .events
-                .contains(&SemanticEvent::DispatchSelected(CarId::new("B")))
-        );
-        assert!(
-            first
-                .events
-                .contains(&SemanticEvent::IntentGenerated(intent.clone()))
-        );
+        assert!(first.events.contains(&SemanticEvent::DispatchSelected {
+            id: CallId::new(1),
+            car: CarId::new("B"),
+        }));
+        assert!(first.events.contains(&SemanticEvent::IntentGenerated {
+            id: CallId::new(1),
+            intent: intent.clone(),
+        }));
         assert!(
             first
                 .events
@@ -192,11 +244,11 @@ mod availability_tests {
             floor: Floor::new(7),
             direction: Direction::Up,
         }));
-        assert!(events.contains(&SemanticEvent::NoEligibleCar));
+        assert!(events.contains(&SemanticEvent::NoEligibleCar(CallId::new(1))));
         assert!(
             !events
                 .iter()
-                .any(|event| matches!(event, SemanticEvent::IntentGenerated(_)))
+                .any(|event| matches!(event, SemanticEvent::IntentGenerated { .. }))
         );
         assert!(app.decision.is_none());
         assert!(

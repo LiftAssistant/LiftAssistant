@@ -59,6 +59,12 @@ impl CallRegistry {
         self.calls.values()
     }
 
+    pub fn pending_calls(&self) -> impl Iterator<Item = (CallId, HallCall)> + '_ {
+        self.calls.values().filter_map(|record| {
+            (record.state == CallState::Pending).then_some((record.id, record.call))
+        })
+    }
+
     pub fn assign(&mut self, id: CallId, car: CarId) -> bool {
         let Some(record) = self.calls.get_mut(&id) else {
             return false;
@@ -107,6 +113,7 @@ pub fn dispatch(
     let car = cars
         .iter()
         .filter(|car| car.mode == OperatingMode::Normal)
+        .filter(|car| car.target.is_none())
         .filter(|car| {
             capabilities
                 .get(&car.id)
@@ -227,6 +234,27 @@ mod tests {
             Some(Intent::ServeFloor {
                 car: CarId::new("B"),
                 floor: Floor::new(8),
+            })
+        );
+    }
+
+    #[test]
+    fn busy_car_is_not_selected_even_when_it_is_nearest() {
+        let mut a = CarState::new("A", Floor::new(7));
+        a.target = Some(Floor::new(8));
+        let cars = vec![a, CarState::new("B", Floor::new(1))];
+        let call = HallCall {
+            floor: Floor::new(7),
+            direction: Direction::Up,
+        };
+
+        let decision = dispatch(&call, &cars, &capabilities(&cars));
+
+        assert_eq!(
+            decision,
+            Some(Intent::ServeFloor {
+                car: CarId::new("B"),
+                floor: Floor::new(7),
             })
         );
     }
