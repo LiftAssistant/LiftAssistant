@@ -1,112 +1,140 @@
 # Project status
 
-Updated: 2026-11-12
+Updated: 2026-11-14
 
 ## Current milestone
 
-**M1 — Interactive Simulator: functional acceptance complete**
+**M2 — Semantic Core**
 
-M0 bootstrap is complete. Stop polishing bootstrap infrastructure unless it blocks M1.
+M1 Interactive Simulator is closed and human-accepted.
 
-## Current baseline
+## Validated baseline
 
-Working today:
+M1 established and validated:
+
 - canonical model types for cars, floors, motion, doors, modes, capabilities, calls, and intents;
-- pure nearest-eligible-car dispatch;
+- pure deterministic nearest-eligible-car dispatch;
 - runtime trait and semantic runtime events;
-- deterministic fixed-duration simulator tick;
+- deterministic fixed-duration simulator stepping;
 - simulated movement, arrival, and door-open state;
-- out-of-service filtering in dispatch;
-- interactive TUI with valid hall calls, fixed stepping, car details, and bounded event trace;
-- minimal CI as a compile/lint/regression gate.
+- interactive two-car/eight-floor TUI;
+- valid hall-call boundary handling;
+- pause/resume/single-step/reset/quit controls;
+- bounded decision/runtime trace;
+- deterministic in-memory replay;
+- availability fallback with OutOfService cars;
+- no-eligible-car behavior;
+- terminal restoration on normal/error exit paths.
 
-M1.1, M1.2, and M1.3 are implemented. All scoped AUTO work is complete;
-remaining UI adjustments depend on hands-on usability feedback.
+Automated validation at M1 close:
+- `cargo fmt --all -- --check`: passed;
+- `cargo clippy --workspace --all-targets --locked -- -D warnings`: passed;
+- `cargo test --workspace --locked`: 12 passed;
+- Rust 1.85 all-target workspace check with committed lockfile: passed;
+- PTY smoke checks passed.
 
-## M1.1 — Interactive loop
+Human validation on 2026-11-14:
+- TUI launched and rendered correctly in Konsole;
+- tested key-driven functions behaved as expected;
+- M1 developer TUI accepted as the first usable version.
 
-**Completed.**
+No remaining M1 HUMAN_PENDING item.
 
-- Two-car/eight-floor building and exact car detail views.
-- Valid floor/direction selection (1F UP only, 8F DOWN only).
-- Calls flow through existing dispatch and runtime submission.
-- Running/paused state, explicit 500 ms single step, reset, quit.
-- Last decision plus a bounded 100-entry trace of decisions/runtime events/errors.
-- Alternate screen/raw mode restored on normal exit and ordinary error returns.
+## Current limitation driving M2
 
-Validation: formatting, Clippy, six workspace tests, and a PTY smoke test of calls,
-pause/single-step, arrival/open door, reset, boundary rejection, and terminal restoration.
+Current call handling is still one-shot:
 
-UI timing only requests fixed steps; wall-clock elapsed never enters simulator physics.
+~~~text
+HallCall
+  -> immediate dispatch
+  -> ServeFloor
+  -> runtime target
+~~~
 
-HUMAN_PENDING: hands-on TUI usability/visual review. All independent M1 implementation work is complete.
+A later call can replace an already accepted target. There is no persistent call identity/lifecycle or queue of pending calls.
 
-## M1.2 — Deterministic replay
+This is the primary M2 problem.
 
-**Completed.**
+## M2.1 — Call identity and lifecycle
 
-- Developer-only in-memory commands represent hall calls and individual fixed steps.
-- Live input and replay share the same deterministic application execution path.
-- P runs the recorded session twice from fresh reference simulators; compares complete
-  semantic outputs and final states, checks against the live state, and pauses the result.
-- Recording is bounded at 2,048 commands; incomplete recordings cannot be replayed.
-- Reset starts a fresh recording. No file format or public schema was needed.
+**READY — next implementation slice.**
 
-Validation: nine workspace tests (including nonempty semantic replay, a changed-step
-negative check, replay continuation, and recording overflow) and PTY replay smoke passed.
+Introduce the smallest durable call model needed to represent active hall calls.
 
-## M1.3 — Availability fallback
+Target lifecycle:
 
-**Completed.**
+~~~text
+Pending
+  -> Assigned(car)
+  -> Serving(car)
+  -> Completed
+~~~
 
-- A/B toggle each simulated car between Normal and OutOfService using SimRuntime::set_mode.
-- Mode changes are shown in car detail/trace and included in replay commands.
-- With A unavailable, 7F UP dispatches to B and completes arrival/open-door flow.
-- Both unavailable: No eligible car, no submitted intent; restoring A recovers dispatch.
-- Reset restores both cars to Normal and clears targets, decisions, trace, and recording.
-- Existing accepted trips continue if availability changes; these controls affect new dispatch only.
+Requirements:
+- calls have stable identity;
+- duplicate active floor+direction calls are not multiplied unnecessarily;
+- lifecycle state is observable;
+- keep semantics deterministic;
+- do not introduce a generic workflow/state-machine framework.
 
-## M1 validation and remaining review
+## M2.2 — Multiple pending calls
 
-- cargo fmt --all -- --check: passed.
-- cargo clippy --workspace --all-targets --locked -- -D warnings: passed.
-- cargo test --workspace --locked: 12 passed, no failures or skipped tests.
-- Rust 1.85 all-target workspace check with the committed lockfile: passed.
-- PTY run via cargo run -p liftassistant-tui: calls, fixed-step pause/resume,
-  arrival/open door, reset, invalid call, replay, availability fallback, no-eligible
-  recovery, and Q exit passed. Esc/Ctrl-C and a broken-output error restore terminal settings.
-- All three M1 slices preserve the five-package architecture; no real elevator integration added.
+After M2.1 works:
 
-No remaining READY implementation items in this M1 cycle. Human check: run the
-TUI in a preferred terminal, assess visual hierarchy/key usability, and report
-specific adjustments if desired. This does not block any unfinished replay or
-fallback work; those have both completed. M2 remains the subsequent roadmap phase.
+- multiple hall calls may coexist;
+- one active trip must not be overwritten by a later call;
+- idle eligible cars may take pending work;
+- if no eligible idle car exists, the call stays pending;
+- after service completion, pending work is reevaluated deterministically;
+- keep dispatch policy intentionally simple before optimizing group control.
 
-## After M1
+## M2.3 — Runtime feedback drives lifecycle
 
-**M2 — Semantic core**
-- multiple pending calls;
-- call lifecycle rather than one-shot dispatch;
-- decision reasons/diagnostics;
-- refine observed state/capability semantics against standards research;
-- extract shared orchestration only if multiple frontends actually need it.
+Use semantic runtime feedback to advance call state rather than treating runtime events as display-only logs.
 
-**M3 — Adapter laboratory**
-- virtual/recorded/read-only adapters first;
-- map established standards;
-- define an external adapter boundary from demonstrated needs.
+At minimum:
+- accepted assignment becomes serving at an appropriate deterministic point;
+- arrival/service completion marks the relevant call completed;
+- replay verifies call lifecycle as well as physical car state.
 
-## Explicit non-goals right now
+## M2.4 — Decision reasons / diagnostics
+
+Evolve opaque `Option<Intent>`-style outcomes toward structured, explainable decisions without building a policy DSL.
+
+Useful diagnostics include:
+- selected car;
+- eligibility/rejection reason;
+- mode/capability constraints;
+- deterministic distance/tie-break information;
+- no-eligible-car reason.
+
+## M2.5 — Capability/configuration refinement
+
+Only after the lifecycle path is working:
+- reduce TUI-only hard-coded semantic assumptions where there is a demonstrated need;
+- refine building topology/capability/configuration inputs;
+- compare terminology and concepts with existing standards before freezing public semantics.
+
+Any safety/authority-model change remains HUMAN-REVIEW.
+
+## Explicit non-goals in M2
 
 - real passenger-elevator control;
-- cloud services;
+- real CAN/CANopen/BACnet controller writes;
+- complex group-control optimization;
+- destination-control optimization;
+- large policy/service-profile DSL;
 - production web/mobile UI;
-- database infrastructure;
+- Home Assistant integration;
+- database/cloud infrastructure;
 - plugin marketplace or plugin ABI;
-- microservices;
-- custom CANopen stack;
-- broad CI matrices;
-- coverage targets;
-- fuzzing/benchmark programs;
+- broad CI/coverage/fuzzing programs;
 - certification/conformance claims;
 - license selection without human review.
+
+## Repository governance status
+
+- `AGENTS.md` is the authoritative agent guide.
+- `agent.md` is a compatibility pointer only.
+- Tool-specific instruction entry points should point to the authoritative files rather than fork project rules.
+- Git commits should use the intended owner identity `Axiaobo7788`.
