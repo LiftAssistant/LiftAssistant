@@ -29,9 +29,9 @@ Changes to safety/authority semantics or passenger-elevator control require HUMA
 
 ## Agent-generated contributions
 
-`AGENTS.md` is authoritative for agent workflow.
+`AGENTS.md` is the authoritative agent workflow.
 
-Tool-specific instruction files should route agents to the same project context rather than maintaining independent conflicting rule sets.
+Any agent working in this repository should read the shared repository context rather than relying on tool-specific copies of project rules.
 
 Before agent-created commits, verify the intended Git author/committer identity.
 
