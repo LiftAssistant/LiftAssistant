@@ -100,6 +100,14 @@ The current building configuration is intentionally narrow: `BuildingTopology` i
 
 These call semantics remain an internal, reversible model informed by CiA 417, BACnet, SAREF4LIFT, and Open-RMF prior art. They are not a frozen normative public schema.
 
+## Validated M4 read-only boundary
+
+The first non-simulator backend is a deterministic, native-semantic recorded runtime. It advertises observation capabilities only, rejects every submitted intent, and advances timed observation frames solely through explicit elapsed input. It defines no file format or live transport.
+
+The first external mapping experiment uses recorded Open-RMF `LiftState` fields. Explicit floor-label configuration and stopped/open at-floor evidence can produce a complete internal `CarState` for Fire/Offline modes while retaining source session/mode context. Moving/unknown position, undirected door movement, closed-door position uncertainty, Human/AGV control modes, unsupported modes, and unknown/unadvertised floors remain structured errors rather than guessed values.
+
+This evidence shows a boundary between complete operational state and partial external observations. No partial-observation model, normative mapping, live middleware dependency, protocol write, or hardware path has been approved or frozen.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

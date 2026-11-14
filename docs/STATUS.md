@@ -261,9 +261,30 @@ Validation: formatting, all-target linting, 39 workspace tests, and the real Ope
 
 ## M4 review checkpoint
 
-**READY.**
+**AUTO review complete — M4 recorded/read-only foundation implemented; broader M4 remains open.**
 
-Review the native recording and Open-RMF mapping experiments together. Decide whether the demonstrated external uncertainty warrants a small canonical observation refinement, or whether further adapters should continue rejecting incomplete state. Do not freeze a public schema or add live transport without HUMAN-REVIEW where applicable.
+Review result:
+- the native recorded runtime is a genuine second backend with explicit-time determinism, state validation, observation-only capabilities, and unconditional intent rejection;
+- the Open-RMF experiment is adapter/runtime-side and does not leak source concepts into Core;
+- no dependency, crate, file schema, live transport, middleware connection, protocol write, hardware access, or conformance claim was added;
+- external `LiftState` evidence proves the current complete `CarState` cannot honestly represent common partial observations such as moving-with-floor-label-only, undirected door movement, or source-specific control modes;
+- continuing to reject incomplete state is safe but makes this mapping foundation-only, not a generally usable Open-RMF backend;
+- adding a partial/uncertain observation type would change the foundational model/runtime contract and must not be smuggled in as an adapter-local convenience;
+- another recorded mapper would largely duplicate the same limitation without resolving that contract decision.
+
+**HUMAN_PENDING (blocks dependent observation-model work):** review whether LiftAssistant should add a separate partial/uncertain observation model at the runtime boundary while keeping operational `CarState` complete. This review must also cover terminology and the relationship to the still-internal M2 semantics before any public schema is frozen.
+
+Environment evidence for later virtual CAN work:
+- Linux has `ip`, but no vcan interface is present;
+- `candump` and `cansend` are not installed;
+- creating a kernel interface or installing system packages was not performed as part of this repository-only read-only scope;
+- no controller capture, bench device, or documented controller API was supplied.
+
+Remaining M4 work is therefore classified as:
+- **foundation complete:** native recorded/read-only runtime and conservative recorded Open-RMF mapping;
+- **HUMAN_PENDING:** canonical partial-observation/runtime-boundary decision;
+- **external-input pending:** virtual CAN environment or recorded controller/protocol evidence;
+- **not started:** live read-only transport, CiA 417/T/GSET mapping, HIL/bench integration, and any writes.
 
 ## Explicit non-goals in completed M2/M3 and current M4 work
 
