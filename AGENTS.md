@@ -2,8 +2,6 @@
 
 This is the authoritative operating guide for AI coding agents working in this repository.
 
-Tool-specific instruction files may point here, but they must not redefine conflicting project rules.
-
 ## Required startup context
 
 Before substantial work, read in this order:
