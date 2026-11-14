@@ -56,7 +56,7 @@ For new M2 semantics, use targeted prior-art research from `docs/PRIOR_ART.md` b
 - refine topology/capability/configuration vocabulary against existing standards;
 - HUMAN-REVIEW before changing safety/authority semantics or freezing normative public schemas.
 
-## M3 — Research and conformance laboratory — current
+## M3 — Research and conformance laboratory — complete
 
 - reusable scenario representation only when real use requires it;
 - trace inspection;
@@ -67,7 +67,9 @@ For new M2 semantics, use targeted prior-art research from `docs/PRIOR_ART.md` b
 
 Do not turn M3 into a certification claim.
 
-## M4 — Real-world bridges
+Generic multi-backend conformance machinery is deferred until a second backend exists. Protocol mappings are deferred until a concrete bridge supplies evidence.
+
+## M4 — Real-world bridges — current
 
 Controlled non-passenger work first:
 

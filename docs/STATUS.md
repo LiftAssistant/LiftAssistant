@@ -4,7 +4,7 @@ Updated: 2026-11-14
 
 ## Current milestone
 
-**M3 — Research and Conformance Laboratory**
+**M4 — Real-world bridges (recorded/read-only first)**
 
 M1 Interactive Simulator is closed and human-accepted.
 
@@ -180,7 +180,7 @@ Implemented behavior:
 - targeted prior-art findings and deliberate vocabulary/model divergences are recorded in `docs/PRIOR_ART.md`;
 - formatting, all-target linting, 25 workspace tests, and PTY reference flows passed at the checkpoint.
 
-**HUMAN_PENDING (non-blocking):** review M2 semantic architecture and terminology before any normative public schema is frozen. The implemented model remains internal and reversible, so independent M3 work may continue.
+**HUMAN_PENDING (non-blocking):** review M2 semantic architecture and terminology before any normative public schema is frozen. The implemented model remains internal and reversible, so independent internal bridge work may continue.
 
 ## M3.1 — Executable reference scenario and trace inspection
 
@@ -212,11 +212,24 @@ Validation: formatting, 29 workspace tests, both real non-interactive scenarios,
 
 ## M3 review checkpoint
 
+**AUTO review complete.**
+
+Review result:
+- the scenario command was introduced only after the lifecycle path had a real non-interactive caller, and its two scenarios share execution/reporting without defining a file schema or new framework;
+- each scenario checks two-run determinism and its own expected semantic/physical result, rather than treating identical wrong runs as success;
+- simulator rejection is one-shot, state-preserving, recorded/replayable, and kept outside Core/runtime protocol semantics and equipment-fault vocabulary;
+- Core, runtime contract, package/dependency boundaries, and interactive TUI behavior remain unchanged;
+- generic multi-backend conformance machinery is deferred until a second backend exists;
+- protocol mappings are deferred until a concrete recorded/read-only bridge supplies evidence;
+- there is no conformance/certification claim and no HUMAN-REVIEW boundary was crossed.
+
+## M4.1 — Native-semantic recorded/read-only runtime
+
 **READY.**
 
-Review the executable scenario/trace/failure vertical slice as a small research laboratory. Explicitly defer generic backend conformance machinery until a second backend exists, and defer protocol mappings until a concrete recorded/read-only bridge provides evidence.
+Add a deterministic runtime backend that replays in-memory native semantic observations according to explicit elapsed durations and rejects every submitted intent. Exercise it through a non-interactive scenario that proves partial-step timing, final observed state, deterministic replay, and the no-write boundary. Do not define a file format, protocol mapping, network transport, or hardware control path.
 
-## Explicit non-goals in M2 and current M3 work
+## Explicit non-goals in completed M2/M3 and current M4 work
 
 - real passenger-elevator control;
 - real CAN/CANopen/BACnet controller writes;

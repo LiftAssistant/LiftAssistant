@@ -39,7 +39,9 @@ New Semantic State + High-level Effects/Intents
 
 The implementation should grow into this shape from demonstrated behavior rather than through a repository-wide rewrite.
 
-M1 established deterministic one-shot dispatch. M2.1 through M2.5 added persistent call identity/lifecycle, multiple pending calls, runtime-feedback-driven state, explainable dispatch decisions, and explicit served-floor topology. The M2 semantic vertical path is implemented and machine-reviewed. Its model remains internal and reversible; human semantic/terminology review is non-blocking for M3 but required before any normative public schema freeze.
+M1 established deterministic one-shot dispatch. M2.1 through M2.5 added persistent call identity/lifecycle, multiple pending calls, runtime-feedback-driven state, explainable dispatch decisions, and explicit served-floor topology. The M2 semantic vertical path is implemented and machine-reviewed. Its model remains internal and reversible; human semantic/terminology review is non-blocking for independent internal work but required before any normative public schema freeze.
+
+M3 added developer-only executable scenarios, complete trace/final-state inspection, expected-outcome verification, and a one-shot simulator intent-rejection control. These remain composition/simulator tools rather than Core semantics, equipment diagnostics, a public scenario format, or a certification/conformance system.
 
 Core must not own networking, field buses, wall-clock time, persistence, terminal/UI frameworks, or vendor SDKs.
 
@@ -79,7 +81,7 @@ A UI/event loop may use wall-clock time to decide when to request the next step,
 - identical initial semantic/physical state + identical explicit inputs + identical step durations must produce identical semantic results;
 - replay must operate without sleeping in real time.
 
-M2 call lifecycle and assignment must preserve the same determinism property.
+M2 call lifecycle and assignment, M3 executable scenarios, and any recorded runtime must preserve the same determinism property.
 
 ## Semantic design method
 
