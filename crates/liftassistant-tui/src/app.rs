@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, time::Duration};
 
-use liftassistant_core::dispatch;
-use liftassistant_model::{CarId, Direction, Floor, HallCall, Intent, OperatingMode};
+use liftassistant_core::{CallRegistration, CallRegistry, dispatch};
+use liftassistant_model::{CallState, CarId, Direction, Floor, HallCall, Intent, OperatingMode};
 use liftassistant_runtime::{ElevatorRuntime, RuntimeEvent};
 use liftassistant_sim::SimRuntime;
 
@@ -26,6 +26,7 @@ pub struct App {
     pub steps: u64,
     pub last_call: Option<HallCall>,
     pub decision: Option<Intent>,
+    pub calls: CallRegistry,
     pub trace: VecDeque<String>,
     pub recording: Vec<Command>,
     pub recording_full: bool,
@@ -40,6 +41,7 @@ impl App {
             steps: 0,
             last_call: None,
             decision: None,
+            calls: CallRegistry::new(),
             trace: VecDeque::new(),
             recording: Vec::new(),
             recording_full: false,
@@ -94,6 +96,23 @@ impl App {
             events.push(SemanticEvent::InvalidCall);
             return events;
         }
+        let id = match self.calls.register(call) {
+            CallRegistration::Created(id) => {
+                events.push(SemanticEvent::CallRegistered(id));
+                id
+            }
+            CallRegistration::Duplicate(id) => {
+                events.push(SemanticEvent::CallDeduplicated(id));
+                if self
+                    .calls
+                    .get(id)
+                    .is_some_and(|record| record.state != CallState::Pending)
+                {
+                    return events;
+                }
+                id
+            }
+        };
         let states = self.runtime.car_states();
         let capabilities = states
             .iter()
@@ -108,11 +127,20 @@ impl App {
             return events;
         };
         let (Intent::ServeFloor { car, .. } | Intent::ParkAt { car, .. }) = &intent;
+        let car = car.clone();
         events.push(SemanticEvent::DispatchSelected(car.clone()));
         events.push(SemanticEvent::IntentGenerated(intent.clone()));
         self.decision = Some(intent.clone());
-        if let Err(error) = self.runtime.submit_intent(intent) {
-            events.push(SemanticEvent::RuntimeError(error.to_string()));
+        match self.runtime.submit_intent(intent) {
+            Ok(()) => {
+                let assigned = CallState::Assigned(car.clone());
+                assert!(self.calls.assign(id, car));
+                events.push(SemanticEvent::CallStateChanged {
+                    id,
+                    state: assigned,
+                });
+            }
+            Err(error) => events.push(SemanticEvent::RuntimeError(error.to_string())),
         }
         events
     }
@@ -130,6 +158,7 @@ impl App {
             || first.app.steps != self.steps
             || first.app.last_call != self.last_call
             || first.app.decision != self.decision
+            || first.app.calls != self.calls
         {
             self.log("REPLAY mismatch: live state preserved".into());
             return;
@@ -201,12 +230,26 @@ pub fn intent_label(intent: &Intent) -> String {
     }
 }
 
+pub fn call_state_label(state: &CallState) -> String {
+    match state {
+        CallState::Pending => "Pending".into(),
+        CallState::Assigned(car) => format!("Assigned {car}"),
+        CallState::Serving(car) => format!("Serving {car}"),
+        CallState::Completed => "Completed".into(),
+    }
+}
+
 fn semantic_label(event: &SemanticEvent) -> String {
     match event {
         SemanticEvent::HallCall(call) => {
             format!("HallCall {} {}", call.floor, direction_name(call.direction))
         }
         SemanticEvent::InvalidCall => "Invalid hall call: 1F only UP; 8F only DOWN".into(),
+        SemanticEvent::CallRegistered(id) => format!("Call {id} -> Pending"),
+        SemanticEvent::CallDeduplicated(id) => format!("Active duplicate -> {id}"),
+        SemanticEvent::CallStateChanged { id, state } => {
+            format!("Call {id} -> {}", call_state_label(state))
+        }
         SemanticEvent::NoEligibleCar => "No eligible car".into(),
         SemanticEvent::DispatchSelected(car) => format!("Dispatch -> {car}"),
         SemanticEvent::IntentGenerated(intent) => format!("Intent -> {}", intent_label(intent)),
@@ -233,7 +276,7 @@ fn event_label(event: &RuntimeEvent) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{CarId, DoorState};
+    use liftassistant_model::{CallId, CallState, CarId, DoorState};
 
     #[test]
     fn hall_calls_respect_building_boundaries() {
@@ -279,6 +322,10 @@ mod tests {
         let a = &app.runtime.car_states()[0];
         assert_eq!(a.position.floor_position, 7.0);
         assert_eq!(a.door, DoorState::Open);
+        assert_eq!(
+            app.calls.get(CallId::new(1)).map(|record| &record.state),
+            Some(&CallState::Assigned(CarId::new("A")))
+        );
         assert!(
             app.trace
                 .iter()
@@ -290,10 +337,28 @@ mod tests {
             SimRuntime::reference_two_car().car_states()
         );
         assert!(app.decision.is_none() && app.last_call.is_none());
+        assert!(app.calls.calls().next().is_none());
         assert_eq!(app.steps, 0);
         assert_eq!(app.trace.len(), 1);
         assert_eq!(app.selected_floor, Floor::new(7));
         assert!(app.recording.is_empty());
+    }
+
+    #[test]
+    fn active_duplicate_call_reuses_identity_without_resubmitting() {
+        let mut app = App::new();
+        app.paused = true;
+        app.call(Direction::Up);
+        let states = app.runtime.car_states();
+
+        let events = app.execute(Command::HallCall(HallCall {
+            floor: Floor::new(7),
+            direction: Direction::Up,
+        }));
+
+        assert!(events.contains(&SemanticEvent::CallDeduplicated(CallId::new(1))));
+        assert_eq!(app.calls.calls().count(), 1);
+        assert_eq!(app.runtime.car_states(), states);
     }
 
     #[test]

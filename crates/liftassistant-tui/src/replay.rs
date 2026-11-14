@@ -1,5 +1,5 @@
 //! Developer-only, in-memory simulator inputs; not a public elevator schema.
-use liftassistant_model::{CarId, HallCall, Intent, OperatingMode};
+use liftassistant_model::{CallId, CallState, CarId, HallCall, Intent, OperatingMode};
 use liftassistant_runtime::RuntimeEvent;
 
 use crate::app::App;
@@ -19,6 +19,9 @@ pub enum Command {
 pub enum SemanticEvent {
     HallCall(HallCall),
     InvalidCall,
+    CallRegistered(CallId),
+    CallDeduplicated(CallId),
+    CallStateChanged { id: CallId, state: CallState },
     NoEligibleCar,
     DispatchSelected(CarId),
     IntentGenerated(Intent),

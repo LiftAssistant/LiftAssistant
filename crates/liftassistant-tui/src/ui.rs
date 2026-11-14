@@ -8,7 +8,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
-use crate::app::{App, direction_name, intent_label};
+use crate::app::{App, call_state_label, direction_name, intent_label};
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -106,7 +106,27 @@ pub fn render(frame: &mut Frame, app: &App) {
         .decision
         .as_ref()
         .map_or_else(|| "-".into(), intent_label);
-    let visible = rows[2].height.saturating_sub(2) as usize;
+    let lower_columns =
+        Layout::horizontal([Constraint::Length(32), Constraint::Min(32)]).split(rows[2]);
+    let calls: Vec<Line> = app
+        .calls
+        .calls()
+        .map(|record| {
+            Line::from(format!(
+                "{} {} {}  {}",
+                record.id,
+                record.call.floor,
+                direction_name(record.call.direction),
+                call_state_label(&record.state)
+            ))
+        })
+        .collect();
+    frame.render_widget(
+        Paragraph::new(calls).block(panel("Calls")),
+        lower_columns[0],
+    );
+
+    let visible = lower_columns[1].height.saturating_sub(2) as usize;
     let trace: Vec<Line> = app
         .trace
         .iter()
@@ -114,8 +134,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         .map(|line| Line::from(line.as_str()))
         .collect();
     frame.render_widget(
-        Paragraph::new(trace).block(panel(&format!("Decision / Events | {last} -> {decision}"))),
-        rows[2],
+        Paragraph::new(trace).block(panel(&format!("Events | {last} -> {decision}"))),
+        lower_columns[1],
     );
     frame.render_widget(Paragraph::new(format!(
         "Selected: {} | 1F: UP only; 8F: DOWN only | rec={}\nUp/Down select | U/D call | Space pause/resume | . step (paused)\nA/B availability | P replay | R reset | Q/Esc quit", app.selected_floor, if app.recording_full { "FULL".into() } else { app.recording.len().to_string() }

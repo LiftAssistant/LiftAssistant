@@ -57,7 +57,7 @@ This is the primary M2 problem.
 
 ## M2.1 — Call identity and lifecycle
 
-**READY — next implementation slice.**
+**Implemented.**
 
 Introduce the smallest durable call model needed to represent active hall calls.
 
@@ -78,9 +78,19 @@ Requirements:
 - keep semantics deterministic;
 - do not introduce a generic workflow/state-machine framework.
 
+Implemented behavior:
+- deterministic `CallId` allocation starts at `#1` and is replay-stable;
+- Core owns a persistent `CallRegistry` with `Pending`, `Assigned(car)`, `Serving(car)`, and `Completed` states;
+- duplicate active floor+direction calls reuse the existing identity; a still-pending duplicate may retry assignment, while an assigned/serving duplicate is not resubmitted;
+- completed calls remain distinguishable and a later same floor+direction request receives a new identity;
+- the developer TUI observes Core call records and semantic call-state events;
+- current application integration advances a successfully submitted call through `Assigned`; runtime-feedback-driven `Serving`/`Completed` transitions remain M2.3 work.
+
+Targeted prior-art findings and the deliberate internal lifecycle divergence are recorded in `docs/PRIOR_ART.md`.
+
 ## M2.2 — Multiple pending calls
 
-After M2.1 works:
+**READY — next implementation slice.**
 
 - multiple hall calls may coexist;
 - one active trip must not be overwritten by a later call;

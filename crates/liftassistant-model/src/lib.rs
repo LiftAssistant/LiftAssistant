@@ -134,6 +134,46 @@ pub struct HallCall {
     pub direction: Direction,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct CallId(u64);
+
+impl CallId {
+    pub const fn new(sequence: u64) -> Self {
+        Self(sequence)
+    }
+
+    pub const fn sequence(self) -> u64 {
+        self.0
+    }
+}
+
+impl fmt::Display for CallId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "#{}", self.0)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CallState {
+    Pending,
+    Assigned(CarId),
+    Serving(CarId),
+    Completed,
+}
+
+impl CallState {
+    pub const fn is_active(&self) -> bool {
+        !matches!(self, Self::Completed)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallRecord {
+    pub id: CallId,
+    pub call: HallCall,
+    pub state: CallState,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Intent {
     ServeFloor { car: CarId, floor: Floor },

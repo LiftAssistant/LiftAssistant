@@ -2,7 +2,102 @@
 
 use std::collections::BTreeMap;
 
-use liftassistant_model::{Capabilities, CarId, CarState, HallCall, Intent, OperatingMode};
+use liftassistant_model::{
+    CallId, CallRecord, CallState, Capabilities, CarId, CarState, HallCall, Intent, OperatingMode,
+};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CallRegistration {
+    Created(CallId),
+    Duplicate(CallId),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CallRegistry {
+    next_id: u64,
+    calls: BTreeMap<CallId, CallRecord>,
+}
+
+impl CallRegistry {
+    pub fn new() -> Self {
+        Self {
+            next_id: 1,
+            calls: BTreeMap::new(),
+        }
+    }
+
+    pub fn register(&mut self, call: HallCall) -> CallRegistration {
+        if let Some(existing) = self
+            .calls
+            .values()
+            .find(|existing| existing.call == call && existing.state.is_active())
+        {
+            return CallRegistration::Duplicate(existing.id);
+        }
+
+        let id = CallId::new(self.next_id);
+        self.next_id = self
+            .next_id
+            .checked_add(1)
+            .expect("deterministic call ID space exhausted");
+        self.calls.insert(
+            id,
+            CallRecord {
+                id,
+                call,
+                state: CallState::Pending,
+            },
+        );
+        CallRegistration::Created(id)
+    }
+
+    pub fn get(&self, id: CallId) -> Option<&CallRecord> {
+        self.calls.get(&id)
+    }
+
+    pub fn calls(&self) -> impl Iterator<Item = &CallRecord> {
+        self.calls.values()
+    }
+
+    pub fn assign(&mut self, id: CallId, car: CarId) -> bool {
+        let Some(record) = self.calls.get_mut(&id) else {
+            return false;
+        };
+        if record.state != CallState::Pending {
+            return false;
+        }
+        record.state = CallState::Assigned(car);
+        true
+    }
+
+    pub fn mark_serving(&mut self, id: CallId, car: &CarId) -> bool {
+        let Some(record) = self.calls.get_mut(&id) else {
+            return false;
+        };
+        if record.state != CallState::Assigned(car.clone()) {
+            return false;
+        }
+        record.state = CallState::Serving(car.clone());
+        true
+    }
+
+    pub fn complete(&mut self, id: CallId, car: &CarId) -> bool {
+        let Some(record) = self.calls.get_mut(&id) else {
+            return false;
+        };
+        if record.state != CallState::Serving(car.clone()) {
+            return false;
+        }
+        record.state = CallState::Completed;
+        true
+    }
+}
+
+impl Default for CallRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 pub fn dispatch(
     call: &HallCall,
@@ -43,6 +138,54 @@ mod tests {
         cars.iter()
             .map(|car| (car.id.clone(), Capabilities::reference_defaults()))
             .collect()
+    }
+
+    #[test]
+    fn call_ids_are_deterministic_and_only_active_duplicates_are_reused() {
+        let call = HallCall {
+            floor: Floor::new(7),
+            direction: Direction::Up,
+        };
+        let mut registry = CallRegistry::new();
+
+        assert_eq!(
+            registry.register(call),
+            CallRegistration::Created(CallId::new(1))
+        );
+        assert_eq!(
+            registry.register(call),
+            CallRegistration::Duplicate(CallId::new(1))
+        );
+        assert!(registry.assign(CallId::new(1), CarId::new("A")));
+        assert!(registry.mark_serving(CallId::new(1), &CarId::new("A")));
+        assert!(registry.complete(CallId::new(1), &CarId::new("A")));
+        assert_eq!(
+            registry.get(CallId::new(1)).map(|record| &record.state),
+            Some(&CallState::Completed)
+        );
+        assert_eq!(
+            registry.register(call),
+            CallRegistration::Created(CallId::new(2))
+        );
+    }
+
+    #[test]
+    fn lifecycle_transitions_require_the_current_assignment() {
+        let mut registry = CallRegistry::new();
+        let CallRegistration::Created(id) = registry.register(HallCall {
+            floor: Floor::new(5),
+            direction: Direction::Down,
+        }) else {
+            panic!("first registration must create a call");
+        };
+
+        assert!(!registry.mark_serving(id, &CarId::new("A")));
+        assert!(registry.assign(id, CarId::new("A")));
+        assert!(!registry.mark_serving(id, &CarId::new("B")));
+        assert!(registry.mark_serving(id, &CarId::new("A")));
+        assert!(!registry.complete(id, &CarId::new("B")));
+        assert!(registry.complete(id, &CarId::new("A")));
+        assert!(!registry.assign(id, CarId::new("B")));
     }
 
     #[test]
