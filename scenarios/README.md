@@ -61,6 +61,20 @@ frames are released only when their explicit delays are covered. It also attempt
 changing state or interrupting later observations. The input is internal Rust data,
 not a file format or external protocol capture.
 
+## Recorded Open-RMF state mapping
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario rmf-recorded-read-only
+~~~
+
+This experiment uses in-memory fields from the official Open-RMF `LiftState`
+message. Explicit configuration maps `L1` through `L4` to LiftAssistant floors.
+Stable stopped/open at-floor and Fire mode observations map into the recorded runtime;
+the RMF session and source modes are retained. `DOOR_MOVING`, moving state without
+continuous position, stopped/closed state without exact-position evidence, and
+AGV/Human control modes are displayed as mapping errors instead of being guessed.
+No ROS node, network subscription, lift request, or file format is involved.
+
 ## Availability fallback
 
 From a reset, pause, toggle A OutOfService, and submit 7F UP. Dispatch selects B

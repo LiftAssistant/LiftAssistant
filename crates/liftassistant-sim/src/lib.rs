@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod recorded;
+mod rmf_recorded;
 
 use std::{collections::BTreeMap, time::Duration};
 
@@ -11,6 +12,7 @@ use liftassistant_model::{
 use liftassistant_runtime::{ElevatorRuntime, RuntimeError, RuntimeEvent};
 
 pub use recorded::{RecordedFrame, RecordedRuntime};
+pub use rmf_recorded::{MappedRmfLiftState, RmfLiftState, RmfMappingError, map_rmf_lift_state};
 
 #[derive(Debug)]
 struct SimCar {

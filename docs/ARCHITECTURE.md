@@ -66,7 +66,7 @@ A runtime may expose observed state, capabilities, semantic events, and acceptan
 - `liftassistant-model`: canonical domain types.
 - `liftassistant-core`: deterministic vendor-neutral semantic decisions/state transitions.
 - `liftassistant-runtime`: semantic execution contract and runtime events.
-- `liftassistant-sim`: deterministic active simulator plus native-semantic recorded/read-only research backend.
+- `liftassistant-sim`: deterministic active simulator, native-semantic recorded/read-only backend, and recorded external-state mapping experiments.
 - `liftassistant-tui`: developer UI and current composition root.
 
 These five packages remain sufficient for the current work. New packages require demonstrated ownership/lifecycle pressure, not speculative layering.

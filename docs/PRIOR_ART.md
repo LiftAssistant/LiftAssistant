@@ -153,3 +153,11 @@ LiftAssistant M2 needs only the demonstrated common denominator: a canonical ord
 BACnet elevator `Fault_Signals` and SAREF4LIFT `FaultSignal`/fault-state concepts represent observed lift or equipment fault conditions, while SAREF4LIFT models commands separately. Open-RMF likewise separates lift requests from reported lift state. A deliberately rejected simulator intent is therefore not evidence of a controller, drive, door, safety-chain, or other equipment fault.
 
 LiftAssistant keeps the M3 control as an explicit one-shot simulator-only intent rejection. It surfaces through the existing runtime submission error path, leaves Core call state pending for deterministic retry, and never produces a normalized equipment fault/alarm. The control and its developer trace event remain internal and reversible; they are not a public diagnostic schema or protocol mapping.
+
+## M4 recorded Open-RMF state-mapping finding
+
+The official Open-RMF `LiftState` message reports a lift name, string floor labels, current/destination floor, discrete door and motion states, available/current modes, and the session granted control. `DOOR_MOVING` does not distinguish opening from closing. `MOTION_UP`/`MOTION_DOWN` do not carry continuous position. `MODE_HUMAN`/`MODE_AGV` describe RMF interaction modes, while the same field also reports fire, offline, and emergency states.
+
+The first LiftAssistant experiment therefore requires an explicit string-label-to-`Floor` configuration and maps only semantically unambiguous recorded observations. A stopped state with an open door supplies enough evidence for the experiment's exact at-floor `Position`; fire service and offline state map directly, while source session and mode data remain attached. A closed door does not by itself confirm exact position. Moving doors, closed-door/unconfirmed position, moving/unknown motion without continuous position, Human/AGV control modes, unsupported modes, unadvertised floors, and unconfigured labels return structured mapping errors instead of fabricated state. The input remains an in-memory recording with no ROS dependency, live transport, request publication, or normative protocol schema.
+
+Official message source: https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg

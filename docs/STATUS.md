@@ -241,9 +241,29 @@ Validation: formatting, final all-target linting, 34 workspace tests, and the re
 
 ## M4.2 — Recorded external-state mapping experiment
 
+**Implemented with Open-RMF `LiftState`.**
+
+Implemented behavior:
+- the internal recorded input mirrors the relevant official Open-RMF `LiftState` fields without adding ROS/message dependencies;
+- every string floor label requires explicit configuration, and reported current/destination floors must also appear in `available_floors`;
+- lift name, stopped/open at-floor position, Fire/Offline mode, destination, available floors, source modes, and session identity are mapped/preserved;
+- `DOOR_MOVING` is rejected because LiftAssistant distinguishes Opening from Closing;
+- a closed door does not confirm the exact at-floor position required by `CarState`, so that complete-state mapping is rejected;
+- `MOTION_UP`/`MOTION_DOWN` are rejected because a string `current_floor` does not provide LiftAssistant's continuous position; `MOTION_UNKNOWN` is also rejected;
+- Human/AGV control modes are rejected rather than conflated with LiftAssistant operating modes; unsupported/unknown/emergency modes remain explicit errors;
+- mapped observations feed the existing recorded/read-only runtime, which still rejects every intent;
+- `cargo run -p liftassistant-tui -- --scenario rmf-recorded-read-only` verifies two identical mappings/playbacks, retained session context, final observed state, no-write behavior, and visible ambiguity errors;
+- no live ROS/network connection, request publication, hardware I/O, public protocol schema, or write path was introduced.
+
+Self-review evidence preserved: the first moving-state implementation mapped `MOTION_UP` plus `current_floor=L3` to an exact `3.0F` position. That fabricated precision was removed; moving states now fail mapping until a source provides continuous position or the canonical model explicitly represents qualitative position. The review then applied the same rule to stopped/closed states, which do not confirm exact at-floor position; the accepted fixture is stopped/open. A subsequent focused build also exposed and removed one unused import.
+
+Validation: formatting, all-target linting, 39 workspace tests, and the real Open-RMF recorded/read-only command passed.
+
+## M4 review checkpoint
+
 **READY.**
 
-Use one official, public, read-only elevator-state representation as a concrete recorded input and map only unambiguous observations into LiftAssistant semantics. Preserve or reject ambiguous fields instead of guessing, keep the fixture in memory, and do not add live middleware/network dependencies or any command path.
+Review the native recording and Open-RMF mapping experiments together. Decide whether the demonstrated external uncertainty warrants a small canonical observation refinement, or whether further adapters should continue rejecting incomplete state. Do not freeze a public schema or add live transport without HUMAN-REVIEW where applicable.
 
 ## Explicit non-goals in completed M2/M3 and current M4 work
 

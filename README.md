@@ -64,6 +64,14 @@ cargo run -p liftassistant-tui -- --scenario recorded-read-only-observation
 
 This scenario replays native semantic observations at explicit elapsed times and proves that the backend rejects every submitted intent without disturbing playback. It performs no protocol, network, device, or hardware I/O.
 
+Inspect the recorded Open-RMF state-mapping boundary:
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario rmf-recorded-read-only
+~~~
+
+The experiment maps only unambiguous recorded `LiftState` fields, retains source session/mode context, and reports ambiguous door, motion, and control-mode semantics as errors. It does not connect to ROS or send lift requests.
+
 Controls:
 
 - Up/Down select a floor; U/D create an UP/DOWN hall call.

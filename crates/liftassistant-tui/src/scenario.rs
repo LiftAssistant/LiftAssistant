@@ -1,13 +1,16 @@
 //! Executable developer scenarios; internal and intentionally not a public file format.
 
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_model::{
     BuildingTopology, CallId, CallState, Capabilities, CarId, CarState, Direction, DoorState,
     Floor, HallCall, Intent, MotionState, OperatingMode, Position,
 };
 use liftassistant_runtime::{ElevatorRuntime, RuntimeEvent};
-use liftassistant_sim::{RecordedFrame, RecordedRuntime};
+use liftassistant_sim::{
+    MappedRmfLiftState, RecordedFrame, RecordedRuntime, RmfLiftState, RmfMappingError,
+    map_rmf_lift_state,
+};
 
 use crate::{
     app::{call_state_label, direction_name, event_label},
@@ -17,13 +20,20 @@ use crate::{
 pub const REFERENCE_SCENARIO: &str = "m2-call-lifecycle";
 pub const REJECTION_SCENARIO: &str = "intent-rejection-recovery";
 pub const RECORDED_SCENARIO: &str = "recorded-read-only-observation";
-pub const SCENARIOS: [&str; 3] = [REFERENCE_SCENARIO, REJECTION_SCENARIO, RECORDED_SCENARIO];
+pub const RMF_RECORDED_SCENARIO: &str = "rmf-recorded-read-only";
+pub const SCENARIOS: [&str; 4] = [
+    REFERENCE_SCENARIO,
+    REJECTION_SCENARIO,
+    RECORDED_SCENARIO,
+    RMF_RECORDED_SCENARIO,
+];
 
 pub fn run(name: &str) -> Result<String, String> {
     match name {
         REFERENCE_SCENARIO => run_reference_scenario(),
         REJECTION_SCENARIO => run_rejection_scenario(),
         RECORDED_SCENARIO => run_recorded_scenario(),
+        RMF_RECORDED_SCENARIO => run_rmf_recorded_scenario(),
         _ => Err(format!(
             "unknown scenario {name:?}; available scenarios: {}",
             SCENARIOS.join(", ")
@@ -45,6 +55,18 @@ struct RecordedPlayback {
     capabilities: Capabilities,
     batches: Vec<RecordedBatch>,
     remaining_frames: usize,
+}
+
+#[derive(Debug, PartialEq)]
+struct RmfRecordedExperiment {
+    initial: MappedRmfLiftState,
+    final_observation: MappedRmfLiftState,
+    write_error: String,
+    ambiguous_door_error: RmfMappingError,
+    motion_error: RmfMappingError,
+    control_mode_error: RmfMappingError,
+    emitted: Vec<RuntimeEvent>,
+    final_states: Vec<CarState>,
 }
 
 fn run_reference_scenario() -> Result<String, String> {
@@ -83,6 +105,16 @@ fn run_recorded_scenario() -> Result<String, String> {
     }
     verify_recorded_outcome(&first)?;
     Ok(render_recorded_report(&first))
+}
+
+fn run_rmf_recorded_scenario() -> Result<String, String> {
+    let first = run_rmf_experiment()?;
+    let second = run_rmf_experiment()?;
+    if first != second {
+        return Err("Open-RMF recorded mapping produced different results on replay".into());
+    }
+    verify_rmf_experiment(&first)?;
+    Ok(render_rmf_report(&first))
 }
 
 fn reference_commands() -> Vec<Command> {
@@ -191,6 +223,91 @@ fn recorded_runtime() -> Result<RecordedRuntime, String> {
         ],
     )
     .map_err(|error| error.to_string())
+}
+
+fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
+    let labels = rmf_floor_labels();
+    let initial_source = rmf_source_state();
+    let initial =
+        map_rmf_lift_state(&initial_source, &labels).map_err(|error| error.to_string())?;
+    let mut final_source = initial_source.clone();
+    final_source.current_floor = "L4".into();
+    final_source.destination_floor.clear();
+    final_source.door_state = RmfLiftState::DOOR_OPEN;
+    final_source.motion_state = RmfLiftState::MOTION_STOPPED;
+    let final_observation =
+        map_rmf_lift_state(&final_source, &labels).map_err(|error| error.to_string())?;
+
+    let mut ambiguous_door = initial_source.clone();
+    ambiguous_door.door_state = RmfLiftState::DOOR_MOVING;
+    let ambiguous_door_error = match map_rmf_lift_state(&ambiguous_door, &labels) {
+        Ok(_) => return Err("Open-RMF DOOR_MOVING was guessed instead of rejected".into()),
+        Err(error) => error,
+    };
+    let mut control_mode = initial_source;
+    let mut moving = control_mode.clone();
+    moving.motion_state = RmfLiftState::MOTION_UP;
+    let motion_error = match map_rmf_lift_state(&moving, &labels) {
+        Ok(_) => return Err("Open-RMF moving state was given fabricated precision".into()),
+        Err(error) => error,
+    };
+    control_mode.current_mode = RmfLiftState::MODE_AGV;
+    let control_mode_error = match map_rmf_lift_state(&control_mode, &labels) {
+        Ok(_) => return Err("Open-RMF AGV control mode was guessed instead of rejected".into()),
+        Err(error) => error,
+    };
+
+    let mut runtime = RecordedRuntime::new(
+        [initial.car_state.clone()],
+        [RecordedFrame::after(
+            Duration::from_millis(500),
+            vec![RuntimeEvent::PositionChanged(
+                final_observation.car_state.clone(),
+            )],
+        )],
+    )
+    .map_err(|error| error.to_string())?;
+    let write_error = match runtime.submit_intent(Intent::ServeFloor {
+        car: initial.car_state.id.clone(),
+        floor: Floor::new(1),
+    }) {
+        Ok(()) => return Err("recorded Open-RMF experiment accepted an intent".into()),
+        Err(error) => error.to_string(),
+    };
+    let emitted = runtime.tick(Duration::from_millis(500));
+    let final_states = runtime.car_states();
+
+    Ok(RmfRecordedExperiment {
+        initial,
+        final_observation,
+        write_error,
+        ambiguous_door_error,
+        motion_error,
+        control_mode_error,
+        emitted,
+        final_states,
+    })
+}
+
+fn rmf_floor_labels() -> BTreeMap<String, Floor> {
+    [("L1", 1), ("L2", 2), ("L3", 3), ("L4", 4)]
+        .into_iter()
+        .map(|(label, floor)| (label.to_owned(), Floor::new(floor)))
+        .collect()
+}
+
+fn rmf_source_state() -> RmfLiftState {
+    RmfLiftState {
+        lift_name: "lift-A".into(),
+        available_floors: vec!["L1".into(), "L2".into(), "L3".into(), "L4".into()],
+        current_floor: "L3".into(),
+        destination_floor: "L4".into(),
+        door_state: RmfLiftState::DOOR_OPEN,
+        motion_state: RmfLiftState::MOTION_STOPPED,
+        available_modes: vec![RmfLiftState::MODE_HUMAN, RmfLiftState::MODE_FIRE],
+        current_mode: RmfLiftState::MODE_FIRE,
+        session_id: "recorded-session".into(),
+    }
 }
 
 fn verify_determinism(first: &Replay, second: &Replay) -> Result<(), String> {
@@ -383,6 +500,39 @@ fn verify_recorded_outcome(playback: &RecordedPlayback) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_rmf_experiment(experiment: &RmfRecordedExperiment) -> Result<(), String> {
+    if experiment.initial.car_state.id != CarId::new("lift-A")
+        || experiment.initial.car_state.position != Position::at_floor(Floor::new(3))
+        || experiment.initial.car_state.motion != MotionState::Stopped
+        || experiment.initial.car_state.door != DoorState::Open
+        || experiment.initial.car_state.mode != OperatingMode::FireService
+        || experiment.initial.car_state.target != Some(Floor::new(4))
+        || experiment.initial.source_session_id != "recorded-session"
+        || experiment.initial.topology.served_floors()
+            != [Floor::new(1), Floor::new(2), Floor::new(3), Floor::new(4)]
+    {
+        return Err("unambiguous Open-RMF fields did not map as expected".into());
+    }
+    if experiment.ambiguous_door_error != RmfMappingError::AmbiguousDoorMoving
+        || experiment.motion_error
+            != RmfMappingError::MotionLacksContinuousPosition(RmfLiftState::MOTION_UP)
+        || experiment.control_mode_error
+            != RmfMappingError::ControlModeIsNotOperatingMode(RmfLiftState::MODE_AGV)
+    {
+        return Err("ambiguous Open-RMF fields were not rejected explicitly".into());
+    }
+    if experiment.write_error != "recorded runtime is read-only and rejects all intents"
+        || experiment.emitted
+            != [RuntimeEvent::PositionChanged(
+                experiment.final_observation.car_state.clone(),
+            )]
+        || experiment.final_states != [experiment.final_observation.car_state.clone()]
+    {
+        return Err("mapped Open-RMF recording did not preserve the no-write playback path".into());
+    }
+    Ok(())
+}
+
 fn render_report(name: &str, outcome: &str, commands: &[Command], replay: &Replay) -> String {
     let mut lines = vec![
         format!("scenario: {name}"),
@@ -465,6 +615,47 @@ fn render_recorded_report(playback: &RecordedPlayback) -> String {
     lines.join("\n")
 }
 
+fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
+    let initial = &experiment.initial.car_state;
+    let final_state = &experiment.final_observation.car_state;
+    [
+        format!("scenario: {RMF_RECORDED_SCENARIO}"),
+        "source: recorded Open-RMF LiftState fields; no ROS or network connection".into(),
+        "determinism: PASS (2 identical mappings and playbacks)".into(),
+        format!("write boundary: PASS ({})", experiment.write_error),
+        format!(
+            "mapped initial: {} position={} motion={:?} door={:?} mode={:?} target={} session={}",
+            initial.id,
+            initial.position.nearest_floor,
+            initial.motion,
+            initial.door,
+            initial.mode,
+            initial
+                .target
+                .map_or_else(|| "-".into(), |floor| floor.to_string()),
+            experiment.initial.source_session_id
+        ),
+        format!(
+            "mapped final: {} position={} motion={:?} door={:?} mode={:?} target=-",
+            final_state.id,
+            final_state.position.nearest_floor,
+            final_state.motion,
+            final_state.door,
+            final_state.mode
+        ),
+        format!(
+            "rejected ambiguous door: {}",
+            experiment.ambiguous_door_error
+        ),
+        format!("rejected imprecise motion: {}", experiment.motion_error),
+        format!("rejected control mode: {}", experiment.control_mode_error),
+        "outcome: PASS (unambiguous observations mapped; ambiguous semantics preserved as errors)"
+            .into(),
+        String::new(),
+    ]
+    .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -508,6 +699,26 @@ mod tests {
         assert!(report.contains("[0999 ms] no events"));
         assert!(report.contains("[1000 ms] Arrived A at 4F"));
         assert!(report.contains("state A position=4.00F motion=Stopped door=Open target=-"));
+    }
+
+    #[test]
+    fn rmf_recorded_scenario_maps_only_unambiguous_read_only_state() {
+        let report = run(RMF_RECORDED_SCENARIO).expect("recorded RMF scenario should pass");
+
+        assert!(report.contains("determinism: PASS (2 identical mappings and playbacks)"));
+        assert!(report.contains("mapped initial: lift-A position=3F motion=Stopped door=Open"));
+        assert!(report.contains("mode=FireService target=4F session=recorded-session"));
+        assert!(report.contains("mapped final: lift-A position=4F motion=Stopped door=Open"));
+        assert!(report.contains(
+            "rejected ambiguous door: Open-RMF DOOR_MOVING does not distinguish opening from closing"
+        ));
+        assert!(report.contains(
+            "rejected imprecise motion: Open-RMF motion_state 1 has no continuous position to map"
+        ));
+        assert!(report.contains(
+            "rejected control mode: Open-RMF control mode 2 is not a LiftAssistant operating mode"
+        ));
+        assert!(report.contains("ambiguous semantics preserved as errors"));
     }
 
     #[test]
