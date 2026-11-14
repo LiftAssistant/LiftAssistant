@@ -37,6 +37,7 @@ It is not primarily a new elevator brand and not merely a monitoring dashboard.
 10. Existing standards are inputs: CiA 417, BACnet, SAREF4LIFT, T/GSET 001-2025, Open-RMF/RFA, THOR/NeXt, and other relevant work.
 11. Adoption can be layered: observe, diagnostics, policy/group semantics, adapters, later native runtime where appropriate.
 12. Avoid premature application/service/plugin layers; extract them only when demonstrated by real callers.
+13. Before introducing or freezing durable domain semantics, protocol mappings, capability/diagnostic models, or external interfaces, review relevant established standards/mature implementations and document meaningful divergences.
 
 ## Agent workflow decisions
 
@@ -46,6 +47,7 @@ It is not primarily a new elevator brand and not merely a monitoring dashboard.
 - A HUMAN_PENDING item blocks only dependent work; independent READY work continues.
 - Green CI is a gate, not a milestone.
 - Tests primarily protect implemented behavior and concrete regressions.
+- Prior-art research is targeted and implementation-serving: enough to avoid reinvention, then return to a working vertical slice.
 - `agent.md` is a generic compatibility/navigation pointer only and must not fork the authoritative rules.
 - Project context should remain tool-agnostic and live in repository documentation rather than vendor-specific agent files.
 - Intended GitHub commit identity is the project owner's primary account `Axiaobo7788`, not alternate account `xiaobo-kipfel`.

@@ -71,6 +71,7 @@ Pending
 ~~~
 
 Requirements:
+- perform a targeted prior-art check using `docs/PRIOR_ART.md` before finalizing lifecycle terminology;
 - calls have stable identity;
 - duplicate active floor+direction calls are not multiplied unnecessarily;
 - lifecycle state is observable;
@@ -136,5 +137,6 @@ Any safety/authority-model change remains HUMAN-REVIEW.
 
 - `AGENTS.md` is the single authoritative agent guide.
 - `agent.md` is a generic compatibility/navigation pointer only.
+- `docs/PRIOR_ART.md` defines when external research is required and which established references to check.
 - Project state is carried by repository documentation, not by vendor-specific agent files.
 - Git commits should use the intended owner identity `Axiaobo7788`.

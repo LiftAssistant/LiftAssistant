@@ -81,6 +81,19 @@ A UI/event loop may use wall-clock time to decide when to request the next step,
 
 M2 call lifecycle and assignment must preserve the same determinism property.
 
+## Semantic design method
+
+Before introducing durable domain semantics or reusable external boundaries:
+
+1. inspect current implemented behavior;
+2. review the relevant established standard/project concepts listed in `docs/PRIOR_ART.md`;
+3. reuse compatible terminology where it improves interoperability;
+4. keep deliberate divergences explicit;
+5. implement the smallest reversible internal model first;
+6. require HUMAN-REVIEW before freezing normative public semantics.
+
+Existing standards are inputs and constraints, not a requirement to copy any one architecture wholesale.
+
 ## Call semantics direction
 
 Current M1 behavior is one-shot and may replace a car target.

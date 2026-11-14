@@ -80,6 +80,7 @@ docs/
   STATUS.md                current milestone / READY work / blockers
   ROADMAP.md               milestone sequence / future scope
   ARCHITECTURE.md          architecture and safety boundaries
+  PRIOR_ART.md             research triggers / standards-project index
 
 scenarios/                 simulator/replay assets as real needs emerge
 spec/                      future language-independent public semantics
@@ -98,7 +99,7 @@ Do not add more crates merely to represent hypothetical future layers. Extract a
 7. No real passenger-elevator control in early milestones.
 8. Working vertical slices come before framework expansion.
 
-See [AGENTS.md](AGENTS.md), [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md), [docs/STATUS.md](docs/STATUS.md), [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+See [AGENTS.md](AGENTS.md), [docs/PROJECT_MEMORY.md](docs/PROJECT_MEMORY.md), [docs/STATUS.md](docs/STATUS.md), [docs/ROADMAP.md](docs/ROADMAP.md), [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), and [docs/PRIOR_ART.md](docs/PRIOR_ART.md).
 
 ## License
 

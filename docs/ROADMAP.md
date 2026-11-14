@@ -28,6 +28,8 @@ M1 acceptance was confirmed by automated checks and hands-on TUI use.
 
 Goal: evolve from one-shot dispatch into persistent, observable elevator-call semantics.
 
+For new M2 semantics, use targeted prior-art research from `docs/PRIOR_ART.md` before finalizing terminology or reusable boundaries. Research should inform the next vertical slice, not replace implementation.
+
 ### M2.1 — Call identity and lifecycle
 - stable call identity;
 - Pending -> Assigned -> Serving -> Completed;
@@ -95,4 +97,5 @@ Only after stable enough semantics:
 - LiftAssistant expresses WHAT, validated lower systems decide HOW;
 - simulation/replay before real hardware;
 - working vertical slices before infrastructure expansion;
-- no premature microservices, plugin marketplace, database, or large policy DSL.
+- no premature microservices, plugin marketplace, database, or large policy DSL;
+- research existing standards/projects before inventing durable semantics, but do not turn research into a milestone by itself.

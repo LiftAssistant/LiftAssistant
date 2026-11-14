@@ -11,8 +11,9 @@ Before substantial work, read in this order:
 3. `docs/STATUS.md` — current milestone, completed work, READY work, blockers.
 4. `docs/ROADMAP.md` — milestone ordering and future scope.
 5. `docs/ARCHITECTURE.md` — architecture and safety boundaries.
-6. This file — agent execution rules.
-7. Relevant code/tests before changing behavior.
+6. `docs/PRIOR_ART.md` — research triggers and established references.
+7. This file — agent execution rules.
+8. Relevant code/tests before changing behavior.
 
 If these files disagree, do not silently pick a convenient version. Prefer implemented behavior for factual current-state claims, then reconcile the documentation as part of the task.
 
@@ -50,6 +51,20 @@ Unless a HUMAN-REVIEW boundary is crossed:
 11. Re-evaluate the project state and continue with the next independent READY item.
 
 Prefer working behavior over speculative framework construction.
+
+### Prior-art gate
+
+Before introducing or materially changing domain semantics, capability models, normalized diagnostics, protocol mappings, external/public interfaces, or reusable adapter/runtime semantics:
+
+1. Read `docs/PRIOR_ART.md`.
+2. Review the most relevant official standard/project sources.
+3. Identify reusable terminology/concepts and any deliberate LiftAssistant divergence.
+4. Keep the research scoped to the next vertical slice.
+5. Implement and validate rather than turning research into an end in itself.
+
+Clear bug fixes, semantic-preserving refactors, formatting, and already-approved small implementation work do not require a fresh research pass.
+
+If research suggests freezing/changing a normative public schema or safety/authority semantics, enter HUMAN-REVIEW. Otherwise continue SELF-ITERATION.
 
 ### HUMAN_PENDING is not a global stop
 
@@ -190,6 +205,7 @@ Do not treat these commands as the work itself.
 - `docs/STATUS.md`: current progress, current milestone, READY/HUMAN_PENDING/blockers.
 - `docs/ROADMAP.md`: milestone sequence and future scope.
 - `docs/ARCHITECTURE.md`: architecture/safety boundaries and current component responsibilities.
+- `docs/PRIOR_ART.md`: research triggers, source hierarchy, and maintained prior-art index.
 - `README.md`: human-facing project overview and runnable entry points.
 - `CONTRIBUTING.md`: contributor-facing workflow/safety summary.
 
