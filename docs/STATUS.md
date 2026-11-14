@@ -51,7 +51,7 @@ HallCall
   -> runtime target
 ~~~
 
-M2.1 through M2.3 now provide persistent call identity/lifecycle, multiple pending calls without target replacement, and runtime-feedback-driven serving/completion/reassignment. Structured dispatch diagnostics are the next semantic-core gap.
+M2.1 through M2.4 now provide persistent call identity/lifecycle, multiple pending calls without target replacement, runtime-feedback-driven serving/completion/reassignment, and structured dispatch explanations. Focused capability/configuration refinement is the next semantic-core gap.
 
 This is the primary M2 problem.
 
@@ -130,7 +130,7 @@ Implemented behavior:
 
 ## M2.4 — Decision reasons / diagnostics
 
-**READY — next implementation slice.**
+**Implemented.**
 
 Evolve opaque `Option<Intent>`-style outcomes toward structured, explainable decisions without building a policy DSL.
 
@@ -141,7 +141,18 @@ Useful diagnostics include:
 - deterministic distance/tie-break information;
 - no-eligible-car reason.
 
+Implemented behavior:
+- Core returns a structured `DispatchDecision` rather than an opaque `Option<Intent>`;
+- every car is reported in deterministic ID order with mode, semantic/runtime busy status, serve-floor capability availability, and distance;
+- rejection reasons distinguish non-Normal mode, Busy, unavailable capabilities, and unsupported ServeFloor;
+- successful selection identifies `OnlyEligible`, `Nearest`, or deterministic `CarIdTieBreak` basis;
+- semantically occupied cars remain visible as rejected candidates instead of being filtered before evaluation;
+- TUI trace and replay expose the structured candidate/selection results with their `CallId`;
+- these explanations are intentionally distinct from equipment fault/alarm diagnostics, as recorded in `docs/PRIOR_ART.md`.
+
 ## M2.5 — Capability/configuration refinement
+
+**READY — next implementation slice.**
 
 Only after the lifecycle path is working:
 - reduce TUI-only hard-coded semantic assumptions where there is a demonstrated need;

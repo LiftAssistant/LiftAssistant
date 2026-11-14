@@ -135,3 +135,9 @@ M2 remains internal/reversible unless a public normative schema is being frozen.
 Targeted review for M2.1 found that BACnet represents landing calls as currently active group-level calls and separately exposes calls assigned to a lift; CiA 417 treats call control as a distinct functional element; SAREF4LIFT primarily supplies lift/device/state/command vocabulary rather than a request lifecycle; and Open-RMF uses requester-provided session identity for a robot's lift session rather than identity for each landing call.
 
 LiftAssistant therefore uses deterministic per-call identity and the internal lifecycle `Pending -> Assigned(car) -> Serving(car) -> Completed`. This deliberately models persistent orchestration state above a runtime, rather than copying a transport object, ontology shape, or requester session. The terminology remains an internal, reversible implementation decision; it is not a frozen public schema.
+
+## M2 dispatch-explanation finding
+
+CiA 417 diagnostic objects, BACnet lift fault/status/mode properties, and SAREF4LIFT fault/state concepts describe device or protocol observations. Open-RMF likewise keeps lift requests separate from reported lift state. A car being busy, outside Normal mode, missing a capability, or losing a deterministic distance tie-break is an orchestration decision explanation, not necessarily a lift fault or alarm.
+
+LiftAssistant therefore keeps M2 dispatch explanations separate from normalized equipment diagnostics: candidate mode, busy status, capability availability, distance, rejection reasons, and `OnlyEligible`/`Nearest`/`CarIdTieBreak` selection basis. This remains an internal, reversible Core result rather than a standards mapping or policy DSL.

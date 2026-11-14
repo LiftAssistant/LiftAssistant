@@ -1,6 +1,10 @@
 //! Developer-only, in-memory simulator inputs; not a public elevator schema.
+use liftassistant_core::{DispatchCandidate, DispatchSelection};
 use liftassistant_model::{CallId, CallState, CarId, HallCall, Intent, OperatingMode};
 use liftassistant_runtime::RuntimeEvent;
+
+#[cfg(test)]
+use liftassistant_core::{DispatchRejection, DispatchSelectionReason};
 
 use crate::app::App;
 
@@ -21,11 +25,27 @@ pub enum SemanticEvent {
     InvalidCall,
     CallRegistered(CallId),
     CallDeduplicated(CallId),
-    CallStateChanged { id: CallId, state: CallState },
+    CallStateChanged {
+        id: CallId,
+        state: CallState,
+    },
+    DispatchCandidate {
+        id: CallId,
+        candidate: DispatchCandidate,
+    },
     NoEligibleCar(CallId),
-    DispatchSelected { id: CallId, car: CarId },
-    IntentGenerated { id: CallId, intent: Intent },
-    ModeChanged { car: CarId, mode: OperatingMode },
+    DispatchSelected {
+        id: CallId,
+        selection: DispatchSelection,
+    },
+    IntentGenerated {
+        id: CallId,
+        intent: Intent,
+    },
+    ModeChanged {
+        car: CarId,
+        mode: OperatingMode,
+    },
     RuntimeError(String),
     Runtime(RuntimeEvent),
 }
@@ -66,7 +86,11 @@ mod tests {
         );
         assert!(first.events.contains(&SemanticEvent::DispatchSelected {
             id: CallId::new(1),
-            car: CarId::new("A"),
+            selection: DispatchSelection {
+                car: CarId::new("A"),
+                distance_floors: 4.0,
+                reason: DispatchSelectionReason::Nearest,
+            },
         }));
         assert!(
             first
@@ -219,8 +243,25 @@ mod tests {
         }));
         assert!(lifecycle_events.contains(&SemanticEvent::DispatchSelected {
             id: CallId::new(3),
-            car: CarId::new("A"),
+            selection: DispatchSelection {
+                car: CarId::new("A"),
+                distance_floors: 5.0,
+                reason: DispatchSelectionReason::OnlyEligible,
+            },
         }));
+        assert!(
+            lifecycle_events.contains(&SemanticEvent::DispatchCandidate {
+                id: CallId::new(3),
+                candidate: DispatchCandidate {
+                    car: CarId::new("B"),
+                    mode: OperatingMode::Normal,
+                    busy: true,
+                    serve_floor: Some(true),
+                    distance_floors: 3.0,
+                    rejections: vec![DispatchRejection::Busy],
+                },
+            })
+        );
 
         for _ in 0..7 {
             app.execute(Command::Step);
@@ -272,7 +313,11 @@ mod availability_tests {
         }));
         assert!(first.events.contains(&SemanticEvent::DispatchSelected {
             id: CallId::new(1),
-            car: CarId::new("B"),
+            selection: DispatchSelection {
+                car: CarId::new("B"),
+                distance_floors: 6.0,
+                reason: DispatchSelectionReason::OnlyEligible,
+            },
         }));
         assert!(first.events.contains(&SemanticEvent::IntentGenerated {
             id: CallId::new(1),

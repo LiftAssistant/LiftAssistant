@@ -97,13 +97,14 @@ impl CallRegistry {
         self.complete(id, car).then_some(id)
     }
 
-    pub fn car_is_occupied(&self, car: &CarId) -> bool {
-        self.calls.values().any(|record| {
-            matches!(
-                &record.state,
-                CallState::Assigned(assigned) | CallState::Serving(assigned) if assigned == car
-            )
-        })
+    pub fn occupied_cars(&self) -> BTreeSet<CarId> {
+        self.calls
+            .values()
+            .filter_map(|record| match &record.state {
+                CallState::Assigned(car) | CallState::Serving(car) => Some(car.clone()),
+                CallState::Pending | CallState::Completed => None,
+            })
+            .collect()
     }
 
     pub fn assign(&mut self, id: CallId, car: CarId) -> bool {
@@ -147,35 +148,130 @@ impl Default for CallRegistry {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DispatchRejection {
+    Mode(OperatingMode),
+    Busy,
+    CapabilitiesUnavailable,
+    ServeFloorUnsupported,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DispatchCandidate {
+    pub car: CarId,
+    pub mode: OperatingMode,
+    pub busy: bool,
+    pub serve_floor: Option<bool>,
+    pub distance_floors: f64,
+    pub rejections: Vec<DispatchRejection>,
+}
+
+impl DispatchCandidate {
+    pub fn is_eligible(&self) -> bool {
+        self.rejections.is_empty()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DispatchSelectionReason {
+    OnlyEligible,
+    Nearest,
+    CarIdTieBreak,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DispatchSelection {
+    pub car: CarId,
+    pub distance_floors: f64,
+    pub reason: DispatchSelectionReason,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DispatchDecision {
+    pub candidates: Vec<DispatchCandidate>,
+    pub selection: Option<DispatchSelection>,
+    pub intent: Option<Intent>,
+}
+
 pub fn dispatch(
     call: &HallCall,
     cars: &[CarState],
     capabilities: &BTreeMap<CarId, Capabilities>,
-) -> Option<Intent> {
-    let car = cars
+    occupied_cars: &BTreeSet<CarId>,
+) -> DispatchDecision {
+    let mut candidates: Vec<_> = cars
         .iter()
-        .filter(|car| car.mode == OperatingMode::Normal)
-        .filter(|car| car.target.is_none())
-        .filter(|car| {
-            capabilities
-                .get(&car.id)
-                .is_some_and(|caps| caps.serve_floor)
+        .map(|car| {
+            let mut rejections = Vec::new();
+            if car.mode != OperatingMode::Normal {
+                rejections.push(DispatchRejection::Mode(car.mode));
+            }
+            let busy = car.target.is_some() || occupied_cars.contains(&car.id);
+            if busy {
+                rejections.push(DispatchRejection::Busy);
+            }
+            let serve_floor = capabilities.get(&car.id).map(|caps| caps.serve_floor);
+            match serve_floor {
+                None => rejections.push(DispatchRejection::CapabilitiesUnavailable),
+                Some(false) => rejections.push(DispatchRejection::ServeFloorUnsupported),
+                Some(true) => {}
+            }
+            DispatchCandidate {
+                car: car.id.clone(),
+                mode: car.mode,
+                busy,
+                serve_floor,
+                distance_floors: (car.position.floor_position - f64::from(call.floor.index()))
+                    .abs(),
+                rejections,
+            }
         })
-        .min_by(|left, right| {
-            let left_distance =
-                (left.position.floor_position - f64::from(call.floor.index())).abs();
-            let right_distance =
-                (right.position.floor_position - f64::from(call.floor.index())).abs();
+        .collect();
+    candidates.sort_by(|left, right| left.car.cmp(&right.car));
 
-            left_distance
-                .total_cmp(&right_distance)
-                .then_with(|| left.id.cmp(&right.id))
-        })?;
-
-    Some(Intent::ServeFloor {
-        car: car.id.clone(),
+    let eligible: Vec<_> = candidates
+        .iter()
+        .filter(|candidate| candidate.is_eligible())
+        .collect();
+    let selected = eligible.iter().copied().min_by(|left, right| {
+        left.distance_floors
+            .total_cmp(&right.distance_floors)
+            .then_with(|| left.car.cmp(&right.car))
+    });
+    let selection = selected.map(|selected| {
+        let reason = if eligible.len() == 1 {
+            DispatchSelectionReason::OnlyEligible
+        } else if eligible
+            .iter()
+            .filter(|candidate| {
+                candidate
+                    .distance_floors
+                    .total_cmp(&selected.distance_floors)
+                    .is_eq()
+            })
+            .count()
+            > 1
+        {
+            DispatchSelectionReason::CarIdTieBreak
+        } else {
+            DispatchSelectionReason::Nearest
+        };
+        DispatchSelection {
+            car: selected.car.clone(),
+            distance_floors: selected.distance_floors,
+            reason,
+        }
+    });
+    let intent = selection.as_ref().map(|selection| Intent::ServeFloor {
+        car: selection.car.clone(),
         floor: call.floor,
-    })
+    });
+
+    DispatchDecision {
+        candidates,
+        selection,
+        intent,
+    }
 }
 
 #[cfg(test)]
@@ -270,14 +366,28 @@ mod tests {
             direction: Direction::Down,
         };
 
-        let decision = dispatch(&call, &cars, &capabilities(&cars));
+        let decision = dispatch(&call, &cars, &capabilities(&cars), &BTreeSet::new());
 
         assert_eq!(
-            decision,
+            decision.intent,
             Some(Intent::ServeFloor {
                 car: CarId::new("A"),
                 floor: Floor::new(8),
             })
+        );
+        assert_eq!(
+            decision.selection,
+            Some(DispatchSelection {
+                car: CarId::new("A"),
+                distance_floors: 5.0,
+                reason: DispatchSelectionReason::Nearest,
+            })
+        );
+        assert!(
+            decision
+                .candidates
+                .iter()
+                .all(|candidate| candidate.is_eligible())
         );
     }
 
@@ -291,14 +401,22 @@ mod tests {
             direction: Direction::Down,
         };
 
-        let decision = dispatch(&call, &cars, &capabilities(&cars));
+        let decision = dispatch(&call, &cars, &capabilities(&cars), &BTreeSet::new());
 
         assert_eq!(
-            decision,
+            decision.intent,
             Some(Intent::ServeFloor {
                 car: CarId::new("B"),
                 floor: Floor::new(8),
             })
+        );
+        assert_eq!(
+            decision.selection.map(|selection| selection.reason),
+            Some(DispatchSelectionReason::OnlyEligible)
+        );
+        assert_eq!(
+            decision.candidates[0].rejections,
+            vec![DispatchRejection::Mode(OperatingMode::OutOfService)]
         );
     }
 
@@ -312,14 +430,72 @@ mod tests {
             direction: Direction::Up,
         };
 
-        let decision = dispatch(&call, &cars, &capabilities(&cars));
+        let decision = dispatch(&call, &cars, &capabilities(&cars), &BTreeSet::new());
 
         assert_eq!(
-            decision,
+            decision.intent,
             Some(Intent::ServeFloor {
                 car: CarId::new("B"),
                 floor: Floor::new(7),
             })
+        );
+        assert_eq!(
+            decision.candidates[0].rejections,
+            vec![DispatchRejection::Busy]
+        );
+    }
+
+    #[test]
+    fn car_id_breaks_an_equal_distance_tie_and_is_explained() {
+        let cars = vec![
+            CarState::new("B", Floor::new(5)),
+            CarState::new("A", Floor::new(3)),
+        ];
+        let call = HallCall {
+            floor: Floor::new(4),
+            direction: Direction::Up,
+        };
+
+        let decision = dispatch(&call, &cars, &capabilities(&cars), &BTreeSet::new());
+
+        assert_eq!(
+            decision.selection,
+            Some(DispatchSelection {
+                car: CarId::new("A"),
+                distance_floors: 1.0,
+                reason: DispatchSelectionReason::CarIdTieBreak,
+            })
+        );
+        assert_eq!(decision.candidates[0].car, CarId::new("A"));
+        assert_eq!(decision.candidates[1].car, CarId::new("B"));
+    }
+
+    #[test]
+    fn missing_and_unsupported_capabilities_explain_no_selection() {
+        let cars = vec![
+            CarState::new("A", Floor::new(3)),
+            CarState::new("B", Floor::new(1)),
+        ];
+        let mut capabilities = BTreeMap::new();
+        let mut unsupported = Capabilities::reference_defaults();
+        unsupported.serve_floor = false;
+        capabilities.insert(CarId::new("B"), unsupported);
+        let call = HallCall {
+            floor: Floor::new(7),
+            direction: Direction::Up,
+        };
+
+        let decision = dispatch(&call, &cars, &capabilities, &BTreeSet::new());
+
+        assert!(decision.intent.is_none());
+        assert!(decision.selection.is_none());
+        assert_eq!(
+            decision.candidates[0].rejections,
+            vec![DispatchRejection::CapabilitiesUnavailable]
+        );
+        assert_eq!(
+            decision.candidates[1].rejections,
+            vec![DispatchRejection::ServeFloorUnsupported]
         );
     }
 }

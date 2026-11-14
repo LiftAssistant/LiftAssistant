@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, time::Duration};
 
-use liftassistant_core::{CallRegistration, CallRegistry, dispatch};
+use liftassistant_core::{CallRegistration, CallRegistry, DispatchRejection, dispatch};
 use liftassistant_model::{CallState, CarId, Direction, Floor, HallCall, Intent, OperatingMode};
 use liftassistant_runtime::{ElevatorRuntime, RuntimeEvent};
 use liftassistant_sim::SimRuntime;
@@ -123,12 +123,8 @@ impl App {
         let mut events = Vec::new();
 
         for (id, call) in pending {
-            let states: Vec<_> = self
-                .runtime
-                .car_states()
-                .into_iter()
-                .filter(|car| !self.calls.car_is_occupied(&car.id))
-                .collect();
+            let states = self.runtime.car_states();
+            let occupied_cars = self.calls.occupied_cars();
             let capabilities = states
                 .iter()
                 .filter_map(|car| {
@@ -137,16 +133,23 @@ impl App {
                         .map(|caps| (car.id.clone(), caps))
                 })
                 .collect();
-            let Some(intent) = dispatch(&call, &states, &capabilities) else {
+            let decision = dispatch(&call, &states, &capabilities, &occupied_cars);
+            events.extend(
+                decision
+                    .candidates
+                    .iter()
+                    .cloned()
+                    .map(|candidate| SemanticEvent::DispatchCandidate { id, candidate }),
+            );
+            let Some(selection) = decision.selection else {
                 events.push(SemanticEvent::NoEligibleCar(id));
                 continue;
             };
-            let (Intent::ServeFloor { car, .. } | Intent::ParkAt { car, .. }) = &intent;
-            let car = car.clone();
-            events.push(SemanticEvent::DispatchSelected {
-                id,
-                car: car.clone(),
-            });
+            let intent = decision
+                .intent
+                .expect("a dispatch selection must produce an intent");
+            let car = selection.car.clone();
+            events.push(SemanticEvent::DispatchSelected { id, selection });
             events.push(SemanticEvent::IntentGenerated {
                 id,
                 intent: intent.clone(),
@@ -310,14 +313,48 @@ fn semantic_label(event: &SemanticEvent) -> String {
         SemanticEvent::CallStateChanged { id, state } => {
             format!("Call {id} -> {}", call_state_label(state))
         }
+        SemanticEvent::DispatchCandidate { id, candidate } => {
+            let status = if candidate.rejections.is_empty() {
+                "eligible".into()
+            } else {
+                format!(
+                    "reject[{}]",
+                    candidate
+                        .rejections
+                        .iter()
+                        .map(rejection_label)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
+            };
+            let serve_floor = candidate
+                .serve_floor
+                .map_or("unknown".into(), |supported| supported.to_string());
+            format!(
+                "Call {id}: {} {status} d={:.2} mode={:?} busy={} serve={serve_floor}",
+                candidate.car, candidate.distance_floors, candidate.mode, candidate.busy
+            )
+        }
         SemanticEvent::NoEligibleCar(id) => format!("Call {id}: no eligible idle car"),
-        SemanticEvent::DispatchSelected { id, car } => format!("Call {id}: dispatch -> {car}"),
+        SemanticEvent::DispatchSelected { id, selection } => format!(
+            "Call {id}: selected {} {:?} d={:.2}",
+            selection.car, selection.reason, selection.distance_floors
+        ),
         SemanticEvent::IntentGenerated { id, intent } => {
             format!("Call {id}: intent -> {}", intent_label(intent))
         }
         SemanticEvent::ModeChanged { car, mode } => format!("Car {car} -> {mode:?}"),
         SemanticEvent::RuntimeError(error) => format!("Runtime error: {error}"),
         SemanticEvent::Runtime(event) => event_label(event),
+    }
+}
+
+fn rejection_label(rejection: &DispatchRejection) -> &'static str {
+    match rejection {
+        DispatchRejection::Mode(_) => "Mode",
+        DispatchRejection::Busy => "Busy",
+        DispatchRejection::CapabilitiesUnavailable => "CapabilitiesUnknown",
+        DispatchRejection::ServeFloorUnsupported => "ServeFloorUnsupported",
     }
 }
 
