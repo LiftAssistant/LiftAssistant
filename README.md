@@ -60,7 +60,7 @@ The building shows nearest-floor positions; car details show exact positions, mo
 
 Recording is capped at 2,048 commands. Pauses and floor selection do not affect physics and are not scenario commands.
 
-Calls now have deterministic identity and persistent Core-owned state. Multiple calls can coexist: idle cars receive pending work deterministically, while excess work remains pending rather than replacing an active target. Runtime acceptance, arrival, and door-open feedback advance calls through serving/completion and release cars for deterministic pending-work reevaluation. Each dispatch reports per-car mode, busy/capability constraints, distance, rejection reasons, and the deterministic selection basis. Focused capability/building-configuration refinement is the next M2 slice.
+Calls now have deterministic identity and persistent Core-owned state. Multiple calls can coexist: idle cars receive pending work deterministically, while excess work remains pending rather than replacing an active target. Runtime acceptance, arrival, and door-open feedback advance calls through serving/completion and release cars for deterministic pending-work reevaluation. Each dispatch reports per-car mode, busy/capability constraints, distance, rejection reasons, and the deterministic selection basis. An explicit served-floor topology drives call validation, TUI selection/rendering, reset, and replay. M2 semantic implementation is complete pending an architecture review checkpoint.
 
 ## Repository layout
 

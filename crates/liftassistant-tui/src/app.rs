@@ -1,26 +1,24 @@
 use std::{collections::VecDeque, time::Duration};
 
-use liftassistant_core::{CallRegistration, CallRegistry, DispatchRejection, dispatch};
-use liftassistant_model::{CallState, CarId, Direction, Floor, HallCall, Intent, OperatingMode};
+use liftassistant_core::{
+    CallRegistration, CallRegistry, DispatchRejection, HallCallRejection, dispatch,
+    validate_hall_call,
+};
+use liftassistant_model::{
+    BuildingTopology, CallState, CarId, Direction, Floor, HallCall, Intent, OperatingMode,
+};
 use liftassistant_runtime::{ElevatorRuntime, RuntimeEvent};
 use liftassistant_sim::SimRuntime;
 
-use crate::replay::{Command, SemanticEvent, run};
+use crate::replay::{Command, SemanticEvent, run_with_topology};
 
 pub const FIXED_STEP: Duration = Duration::from_millis(500);
 const TRACE_LIMIT: usize = 100;
 const RECORDING_LIMIT: usize = 2048;
 
-pub fn valid_call(call: HallCall) -> bool {
-    (1..=8).contains(&call.floor.index())
-        && !matches!(
-            (call.floor.index(), call.direction),
-            (1, Direction::Down) | (8, Direction::Up)
-        )
-}
-
 pub struct App {
     pub runtime: SimRuntime,
+    pub topology: BuildingTopology,
     pub selected_floor: Floor,
     pub paused: bool,
     pub steps: u64,
@@ -34,9 +32,16 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        Self::with_topology(BuildingTopology::reference_eight_floor())
+    }
+
+    pub(crate) fn with_topology(topology: BuildingTopology) -> Self {
+        let floors = topology.served_floors();
+        let selected_floor = floors[floors.len().saturating_sub(2)];
         Self {
             runtime: SimRuntime::reference_two_car(),
-            selected_floor: Floor::new(7),
+            topology,
+            selected_floor,
             paused: false,
             steps: 0,
             last_call: None,
@@ -49,7 +54,12 @@ impl App {
     }
 
     pub fn select_floor(&mut self, delta: i16) {
-        self.selected_floor = Floor::new((self.selected_floor.index() + delta).clamp(1, 8));
+        let floors = self.topology.served_floors();
+        let current = floors
+            .binary_search(&self.selected_floor)
+            .expect("selected floor belongs to the building topology");
+        let selected = (current as i32 + i32::from(delta)).clamp(0, floors.len() as i32 - 1);
+        self.selected_floor = floors[selected as usize];
     }
 
     pub fn call(&mut self, direction: Direction) {
@@ -92,9 +102,9 @@ impl App {
     fn submit_call(&mut self, call: HallCall) -> Vec<SemanticEvent> {
         let mut events = vec![SemanticEvent::HallCall(call)];
         self.last_call = Some(call);
-        if !valid_call(call) {
+        if let Err(reason) = validate_hall_call(&call, &self.topology) {
             self.decision = None;
-            events.push(SemanticEvent::InvalidCall);
+            events.push(SemanticEvent::InvalidCall(reason));
             return events;
         }
         match self.calls.register(call) {
@@ -213,8 +223,8 @@ impl App {
             self.log("Replay unavailable: recording full; R reset to record a new session".into());
             return;
         }
-        let first = run(&self.recording);
-        let second = run(&self.recording);
+        let first = run_with_topology(&self.recording, self.topology.clone());
+        let second = run_with_topology(&self.recording, self.topology.clone());
         if first.events != second.events
             || first.app.runtime.car_states() != second.app.runtime.car_states()
             || first.app.runtime.car_states() != self.runtime.car_states()
@@ -222,6 +232,7 @@ impl App {
             || first.app.last_call != self.last_call
             || first.app.decision != self.decision
             || first.app.calls != self.calls
+            || first.app.topology != self.topology
         {
             self.log("REPLAY mismatch: live state preserved".into());
             return;
@@ -266,8 +277,9 @@ impl App {
     }
 
     pub fn reset(&mut self) {
-        *self = Self::new();
-        self.log("RESET: reference two-car simulator".into());
+        let topology = self.topology.clone();
+        *self = Self::with_topology(topology);
+        self.log("RESET: two-car simulator with configured topology".into());
     }
 
     fn log(&mut self, message: String) {
@@ -307,7 +319,15 @@ fn semantic_label(event: &SemanticEvent) -> String {
         SemanticEvent::HallCall(call) => {
             format!("HallCall {} {}", call.floor, direction_name(call.direction))
         }
-        SemanticEvent::InvalidCall => "Invalid hall call: 1F only UP; 8F only DOWN".into(),
+        SemanticEvent::InvalidCall(reason) => match reason {
+            HallCallRejection::FloorNotServed(floor) => {
+                format!("Invalid hall call: {floor} is not served")
+            }
+            HallCallRejection::DirectionUnavailableAtTerminal { floor, direction } => format!(
+                "Invalid hall call: {floor} has no {} service",
+                direction_name(*direction)
+            ),
+        },
         SemanticEvent::CallRegistered(id) => format!("Call {id} -> Pending"),
         SemanticEvent::CallDeduplicated(id) => format!("Active duplicate -> {id}"),
         SemanticEvent::CallStateChanged { id, state } => {
@@ -378,22 +398,41 @@ mod tests {
     use liftassistant_model::{CallId, CallState, CarId, DoorState};
 
     #[test]
-    fn hall_calls_respect_building_boundaries() {
-        for floor in 0..=9 {
-            for direction in [Direction::Up, Direction::Down] {
-                let expected = matches!(
-                    (floor, direction),
-                    (1, Direction::Up) | (8, Direction::Down) | (2..=7, _)
-                );
-                assert_eq!(
-                    valid_call(HallCall {
-                        floor: Floor::new(floor),
-                        direction
-                    }),
-                    expected
-                );
+    fn floor_selection_and_call_validation_use_the_configured_topology() {
+        let topology = BuildingTopology::new([Floor::new(1), Floor::new(3), Floor::new(5)])
+            .expect("nonempty topology");
+        let mut app = App::with_topology(topology.clone());
+
+        assert_eq!(app.selected_floor, Floor::new(3));
+        app.select_floor(1);
+        assert_eq!(app.selected_floor, Floor::new(5));
+        app.select_floor(1);
+        assert_eq!(app.selected_floor, Floor::new(5));
+        app.select_floor(-2);
+        assert_eq!(app.selected_floor, Floor::new(1));
+
+        let unknown = app.execute(Command::HallCall(HallCall {
+            floor: Floor::new(2),
+            direction: Direction::Up,
+        }));
+        assert!(unknown.contains(&SemanticEvent::InvalidCall(
+            HallCallRejection::FloorNotServed(Floor::new(2))
+        )));
+        let terminal = app.execute(Command::HallCall(HallCall {
+            floor: Floor::new(1),
+            direction: Direction::Down,
+        }));
+        assert!(terminal.contains(&SemanticEvent::InvalidCall(
+            HallCallRejection::DirectionUnavailableAtTerminal {
+                floor: Floor::new(1),
+                direction: Direction::Down,
             }
-        }
+        )));
+        assert!(app.calls.calls().next().is_none());
+
+        app.reset();
+        assert_eq!(app.topology, topology);
+        assert_eq!(app.selected_floor, Floor::new(3));
     }
 
     #[test]

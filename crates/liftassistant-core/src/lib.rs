@@ -3,9 +3,33 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use liftassistant_model::{
-    CallId, CallRecord, CallState, Capabilities, CarId, CarState, Floor, HallCall, Intent,
-    OperatingMode,
+    BuildingTopology, CallId, CallRecord, CallState, Capabilities, CarId, CarState, Direction,
+    Floor, HallCall, Intent, OperatingMode,
 };
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HallCallRejection {
+    FloorNotServed(Floor),
+    DirectionUnavailableAtTerminal { floor: Floor, direction: Direction },
+}
+
+pub fn validate_hall_call(
+    call: &HallCall,
+    topology: &BuildingTopology,
+) -> Result<(), HallCallRejection> {
+    if !topology.contains(call.floor) {
+        return Err(HallCallRejection::FloorNotServed(call.floor));
+    }
+    if (call.floor == topology.lowest_floor() && call.direction == Direction::Down)
+        || (call.floor == topology.highest_floor() && call.direction == Direction::Up)
+    {
+        return Err(HallCallRejection::DirectionUnavailableAtTerminal {
+            floor: call.floor,
+            direction: call.direction,
+        });
+    }
+    Ok(())
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CallRegistration {
@@ -283,6 +307,46 @@ mod tests {
         cars.iter()
             .map(|car| (car.id.clone(), Capabilities::reference_defaults()))
             .collect()
+    }
+
+    #[test]
+    fn hall_call_validation_uses_served_floors_and_topology_terminals() {
+        let topology = BuildingTopology::new([Floor::new(1), Floor::new(3), Floor::new(5)])
+            .expect("nonempty topology");
+
+        assert_eq!(
+            validate_hall_call(
+                &HallCall {
+                    floor: Floor::new(2),
+                    direction: Direction::Up,
+                },
+                &topology,
+            ),
+            Err(HallCallRejection::FloorNotServed(Floor::new(2)))
+        );
+        assert_eq!(
+            validate_hall_call(
+                &HallCall {
+                    floor: Floor::new(1),
+                    direction: Direction::Down,
+                },
+                &topology,
+            ),
+            Err(HallCallRejection::DirectionUnavailableAtTerminal {
+                floor: Floor::new(1),
+                direction: Direction::Down,
+            })
+        );
+        assert!(
+            validate_hall_call(
+                &HallCall {
+                    floor: Floor::new(3),
+                    direction: Direction::Down,
+                },
+                &topology,
+            )
+            .is_ok()
+        );
     }
 
     #[test]

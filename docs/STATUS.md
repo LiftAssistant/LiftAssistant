@@ -51,7 +51,7 @@ HallCall
   -> runtime target
 ~~~
 
-M2.1 through M2.4 now provide persistent call identity/lifecycle, multiple pending calls without target replacement, runtime-feedback-driven serving/completion/reassignment, and structured dispatch explanations. Focused capability/configuration refinement is the next semantic-core gap.
+M2.1 through M2.5 now provide persistent call identity/lifecycle, multiple pending calls without target replacement, runtime-feedback-driven serving/completion/reassignment, structured dispatch explanations, and explicit served-floor topology. M2 implementation is complete; the architecture review checkpoint is next.
 
 This is the primary M2 problem.
 
@@ -152,7 +152,7 @@ Implemented behavior:
 
 ## M2.5 — Capability/configuration refinement
 
-**READY — next implementation slice.**
+**Implemented.**
 
 Only after the lifecycle path is working:
 - reduce TUI-only hard-coded semantic assumptions where there is a demonstrated need;
@@ -160,6 +160,19 @@ Only after the lifecycle path is working:
 - compare terminology and concepts with existing standards before freezing public semantics.
 
 Any safety/authority-model change remains HUMAN-REVIEW.
+
+Implemented behavior:
+- model owns a canonical, sorted, duplicate-free, nonempty `BuildingTopology` of served floors;
+- Core validates floor membership and terminal UP/DOWN availability from topology rather than TUI constants;
+- TUI selection/rendering iterates configured floors, including non-contiguous floor sets;
+- invalid call events distinguish unserved floors from unavailable terminal direction;
+- reset and replay preserve and compare the same topology alongside semantic and physical state;
+- runtime-provided per-car capabilities remain the dispatch input; no speculative building/door/capability DSL was introduced;
+- the deliberate boundary from BACnet floor indexes and SAREF4LIFT service/space graphs is recorded in `docs/PRIOR_ART.md`.
+
+## M2 review checkpoint
+
+**READY — review M2 as a complete semantic vertical path before advancing the milestone.**
 
 ## Explicit non-goals in M2
 

@@ -38,23 +38,26 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     let columns = Layout::horizontal([Constraint::Length(25), Constraint::Min(40)]).split(rows[1]);
     let states = app.runtime.car_states();
-    let building: Vec<Line> = (1..=8)
+    let building: Vec<Line> = app
+        .topology
+        .served_floors()
+        .iter()
         .rev()
         .map(|floor| {
-            let a = if states[0].position.nearest_floor.index() == floor {
+            let a = if states[0].position.nearest_floor == *floor {
                 "A"
             } else {
                 " "
             };
-            let b = if states[1].position.nearest_floor.index() == floor {
+            let b = if states[1].position.nearest_floor == *floor {
                 "B"
             } else {
                 " "
             };
-            let selected = app.selected_floor.index() == floor;
+            let selected = app.selected_floor == *floor;
             Line::styled(
                 format!(
-                    "{} {floor}F |  {a}  |  {b}  |",
+                    "{} {floor} |  {a}  |  {b}  |",
                     if selected { ">" } else { " " }
                 ),
                 if selected {
@@ -137,8 +140,15 @@ pub fn render(frame: &mut Frame, app: &App) {
         Paragraph::new(trace).block(panel(&format!("Events | {last} -> {decision}"))),
         lower_columns[1],
     );
+    let lowest = app.topology.lowest_floor();
+    let highest = app.topology.highest_floor();
+    let terminals = if lowest == highest {
+        format!("{lowest}: no hall direction")
+    } else {
+        format!("{lowest}: UP only; {highest}: DOWN only")
+    };
     frame.render_widget(Paragraph::new(format!(
-        "Selected: {} | 1F: UP only; 8F: DOWN only | rec={}\nUp/Down select | U/D call | Space pause/resume | . step (paused)\nA/B availability | P replay | R reset | Q/Esc quit", app.selected_floor, if app.recording_full { "FULL".into() } else { app.recording.len().to_string() }
+        "Selected: {} | {terminals} | rec={}\nUp/Down select | U/D call | Space pause/resume | . step (paused)\nA/B availability | P replay | R reset | Q/Esc quit", app.selected_floor, if app.recording_full { "FULL".into() } else { app.recording.len().to_string() }
     )).style(Style::default().fg(Color::Gray)), rows[3]);
 }
 

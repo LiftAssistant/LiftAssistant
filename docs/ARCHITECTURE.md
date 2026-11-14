@@ -39,7 +39,7 @@ New Semantic State + High-level Effects/Intents
 
 The implementation should grow into this shape from demonstrated behavior rather than through a repository-wide rewrite.
 
-M1 established deterministic one-shot dispatch. M2.1 through M2.4 added persistent call identity/lifecycle, multiple pending calls, runtime-feedback-driven state, and explainable dispatch decisions. Focused capability/configuration refinement remains the next M2 step.
+M1 established deterministic one-shot dispatch. M2.1 through M2.5 added persistent call identity/lifecycle, multiple pending calls, runtime-feedback-driven state, explainable dispatch decisions, and explicit served-floor topology. The M2 semantic vertical path is implemented pending its architecture review checkpoint.
 
 Core must not own networking, field buses, wall-clock time, persistence, terminal/UI frameworks, or vendor SDKs.
 
@@ -110,6 +110,8 @@ Multiple calls coexist without a complex group-control algorithm. Pending calls 
 Runtime intent acceptance advances Assigned to Serving. Arrival evidence followed by an open door completes the matching call and immediately reevaluates pending work. Arrival evidence is Core-owned so feedback may span runtime event batches. The developer UI observes this state; it does not own the lifecycle.
 
 Dispatch returns a structured deterministic decision. It evaluates every car's mode, semantic/runtime occupancy, serve-floor capability, and distance, records rejection reasons, and identifies whether selection used sole eligibility, nearest distance, or the car-ID tie-break. These are orchestration explanations, not equipment fault/alarm semantics and not a policy language.
+
+`BuildingTopology` is the current minimal configuration input: a canonical ordered set of served floors. Core derives hall-call membership and terminal-direction validity from it, and replay receives the same topology explicitly. It is not a universal building model; floor names, door/service mappings, spatial relationships, and protocol indexes remain outside the model until demonstrated by adapters or integrations.
 
 ## Future backends
 

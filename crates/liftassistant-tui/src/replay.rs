@@ -1,6 +1,8 @@
 //! Developer-only, in-memory simulator inputs; not a public elevator schema.
-use liftassistant_core::{DispatchCandidate, DispatchSelection};
-use liftassistant_model::{CallId, CallState, CarId, HallCall, Intent, OperatingMode};
+use liftassistant_core::{DispatchCandidate, DispatchSelection, HallCallRejection};
+use liftassistant_model::{
+    BuildingTopology, CallId, CallState, CarId, HallCall, Intent, OperatingMode,
+};
 use liftassistant_runtime::RuntimeEvent;
 
 #[cfg(test)]
@@ -22,7 +24,7 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SemanticEvent {
     HallCall(HallCall),
-    InvalidCall,
+    InvalidCall(HallCallRejection),
     CallRegistered(CallId),
     CallDeduplicated(CallId),
     CallStateChanged {
@@ -55,8 +57,13 @@ pub struct Replay {
     pub events: Vec<SemanticEvent>,
 }
 
+#[cfg(test)]
 pub fn run(commands: &[Command]) -> Replay {
-    let mut app = App::new();
+    run_with_topology(commands, BuildingTopology::reference_eight_floor())
+}
+
+pub fn run_with_topology(commands: &[Command], topology: BuildingTopology) -> Replay {
+    let mut app = App::with_topology(topology);
     let mut events = Vec::new();
     for command in commands {
         events.extend(app.execute(command.clone()));
@@ -142,6 +149,23 @@ mod tests {
         assert_eq!(app.steps, 3);
         app.reset();
         assert!(app.recording.is_empty());
+    }
+
+    #[test]
+    fn replay_and_reset_preserve_the_building_topology() {
+        let topology = BuildingTopology::new([Floor::new(1), Floor::new(3), Floor::new(5)])
+            .expect("nonempty topology");
+        let mut app = App::with_topology(topology.clone());
+        app.call(Direction::Up);
+        app.step();
+
+        app.replay();
+
+        assert_eq!(app.topology, topology);
+        assert!(app.trace.back().unwrap().contains("REPLAY verified"));
+        app.reset();
+        assert_eq!(app.topology, topology);
+        assert_eq!(app.selected_floor, Floor::new(3));
     }
 
     #[test]

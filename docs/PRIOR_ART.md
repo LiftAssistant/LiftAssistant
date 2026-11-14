@@ -141,3 +141,9 @@ LiftAssistant therefore uses deterministic per-call identity and the internal li
 CiA 417 diagnostic objects, BACnet lift fault/status/mode properties, and SAREF4LIFT fault/state concepts describe device or protocol observations. Open-RMF likewise keeps lift requests separate from reported lift state. A car being busy, outside Normal mode, missing a capability, or losing a deterministic distance tie-break is an orchestration decision explanation, not necessarily a lift fault or alarm.
 
 LiftAssistant therefore keeps M2 dispatch explanations separate from normalized equipment diagnostics: candidate mode, busy status, capability availability, distance, rejection reasons, and `OnlyEligible`/`Nearest`/`CarIdTieBreak` selection basis. This remains an internal, reversible Core result rather than a standards mapping or policy DSL.
+
+## M2 served-floor configuration finding
+
+BACnet defines a universal floor number as a bottom-up contiguous building index and uses it for floor text, positions, stops, and landing calls. SAREF4LIFT separately models car-stop spaces, building spaces, door connection points, and car services, which can express topology beyond a flat floor range. CiA 417 keeps call/input/position functions behind implementation-independent virtual-device interfaces.
+
+LiftAssistant M2 needs only the demonstrated common denominator: a canonical ordered nonempty set of served `Floor` values. Core validates membership and terminal hall-call direction from that set. It intentionally does not yet model public floor names, doors, car-specific service maps, spatial graphs, or BACnet array indexes; those require real adapter/integration evidence.

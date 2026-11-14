@@ -40,6 +40,58 @@ impl fmt::Display for Floor {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BuildingTopology {
+    served_floors: Vec<Floor>,
+}
+
+impl BuildingTopology {
+    pub fn new(floors: impl IntoIterator<Item = Floor>) -> Result<Self, BuildingTopologyError> {
+        let mut served_floors: Vec<_> = floors.into_iter().collect();
+        served_floors.sort_unstable();
+        served_floors.dedup();
+        if served_floors.is_empty() {
+            return Err(BuildingTopologyError::NoServedFloors);
+        }
+        Ok(Self { served_floors })
+    }
+
+    pub fn reference_eight_floor() -> Self {
+        Self::new((1..=8).map(Floor::new)).expect("reference topology has served floors")
+    }
+
+    pub fn served_floors(&self) -> &[Floor] {
+        &self.served_floors
+    }
+
+    pub fn contains(&self, floor: Floor) -> bool {
+        self.served_floors.binary_search(&floor).is_ok()
+    }
+
+    pub fn lowest_floor(&self) -> Floor {
+        self.served_floors[0]
+    }
+
+    pub fn highest_floor(&self) -> Floor {
+        self.served_floors[self.served_floors.len() - 1]
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BuildingTopologyError {
+    NoServedFloors,
+}
+
+impl fmt::Display for BuildingTopologyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoServedFloors => f.write_str("building topology requires a served floor"),
+        }
+    }
+}
+
+impl std::error::Error for BuildingTopologyError {}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Direction {
     Up,
@@ -178,4 +230,33 @@ pub struct CallRecord {
 pub enum Intent {
     ServeFloor { car: CarId, floor: Floor },
     ParkAt { car: CarId, floor: Floor },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn building_topology_canonicalizes_served_floors() {
+        let topology =
+            BuildingTopology::new([Floor::new(5), Floor::new(1), Floor::new(3), Floor::new(3)])
+                .expect("nonempty topology");
+
+        assert_eq!(
+            topology.served_floors(),
+            &[Floor::new(1), Floor::new(3), Floor::new(5)]
+        );
+        assert_eq!(topology.lowest_floor(), Floor::new(1));
+        assert_eq!(topology.highest_floor(), Floor::new(5));
+        assert!(topology.contains(Floor::new(3)));
+        assert!(!topology.contains(Floor::new(2)));
+    }
+
+    #[test]
+    fn building_topology_rejects_an_empty_floor_set() {
+        assert_eq!(
+            BuildingTopology::new([]),
+            Err(BuildingTopologyError::NoServedFloors)
+        );
+    }
 }
