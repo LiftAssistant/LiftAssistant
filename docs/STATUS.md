@@ -134,7 +134,7 @@ Any safety/authority-model change remains HUMAN-REVIEW.
 
 ## Repository governance status
 
-- `AGENTS.md` is the authoritative agent guide.
-- `agent.md` is a compatibility pointer only.
-- Tool-specific instruction entry points should point to the authoritative files rather than fork project rules.
+- `AGENTS.md` is the single authoritative agent guide.
+- `agent.md` is a generic compatibility/navigation pointer only.
+- Project state is carried by repository documentation, not by vendor-specific agent files.
 - Git commits should use the intended owner identity `Axiaobo7788`.
