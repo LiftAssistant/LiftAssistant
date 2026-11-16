@@ -161,3 +161,38 @@ The official Open-RMF `LiftState` message reports a lift name, string floor labe
 The first LiftAssistant experiment therefore requires an explicit string-label-to-`Floor` configuration and maps only semantically unambiguous recorded observations. A stopped state with an open door supplies enough evidence for the experiment's exact at-floor `Position`; fire service and offline state map directly, while source session and mode data remain attached. A closed door does not by itself confirm exact position. Moving doors, closed-door/unconfirmed position, moving/unknown motion without continuous position, Human/AGV control modes, unsupported modes, unadvertised floors, and unconfigured labels return structured mapping errors instead of fabricated state. The input remains an in-memory recording with no ROS dependency, live transport, request publication, or normative protocol schema.
 
 Official message source: https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg
+
+
+## Cross-domain production architecture references
+
+These are architectural prior art, not LiftAssistant domain standards.
+
+### OPC UA DataValue
+
+Official reference:
+https://reference.opcfoundation.org/specs/OPC-10000-4/7.11
+
+Useful idea: a value is accompanied by status/quality and source/server timestamps rather than treated as an unqualified scalar. Use this as prior art for observation provenance/quality; do not copy OPC UA types wholesale.
+
+### ROS 2 QoS: Deadline, Liveliness, Lifespan
+
+Official design:
+https://design.ros2.org/articles/qos_deadline_liveliness_lifespan.html
+
+Useful idea: freshness expectations, publisher liveliness and sample lifespan are distinct concepts. This is relevant to deciding when elevator observations are still usable.
+
+### Kubernetes controllers/reconciliation
+
+Official documentation:
+https://kubernetes.io/docs/concepts/architecture/controller/
+
+Useful idea: controllers repeatedly reconcile desired state against observed current state rather than assuming one command permanently establishes reality. Use only the control-loop principle; LiftAssistant is not a Kubernetes-style distributed control plane.
+
+### OpenTelemetry semantic stability
+
+Official semantic-convention documentation:
+https://opentelemetry.io/docs/specs/semconv/general/semantic-convention-groups/
+
+Useful idea: semantic groups progress through explicit maturity/stability levels and stable groups are not casually broken. This is prior art for future LiftAssistant semantic maturity/versioning.
+
+Additional production patterns such as diagnostic registries, integration quality profiles, process sandboxing, update rollback and sanitized diagnostic bundles should be researched only when their implementation milestone becomes READY.

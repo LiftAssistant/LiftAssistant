@@ -69,18 +69,32 @@ Do not turn M3 into a certification claim.
 
 Generic multi-backend conformance machinery is deferred until a second backend exists. Protocol mappings are deferred until a concrete bridge supplies evidence.
 
-## M4 — Real-world bridges — current
+## M4 — Production boundary and real-world bridges — current
 
-Controlled non-passenger work first:
+M4 should first make the prototype architecture honest about real external observations before adding live control.
+
+Ordered direction:
+
+1. canonical partial observation proof while keeping operational state complete;
+2. separate observation-source, high-level intent-sink, and simulator/replay driving responsibilities;
+3. extract a shared Engine boundary once duplicated orchestration demonstrates the need;
+4. prove a minimal diagnostics/flight-recorder/replay substrate;
+5. prove a headless read-only host/lifecycle;
+6. expand recorded/virtual/read-only adapters and protocol mappings;
+7. controlled non-passenger HIL/bench work;
+8. only later consider high-level writes under explicit HUMAN-REVIEW.
+
+Candidate bridge work after the boundary is sound:
 
 - virtual CAN / SocketCAN;
 - CiA 417 mapping experiments;
+- BACnet/building observation mappings;
 - T/GSET 001-2025 gateway research;
-- HIL/bench environments;
+- Open-RMF live/read-only integration;
 - documented controller APIs;
-- read-only/recorded adapters before writes.
+- recorded/read-only adapters before writes.
 
-Any passenger-elevator control or safety-authority change requires HUMAN-REVIEW.
+Any passenger-elevator control, safety-authority change, normative public-schema freeze, or first real write path requires HUMAN-REVIEW.
 
 ## M5 — User/building integrations
 

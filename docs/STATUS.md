@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-11-14
+Updated: 2026-11-16
 
 ## Current milestone
 
@@ -308,3 +308,77 @@ Remaining M4 work is therefore classified as:
 - `docs/PRIOR_ART.md` defines when external research is required and which established references to check.
 - Project state is carried by repository documentation, not by vendor-specific agent files.
 - Git commits should use the intended owner identity `Axiaobo7788`.
+
+
+## M4 next plan — reviewed 2026-11-16
+
+The current recorded/Open-RMF experiments have supplied enough evidence to move beyond the original all-in-one runtime contract.
+
+### M4.3 — Canonical partial observation proof
+
+**READY — next implementation slice.**
+
+Direction approved for internal/reversible work:
+
+- keep complete operational `CarState` intact;
+- introduce the smallest separate canonical observation representation needed to express the demonstrated Open-RMF ambiguities without fabricating precision;
+- carry explicit provenance/source identity and deterministic sequencing;
+- distinguish unknown/uncertain/unavailable information explicitly rather than collapsing everything into `Option<T>`;
+- do not expose the new observation type directly to Core as trusted operational state;
+- add a resolver path that produces complete `CarState` only when evidence is sufficient;
+- migrate the recorded Open-RMF experiment to produce canonical observations rather than failing merely because a complete `CarState` cannot yet be constructed;
+- preserve raw/source-specific context for diagnostics and later mapping review;
+- remain internal/experimental; no public schema freeze.
+
+Keep this slice narrow. Do not design a universal telemetry framework, generic confidence model, database, or persistence format.
+
+### M4.4 — Separate observation, intent, and simulation-driving contracts
+
+After M4.3 is working:
+
+- split the prototype `ElevatorRuntime` responsibilities so read-only observation sources do not need a write API;
+- separate observation ingestion from high-level intent submission;
+- move explicit `tick/advance(Duration)` semantics to simulator/replay drivers rather than treating them as a universal live-runtime contract;
+- preserve deterministic simulator/replay behavior;
+- keep the API internal/reversible.
+
+### M4.5 — Extract the demonstrated Engine boundary
+
+After the runtime split demonstrates shared orchestration:
+
+- move common semantic orchestration/state resolution out of the TUI composition layer;
+- keep Core deterministic and I/O-free;
+- make TUI/scenario execution consume the same Engine boundary;
+- do not add network/API/daemon concerns to Engine;
+- add a new crate only if concrete duplicated ownership now justifies it.
+
+This is the first point where the previously deferred application/orchestration extraction is expected to have real caller pressure.
+
+### M4.6 — Diagnostics substrate
+
+Once observation flow and Engine ownership are clear:
+
+- add a bounded in-memory flight recorder over canonical observations, semantic transitions, decisions and intents;
+- define a small internal machine-readable diagnostic-event shape;
+- add deterministic invariant/sequence anomaly detection for one or two demonstrated cases;
+- make an incident snapshot replayable through the existing deterministic tooling;
+- do not add ML, a database, cloud telemetry, or a large diagnostic taxonomy.
+
+The purpose is to validate that production failures can leave useful, replayable evidence.
+
+### M4.7 — Headless/read-only production host proof
+
+Only after the previous slices:
+
+- prove the Engine can run without the TUI;
+- introduce lifecycle/readiness concepts sufficient for startup, synchronization, read-only readiness and degraded state;
+- connect only recorded/virtual/read-only sources;
+- no passenger-elevator writes;
+- no public stable API yet;
+- no production deployment claim.
+
+## Preserved production ideas
+
+Longer-term production/debugging ideas are preserved in `docs/PRODUCTION_DESIGN_NOTES.md`. They are constraints/candidates, not a mandate to implement them all during M4.
+
+The highest-priority future themes include observation quality/freshness, reconciliation, shadow debugging, incident capsules/replay, stable diagnostic codes, adapter validation profiles, sandboxing, semantic maturity/versioning, safe update/rollback, sanitized diagnostic bundles, and a community recorded-fixture corpus.

@@ -1,6 +1,6 @@
 # Project memory
 
-Last consolidated: 2026-11-14
+Last consolidated: 2026-11-16
 
 This file contains durable project facts and decisions only.
 
@@ -39,6 +39,10 @@ It is not primarily a new elevator brand and not merely a monitoring dashboard.
 10. Existing standards are inputs: CiA 417, BACnet, SAREF4LIFT, T/GSET 001-2025, Open-RMF/RFA, THOR/NeXt, and other relevant work.
 11. Adoption can be layered: observe, diagnostics, policy/group semantics, adapters, later native runtime where appropriate.
 12. Avoid premature application/service/plugin layers; extract them only when demonstrated by real callers.
+13. Production architecture should keep semantic logic, user interfaces, external adapters, and the validated/certified execution domain separable.
+14. Production debugging/diagnostics, incident evidence, and deterministic replay are first-class platform concerns rather than optional logging features.
+15. Complete operational state should not be weakened merely to fit incomplete external sources; external uncertainty should be represented before operational-state resolution.
+16. Production deployment must remain safe when LiftAssistant or one of its user-facing components is unavailable; the lower execution/safety domain remains independently responsible for elevator safety.
 
 ## Product philosophy
 

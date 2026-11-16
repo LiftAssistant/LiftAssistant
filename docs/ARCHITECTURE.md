@@ -150,3 +150,47 @@ LiftAssistant policy / group / intent
 LiftAssistant must never rely on its own availability for a real elevator to remain safe.
 
 Changing the safety/authority model is a HUMAN-REVIEW boundary.
+
+
+## Target production direction
+
+This section describes the reviewed production direction, not the current implementation topology.
+
+~~~text
+TUI / WebUI / HA / BMS / API
+            |
+            v
+      semantic client/API boundary
+            |
+            v
+          Engine
+ calls / dispatch / resolver
+            |
+      +-----+------+
+      |            |
+      v            v
+observations    high-level intents
+      |            |
+      v            v
+   adapters    authority/write gate
+      |            |
+      +------v-----+
+             |
+             v
+ validated/certified execution domain
+             |
+   motion / door / safety / hardware
+~~~
+
+Production design should preserve these separations:
+
+- UI/client failure must not imply semantic Engine failure.
+- Adapter failure should be isolatable from Engine and from unrelated adapters.
+- Partial external observations should be normalized before they become complete operational state.
+- High-level intents must remain separate from low-level safety/actuator control.
+- Loss/restart of LiftAssistant must not make the elevator unsafe.
+- Production debugging and diagnostics should consume the same canonical event/observation flow rather than rely on ad-hoc logging.
+
+The current `ElevatorRuntime` is a useful prototype abstraction, not a frozen production contract. M4 is allowed to evolve it internally as recorded/read-only evidence demonstrates better boundaries.
+
+Detailed non-normative production ideas are preserved in `docs/PRODUCTION_DESIGN_NOTES.md`.

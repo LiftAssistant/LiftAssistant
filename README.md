@@ -107,6 +107,7 @@ docs/
   ROADMAP.md               milestone sequence / future scope
   ARCHITECTURE.md          architecture and safety boundaries
   PRIOR_ART.md             research triggers / standards-project index
+  PRODUCTION_DESIGN_NOTES.md non-normative production/debugging ideas
 
 scenarios/                 simulator/replay assets as real needs emerge
 spec/                      future language-independent public semantics
