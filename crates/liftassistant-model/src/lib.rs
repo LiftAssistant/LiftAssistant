@@ -373,6 +373,28 @@ impl From<&CarObservation> for CarObservationUpdate {
     }
 }
 
+impl CarObservationUpdate {
+    /// Creates a complete canonical update from an already resolved operational state.
+    ///
+    /// This is used by deterministic native runtimes; external adapters should map their own
+    /// source evidence directly instead of first fabricating a [`CarState`].
+    pub fn from_state(provenance: ObservationProvenance, state: &CarState) -> Self {
+        let position = match state.location {
+            CarLocation::Floor(floor) => PositionEvidence::FloorReference(floor),
+            CarLocation::Continuous(position) => PositionEvidence::Exact(position),
+        };
+        Self {
+            provenance,
+            car: state.id.clone(),
+            position: Some(position),
+            motion: Some(MotionEvidence::Known(state.motion)),
+            door: Some(DoorEvidence::Known(state.door)),
+            mode: Some(OperatingModeEvidence::Known(state.mode)),
+            reported_destination: Some(state.reported_destination),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HallCall {
     pub floor: Floor,

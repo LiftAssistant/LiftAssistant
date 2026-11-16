@@ -3,25 +3,20 @@
 ## Current composition
 
 ~~~text
-Developer TUI / Scenario runner
-              |
-              | hall calls / runtime feedback / observations
-              v
-            Engine ----------> LiftAssistant Core
-              |
-              | high-level intents
-              v
-          IntentSink -----------------> Simulator
-                                         ^      |
-                 explicit duration       |      | runtime events
-          SimulationDriver --------------+------+
-                                         |
-                                  ObservationSource
+Simulator / recorded feed -- canonical observation updates --> Engine
+                                                               |
+Developer TUI / scenarios / headless <--- Engine-owned state ---+
+                                                               |
+                                                               +--> LiftAssistant Core
+                                                               |
+                                                               +--> IntentSink --> Simulator
+
+SimulationDriver -- explicit duration --> semantic runtime events --> Engine
 ~~~
 
-The simulator is the first active runtime backend and implements observation, high-level-intent, and deterministic-driving contracts. M4 adds a second, recorded/read-only source that implements observation and replay driving but has no intent-submission contract. Live sources and intent backends should implement only the responsibilities they actually provide; explicit `advance(Duration)` is not a universal live-adapter requirement.
+The simulator is the first active runtime backend and emits canonical observation updates while implementing high-level-intent and deterministic-driving contracts. M4 adds deterministic recorded/read-only feeds and replay driving without an intent-submission contract. Live feeds and intent backends should implement only the responsibilities they actually provide; explicit `advance(Duration)` is not a universal live-adapter requirement.
 
-The shared Engine owns topology, call lifecycle, dispatch, pending scheduling, high-level intent submission/result handling, runtime-feedback processing, and canonical observation resolution. The developer TUI composition retains only UI state, simulator-specific controls, explicit time driving, bounded display trace, and replay input recording. Interactive and non-interactive scenario callers use the same Engine path.
+The shared Engine owns topology, call lifecycle, dispatch, pending scheduling, capabilities, incremental observation assembly, resolved operational state/evidence, high-level intent submission/result handling, and runtime-feedback processing. Dispatch and read-side clients consume this Engine-owned view rather than querying an adapter-owned state store. The developer TUI composition retains only UI state, simulator-specific controls, explicit time driving, bounded display trace, and replay input recording. Interactive, headless, and non-interactive scenario callers use the same Engine ingestion/read path.
 
 ## Functional core
 
@@ -57,13 +52,13 @@ The runtime/controller defines HOW.
 
 Low-level motion and safety primitives remain outside Core.
 
-`ObservationSource` exposes resolved operational state and capabilities. `IntentSink` accepts only high-level LiftAssistant intents. `SimulationDriver` produces semantic runtime events from explicit simulated/replay duration. A component implements only the contracts it actually supports. Vendor protocol objects must not leak into Core semantics.
+Canonical `CarObservationUpdate` values enter Engine through one ingestion boundary; there is no adapter state-query trait in the dispatch path. `IntentSink` accepts only high-level LiftAssistant intents. `SimulationDriver` produces semantic runtime events from explicit simulated/replay duration. A component implements only the contracts it actually supports. Vendor protocol objects must not leak into Core semantics.
 
 ## Current packages
 
 - `liftassistant-model`: canonical domain types.
 - `liftassistant-core`: deterministic vendor-neutral semantic decisions/state transitions.
-- `liftassistant-engine`: shared deterministic semantic orchestration and observation resolution.
+- `liftassistant-engine`: shared deterministic semantic orchestration, observation assembly/resolution, and operational state ownership.
 - `liftassistant-headless`: internal non-interactive read-only host/lifecycle proof.
 - `liftassistant-runtime`: semantic execution contract and runtime events.
 - `liftassistant-sim`: deterministic active simulator, native-semantic recorded/read-only backend, and recorded external-state mapping experiments.

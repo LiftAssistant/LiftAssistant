@@ -4,15 +4,16 @@ use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_engine::{
     DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, Engine, IncidentSnapshot,
+    ObservationIngestResult,
 };
 use liftassistant_model::{
-    BuildingTopology, CallId, CallState, Capabilities, CarId, CarLocation, CarState, Direction,
-    DoorEvidence, DoorState, Floor, HallCall, MotionEvidence, MotionState, ObservationProvenance,
-    ObservationSequence, ObservationSourceId, OperatingMode, OperatingModeEvidence, Position,
-    PositionEvidence, ReportedDestination,
+    BuildingTopology, CallId, CallState, Capabilities, CarId, CarLocation, CarObservation,
+    CarObservationUpdate, CarState, Direction, DoorEvidence, DoorState, Floor, HallCall,
+    MotionEvidence, MotionState, ObservationProvenance, ObservationSequence, ObservationSourceId,
+    OperatingMode, OperatingModeEvidence, Position, PositionEvidence, ReportedDestination,
 };
 use liftassistant_runtime::{
-    CarStateResolution, ObservationSource, RuntimeEvent, SimulationDriver, UnresolvedCarStateReason,
+    CarStateResolution, RuntimeEvent, SimulationDriver, UnresolvedCarStateReason,
 };
 use liftassistant_sim::{
     BacnetDoorStatus, BacnetLiftCarDirection, BacnetLiftCarMode, MappedBacnetObservation,
@@ -200,10 +201,15 @@ fn rejection_commands() -> Vec<Command> {
 
 fn play_recording() -> Result<RecordedPlayback, String> {
     let mut runtime = recorded_runtime()?;
+    let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
     let source_name = runtime.source_name().to_owned();
     let capabilities = runtime
         .capabilities(&CarId::new("A"))
         .ok_or_else(|| "recorded car A has no capabilities".to_owned())?;
+    engine.set_capabilities(CarId::new("A"), capabilities.clone());
+    for update in runtime.take_observation_updates() {
+        engine.ingest_observation_update(update);
+    }
 
     let mut elapsed_total = Duration::ZERO;
     let mut batches = Vec::new();
@@ -214,10 +220,16 @@ fn play_recording() -> Result<RecordedPlayback, String> {
         Duration::from_millis(1),
     ] {
         elapsed_total += elapsed;
+        let events = runtime.advance(elapsed);
+        for event in &events {
+            if let RuntimeEvent::Observation(update) = event {
+                engine.ingest_observation_update(update.clone());
+            }
+        }
         batches.push(RecordedBatch {
             elapsed_total,
-            events: runtime.advance(elapsed),
-            states: runtime.car_states(),
+            events,
+            states: engine.car_states(),
         });
     }
     Ok(RecordedPlayback {
@@ -240,16 +252,25 @@ fn recorded_runtime() -> Result<RecordedRuntime, String> {
         mode: OperatingMode::Normal,
         reported_destination: ReportedDestination::Known(Floor::new(4)),
     };
+    let mut final_state = CarState::new("A", Floor::new(4));
+    final_state.door = DoorState::Open;
     RecordedRuntime::new(
         [CarState::new("A", Floor::new(3))],
         [
             RecordedFrame::after(
                 Duration::from_millis(500),
-                vec![RuntimeEvent::PositionChanged(moving)],
+                vec![RuntimeEvent::Observation(CarObservationUpdate::from_state(
+                    recorded_provenance(2),
+                    &moving,
+                ))],
             ),
             RecordedFrame::after(
                 Duration::from_millis(500),
                 vec![
+                    RuntimeEvent::Observation(CarObservationUpdate::from_state(
+                        recorded_provenance(3),
+                        &final_state,
+                    )),
                     RuntimeEvent::Arrived {
                         car: CarId::new("A"),
                         floor: Floor::new(4),
@@ -271,7 +292,7 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     let incomplete = map_rmf_lift_state(&incomplete_source, &labels, rmf_provenance(1))
         .map_err(|error| error.to_string())?;
     let mut engine = Engine::new(incomplete.topology.clone());
-    let incomplete_resolution = engine.resolve_observation(&incomplete.observation);
+    let incomplete_resolution = ingest_resolution(&mut engine, &incomplete.observation)?;
 
     let mut final_source = incomplete_source.clone();
     final_source.current_floor = "L4".into();
@@ -280,27 +301,24 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     final_source.motion_state = RmfLiftState::MOTION_STOPPED;
     let final_observation = map_rmf_lift_state(&final_source, &labels, rmf_provenance(2))
         .map_err(|error| error.to_string())?;
-    let final_resolution = engine.resolve_observation(&final_observation.observation);
-    let final_state = match &final_resolution {
-        CarStateResolution::Resolved(state) => state.clone(),
+    let final_resolution = ingest_resolution(&mut engine, &final_observation.observation)?;
+    match &final_resolution {
+        CarStateResolution::Resolved(_) => {}
         CarStateResolution::Unresolved { reasons, .. } => {
             return Err(format!(
                 "sufficient Open-RMF observation stayed unresolved: {reasons:?}"
             ));
         }
-    };
+    }
 
+    let final_states = engine.car_states();
     let mut source_specific_mode_source = final_source;
     source_specific_mode_source.current_mode = RmfLiftState::MODE_AGV;
     let source_specific_mode =
         map_rmf_lift_state(&source_specific_mode_source, &labels, rmf_provenance(3))
             .map_err(|error| error.to_string())?;
     let source_specific_mode_resolution =
-        engine.resolve_observation(&source_specific_mode.observation);
-
-    let runtime =
-        RecordedRuntime::new([final_state.clone()], []).map_err(|error| error.to_string())?;
-    let final_states = runtime.car_states();
+        ingest_resolution(&mut engine, &source_specific_mode.observation)?;
 
     Ok(RmfRecordedExperiment {
         incomplete,
@@ -324,7 +342,7 @@ fn run_bacnet_experiment() -> Result<BacnetRecordedExperiment, String> {
     )
     .map_err(|error| error.to_string())?;
     let mut engine = Engine::new(partial.topology.clone());
-    let partial_resolution = engine.resolve_observation(&partial.observation);
+    let partial_resolution = ingest_resolution(&mut engine, &partial.observation)?;
 
     let mut final_source = partial_source.clone();
     final_source.car_position = 4;
@@ -339,16 +357,17 @@ fn run_bacnet_experiment() -> Result<BacnetRecordedExperiment, String> {
         bacnet_provenance(2),
     )
     .map_err(|error| error.to_string())?;
-    let final_resolution = engine.resolve_observation(&final_observation.observation);
-    let final_state = match &final_resolution {
-        CarStateResolution::Resolved(state) => state.clone(),
+    let final_resolution = ingest_resolution(&mut engine, &final_observation.observation)?;
+    match &final_resolution {
+        CarStateResolution::Resolved(_) => {}
         CarStateResolution::Unresolved { reasons, .. } => {
             return Err(format!(
                 "sufficient BACnet observation stayed unresolved: {reasons:?}"
             ));
         }
-    };
+    }
 
+    let final_states = engine.car_states();
     let mut decoupled_source = final_source.clone();
     decoupled_source.out_of_service = true;
     decoupled_source.car_mode = Some(BacnetLiftCarMode::OutOfService);
@@ -359,7 +378,7 @@ fn run_bacnet_experiment() -> Result<BacnetRecordedExperiment, String> {
         bacnet_provenance(3),
     )
     .map_err(|error| error.to_string())?;
-    let decoupled_resolution = engine.resolve_observation(&decoupled.observation);
+    let decoupled_resolution = ingest_resolution(&mut engine, &decoupled.observation)?;
 
     let mut mixed_doors_source = final_source;
     mixed_doors_source.car_door_status = vec![BacnetDoorStatus::Opened, BacnetDoorStatus::Closed];
@@ -370,10 +389,7 @@ fn run_bacnet_experiment() -> Result<BacnetRecordedExperiment, String> {
         bacnet_provenance(4),
     )
     .map_err(|error| error.to_string())?;
-    let mixed_doors_resolution = engine.resolve_observation(&mixed_doors.observation);
-
-    let runtime = RecordedRuntime::new([final_state], []).map_err(|error| error.to_string())?;
-    let final_states = runtime.car_states();
+    let mixed_doors_resolution = ingest_resolution(&mut engine, &mixed_doors.observation)?;
 
     Ok(BacnetRecordedExperiment {
         partial,
@@ -401,10 +417,10 @@ fn run_diagnostic_experiment() -> Result<DiagnosticExperiment, String> {
         .map_err(|error| error.to_string())?;
 
     let mut engine = Engine::with_diagnostic_capacity(first.topology.clone(), 4);
-    engine.resolve_observation(&first.observation);
-    engine.resolve_observation(&duplicate.observation);
-    engine.resolve_observation(&next.observation);
-    engine.resolve_observation(&after.observation);
+    engine.ingest_observation_update((&first.observation).into());
+    engine.ingest_observation_update((&duplicate.observation).into());
+    engine.ingest_observation_update((&next.observation).into());
+    engine.ingest_observation_update((&after.observation).into());
 
     let recorder_entries = engine.diagnostics().entries().cloned().collect();
     let incident = engine
@@ -419,6 +435,28 @@ fn run_diagnostic_experiment() -> Result<DiagnosticExperiment, String> {
         incident,
         replayed_anomalies,
     })
+}
+
+fn ingest_resolution(
+    engine: &mut Engine,
+    observation: &CarObservation,
+) -> Result<CarStateResolution, String> {
+    match engine.ingest_observation_update(observation.into()) {
+        ObservationIngestResult::Resolution(resolution) => Ok(resolution),
+        ObservationIngestResult::Incomplete(_) => {
+            Err("whole observation unexpectedly remained incomplete after assembly".into())
+        }
+        ObservationIngestResult::Rejected(error) => {
+            Err(format!("observation update was rejected: {error:?}"))
+        }
+    }
+}
+
+fn recorded_provenance(sequence: u64) -> ObservationProvenance {
+    ObservationProvenance {
+        source: ObservationSourceId::new("recorded-read-only"),
+        sequence: ObservationSequence::new(sequence),
+    }
 }
 
 fn rmf_provenance(sequence: u64) -> ObservationProvenance {
@@ -477,7 +515,7 @@ fn rmf_source_state() -> RmfLiftState {
 
 fn verify_determinism(first: &Replay, second: &Replay) -> Result<(), String> {
     if first.events != second.events
-        || first.app.runtime.car_states() != second.app.runtime.car_states()
+        || first.app.engine.car_states() != second.app.engine.car_states()
         || first.app.steps != second.app.steps
         || first.app.engine != second.app.engine
         || first.app.recording != second.app.recording
@@ -537,7 +575,7 @@ fn verify_reference_outcome(replay: &Replay) -> Result<(), String> {
         ));
     }
 
-    let states = replay.app.runtime.car_states();
+    let states = replay.app.engine.car_states();
     let expected_positions = [("A", Floor::new(2)), ("B", Floor::new(5))];
     if states.len() != expected_positions.len()
         || expected_positions.iter().any(|(id, floor)| {
@@ -614,7 +652,7 @@ fn verify_rejection_outcome(replay: &Replay) -> Result<(), String> {
                 .into(),
         );
     }
-    let states = replay.app.runtime.car_states();
+    let states = replay.app.engine.car_states();
     let recovered = states.iter().any(|state| {
         state.id.as_str() == "A"
             && state.location == CarLocation::Continuous(Position::at_floor(Floor::new(7)))
@@ -650,7 +688,7 @@ fn verify_recorded_outcome(playback: &RecordedPlayback) -> Result<(), String> {
         || !playback.batches[0].events.is_empty()
         || playback.batches[1].events.len() != 1
         || !playback.batches[2].events.is_empty()
-        || playback.batches[3].events.len() != 2
+        || playback.batches[3].events.len() != 3
         || playback.remaining_frames != 0
     {
         return Err("recorded frames were not released at their explicit elapsed times".into());
@@ -861,7 +899,7 @@ fn render_report(name: &str, outcome: &str, commands: &[Command], replay: &Repla
     }));
     lines.push(String::new());
     lines.push("final cars:".into());
-    lines.extend(replay.app.runtime.car_states().into_iter().map(|state| {
+    lines.extend(replay.app.engine.car_states().into_iter().map(|state| {
         format!(
             "  {} location={} motion={:?} door={:?} mode={:?} reported_destination={}",
             state.id,
@@ -1075,7 +1113,7 @@ mod tests {
             )
         );
         assert!(report.contains("[0250 ms] no events"));
-        assert!(report.contains("[0500 ms] PositionChanged A 3.50F"));
+        assert!(report.contains("[0500 ms] Observation A 3.50F"));
         assert!(report.contains("[0999 ms] no events"));
         assert!(report.contains("[1000 ms] Arrived A at 4F"));
         assert!(report.contains(

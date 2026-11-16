@@ -56,15 +56,15 @@ The exact Rust types and any future public schema are not frozen.
 
 ## Runtime boundary direction
 
-M4 implementation evidence separated the prototype responsibilities into:
+M4 implementation evidence separates the prototype responsibilities into:
 
 ~~~text
-ObservationSource
+Canonical observation updates -> Engine-owned evidence/state
 IntentSink
 Simulation/Replay Driver
 ~~~
 
-Read-only adapters do not implement a write method merely to reject it. Simulator/replay time advancement does not define the semantics of a live production adapter. The internal Rust contracts remain reversible; no external protocol is frozen.
+Read-only feeds do not implement a write method merely to reject it, and dispatch does not query adapter-owned resolved state. Simulator/replay time advancement does not define the semantics of a live production adapter. The internal Rust boundaries remain reversible; no external protocol is frozen.
 
 ## Engine and client separation
 

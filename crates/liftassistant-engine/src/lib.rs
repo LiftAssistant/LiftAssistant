@@ -2,6 +2,8 @@
 
 mod diagnostics;
 
+use std::collections::BTreeMap;
+
 pub use diagnostics::{
     DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, DiagnosticSequence, FlightRecorder,
     IncidentSnapshot,
@@ -11,9 +13,13 @@ use liftassistant_core::{
     CallRegistration, CallRegistry, DispatchCandidate, DispatchSelection, HallCallRejection,
     dispatch, validate_hall_call,
 };
-use liftassistant_model::{BuildingTopology, CallId, CallState, CarObservation, HallCall, Intent};
+use liftassistant_model::{
+    BuildingTopology, CallId, CallState, Capabilities, CarId, CarObservationUpdate, CarState,
+    HallCall, Intent, ObservationSourceId,
+};
 use liftassistant_runtime::{
-    CarStateResolution, IntentSink, ObservationSource, RuntimeEvent, resolve_car_observation,
+    AssembledCarObservation, CarStateResolution, IntentSink, ObservationAssembler,
+    ObservationAssemblyError, RuntimeEvent, resolve_car_observation,
 };
 
 const DEFAULT_DIAGNOSTIC_CAPACITY: usize = 128;
@@ -49,6 +55,13 @@ pub enum EngineEvent {
     Runtime(RuntimeEvent),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum ObservationIngestResult {
+    Incomplete(Box<AssembledCarObservation>),
+    Resolution(CarStateResolution),
+    Rejected(ObservationAssemblyError),
+}
+
 /// Deterministic semantic orchestration shared by interactive and headless callers.
 ///
 /// Adapters, time driving, UI state, persistence, and transport remain outside this boundary.
@@ -58,6 +71,9 @@ pub struct Engine {
     last_call: Option<HallCall>,
     decision: Option<Intent>,
     calls: CallRegistry,
+    observations: ObservationAssembler,
+    states: BTreeMap<(ObservationSourceId, CarId), CarState>,
+    capabilities: BTreeMap<CarId, Capabilities>,
     diagnostics: FlightRecorder,
 }
 
@@ -72,6 +88,9 @@ impl Engine {
             last_call: None,
             decision: None,
             calls: CallRegistry::new(),
+            observations: ObservationAssembler::new(),
+            states: BTreeMap::new(),
+            capabilities: BTreeMap::new(),
             diagnostics: FlightRecorder::new(capacity),
         }
     }
@@ -96,14 +115,55 @@ impl Engine {
         &self.diagnostics
     }
 
-    pub fn resolve_observation(&mut self, observation: &CarObservation) -> CarStateResolution {
-        self.diagnostics.record_observation(observation.clone());
-        resolve_car_observation(observation)
+    pub fn set_capabilities(&mut self, car: CarId, capabilities: Capabilities) {
+        self.capabilities.insert(car, capabilities);
+    }
+
+    pub fn car_states(&self) -> Vec<CarState> {
+        self.states.values().cloned().collect()
+    }
+
+    pub fn car_state(&self, source: &ObservationSourceId, car: &CarId) -> Option<&CarState> {
+        self.states.get(&(source.clone(), car.clone()))
+    }
+
+    pub fn evidence(
+        &self,
+        source: &ObservationSourceId,
+        car: &CarId,
+    ) -> Option<&AssembledCarObservation> {
+        self.observations.current(source, car)
+    }
+
+    pub fn ingest_observation_update(
+        &mut self,
+        update: CarObservationUpdate,
+    ) -> ObservationIngestResult {
+        let key = (update.provenance.source.clone(), update.car.clone());
+        self.diagnostics.record_observation(update.clone());
+        let assembled = match self.observations.apply(update) {
+            Ok(assembled) => assembled,
+            Err(error) => return ObservationIngestResult::Rejected(error),
+        };
+        let Some(snapshot) = assembled.snapshot() else {
+            self.states.remove(&key);
+            return ObservationIngestResult::Incomplete(Box::new(assembled));
+        };
+        let resolution = resolve_car_observation(&snapshot);
+        match &resolution {
+            CarStateResolution::Resolved(state) => {
+                self.states.insert(key, state.clone());
+            }
+            CarStateResolution::Unresolved { .. } => {
+                self.states.remove(&key);
+            }
+        }
+        ObservationIngestResult::Resolution(resolution)
     }
 
     pub fn submit_call<B>(&mut self, call: HallCall, backend: &mut B) -> Vec<EngineEvent>
     where
-        B: ObservationSource + IntentSink,
+        B: IntentSink,
     {
         let mut events = vec![EngineEvent::HallCall(call)];
         self.last_call = Some(call);
@@ -138,7 +198,7 @@ impl Engine {
 
     pub fn retry_pending<B>(&mut self, backend: &mut B) -> Vec<EngineEvent>
     where
-        B: ObservationSource + IntentSink,
+        B: IntentSink,
     {
         let events = self.dispatch_pending(backend);
         self.diagnostics.record_engine_events(&events);
@@ -151,7 +211,7 @@ impl Engine {
         backend: &mut B,
     ) -> Vec<EngineEvent>
     where
-        B: ObservationSource + IntentSink,
+        B: IntentSink,
     {
         let mut events = Vec::new();
 
@@ -168,6 +228,9 @@ impl Engine {
                     }
                 }
                 RuntimeEvent::IntentAccepted(Intent::ParkAt { .. }) => {}
+                RuntimeEvent::Observation(update) => {
+                    self.ingest_observation_update(update.clone());
+                }
                 RuntimeEvent::Arrived { car, floor } => {
                     self.calls.note_arrival(car, *floor);
                 }
@@ -184,7 +247,7 @@ impl Engine {
                     });
                     events.extend(self.dispatch_pending(backend));
                 }
-                RuntimeEvent::PositionChanged(_) | RuntimeEvent::DoorStateChanged { .. } => {}
+                RuntimeEvent::DoorStateChanged { .. } => {}
             }
         }
         self.diagnostics.record_engine_events(&events);
@@ -193,23 +256,15 @@ impl Engine {
 
     fn dispatch_pending<B>(&mut self, backend: &mut B) -> Vec<EngineEvent>
     where
-        B: ObservationSource + IntentSink,
+        B: IntentSink,
     {
         let pending: Vec<_> = self.calls.pending_calls().collect();
         let mut events = Vec::new();
 
         for (id, call) in pending {
-            let states = backend.car_states();
+            let states = self.car_states();
             let occupied_cars = self.calls.occupied_cars();
-            let capabilities = states
-                .iter()
-                .filter_map(|car| {
-                    backend
-                        .capabilities(&car.id)
-                        .map(|caps| (car.id.clone(), caps))
-                })
-                .collect();
-            let decision = dispatch(&call, &states, &capabilities, &occupied_cars);
+            let decision = dispatch(&call, &states, &self.capabilities, &occupied_cars);
             events.extend(
                 decision
                     .candidates
@@ -255,27 +310,14 @@ impl Engine {
 mod tests {
     use super::*;
     use liftassistant_model::{
-        Capabilities, CarId, CarState, Direction, DoorState, Floor, ReportedDestination,
+        Capabilities, CarId, CarObservationUpdate, CarState, Direction, DoorState, Floor,
+        ObservationProvenance, ObservationSequence, ObservationSourceId, PositionEvidence,
+        ReportedDestination,
     };
     use liftassistant_runtime::RuntimeError;
 
     struct TestBackend {
-        state: CarState,
         intents: Vec<Intent>,
-    }
-
-    impl ObservationSource for TestBackend {
-        fn source_name(&self) -> &str {
-            "engine-test"
-        }
-
-        fn car_states(&self) -> Vec<CarState> {
-            vec![self.state.clone()]
-        }
-
-        fn capabilities(&self, car: &CarId) -> Option<Capabilities> {
-            (car == &self.state.id).then_some(Capabilities::reference_defaults())
-        }
     }
 
     impl IntentSink for TestBackend {
@@ -285,11 +327,30 @@ mod tests {
         }
     }
 
+    fn provenance(sequence: u64) -> ObservationProvenance {
+        ObservationProvenance {
+            source: ObservationSourceId::new("engine-test"),
+            sequence: ObservationSequence::new(sequence),
+        }
+    }
+
+    fn seed_state(engine: &mut Engine, state: &CarState, sequence: u64) {
+        engine.set_capabilities(state.id.clone(), Capabilities::reference_defaults());
+        assert_eq!(
+            engine.ingest_observation_update(CarObservationUpdate::from_state(
+                provenance(sequence),
+                state,
+            )),
+            ObservationIngestResult::Resolution(CarStateResolution::Resolved(state.clone()))
+        );
+    }
+
     #[test]
     fn engine_owns_call_lifecycle_and_runtime_feedback_orchestration() {
         let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let state = CarState::new("A", Floor::new(3));
+        seed_state(&mut engine, &state, 1);
         let mut backend = TestBackend {
-            state: CarState::new("A", Floor::new(3)),
             intents: Vec::new(),
         };
         let call = HallCall {
@@ -352,7 +413,6 @@ mod tests {
         let mut engine =
             Engine::with_diagnostic_capacity(BuildingTopology::reference_eight_floor(), 3);
         let mut backend = TestBackend {
-            state: CarState::new("A", Floor::new(3)),
             intents: Vec::new(),
         };
         let intent = Intent::ServeFloor {
@@ -364,11 +424,11 @@ mod tests {
             vec![RuntimeEvent::IntentAccepted(intent.clone())],
             &mut backend,
         );
-        for _ in 0..2 {
-            engine.consume_runtime_events(
-                vec![RuntimeEvent::PositionChanged(backend.state.clone())],
-                &mut backend,
-            );
+        for sequence in 1..=2 {
+            engine.ingest_observation_update(CarObservationUpdate::from_state(
+                provenance(sequence),
+                &CarState::new("A", Floor::new(3)),
+            ));
         }
 
         assert_eq!(engine.diagnostics().entries().count(), 3);
@@ -386,8 +446,9 @@ mod tests {
     #[test]
     fn desired_destination_survives_unknown_reported_destination() {
         let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let state = CarState::new("A", Floor::new(3));
+        seed_state(&mut engine, &state, 1);
         let mut backend = TestBackend {
-            state: CarState::new("A", Floor::new(3)),
             intents: Vec::new(),
         };
         let desired = Intent::ServeFloor {
@@ -402,7 +463,12 @@ mod tests {
             },
             &mut backend,
         );
-        backend.state.reported_destination = ReportedDestination::Unknown;
+        let mut reported_unknown = state;
+        reported_unknown.reported_destination = ReportedDestination::Unknown;
+        engine.ingest_observation_update(CarObservationUpdate::from_state(
+            provenance(2),
+            &reported_unknown,
+        ));
 
         assert_eq!(engine.decision(), Some(&desired));
         assert_eq!(backend.intents, vec![desired]);
@@ -420,5 +486,27 @@ mod tests {
         );
         assert!(second.contains(&EngineEvent::NoEligibleCar(CallId::new(2))));
         assert_eq!(backend.intents.len(), 1);
+    }
+
+    #[test]
+    fn explicit_unknown_invalidates_engine_owned_operational_state() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let state = CarState::new("A", Floor::new(3));
+        seed_state(&mut engine, &state, 1);
+
+        let mut update = CarObservationUpdate::from_state(provenance(2), &state);
+        update.position = Some(PositionEvidence::Unknown);
+        assert_eq!(
+            engine.ingest_observation_update(update),
+            ObservationIngestResult::Resolution(CarStateResolution::Unresolved {
+                car: CarId::new("A"),
+                reasons: vec![liftassistant_runtime::UnresolvedCarStateReason::PositionUnknown],
+            })
+        );
+        assert!(
+            engine
+                .car_state(&ObservationSourceId::new("engine-test"), &CarId::new("A"))
+                .is_none()
+        );
     }
 }

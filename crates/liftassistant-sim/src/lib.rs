@@ -7,12 +7,11 @@ mod rmf_recorded;
 use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_model::{
-    Capabilities, CarId, CarLocation, CarState, Direction, DoorState, Floor, Intent, MotionState,
+    Capabilities, CarId, CarLocation, CarObservationUpdate, CarState, Direction, DoorState, Floor,
+    Intent, MotionState, ObservationProvenance, ObservationSequence, ObservationSourceId,
     OperatingMode, Position, ReportedDestination,
 };
-use liftassistant_runtime::{
-    IntentSink, ObservationSource, RuntimeError, RuntimeEvent, SimulationDriver,
-};
+use liftassistant_runtime::{IntentSink, RuntimeError, RuntimeEvent, SimulationDriver};
 
 pub use bacnet_recorded::{
     BacnetDoorStatus, BacnetLiftCarDirection, BacnetLiftCarMode, BacnetLiftSourceContext,
@@ -35,6 +34,9 @@ struct SimCar {
 pub struct SimRuntime {
     cars: BTreeMap<CarId, SimCar>,
     speed_floors_per_second: f64,
+    source: ObservationSourceId,
+    next_sequence: u64,
+    pending_observations: Vec<CarObservationUpdate>,
     pending_events: Vec<RuntimeEvent>,
     reject_next_intent: bool,
 }
@@ -58,12 +60,20 @@ impl SimRuntime {
             })
             .collect();
 
-        Self {
+        let mut runtime = Self {
             cars,
             speed_floors_per_second,
+            source: ObservationSourceId::new("simulator"),
+            next_sequence: 1,
+            pending_observations: Vec::new(),
             pending_events: Vec::new(),
             reject_next_intent: false,
+        };
+        let initial_states = runtime.car_states();
+        for state in initial_states {
+            runtime.queue_observation(state);
         }
+        runtime
     }
 
     pub fn reference_two_car() -> Self {
@@ -83,12 +93,41 @@ impl SimRuntime {
     }
 
     pub fn set_mode(&mut self, car: &CarId, mode: OperatingMode) -> Result<(), RuntimeError> {
-        let sim_car = self
-            .cars
-            .get_mut(car)
-            .ok_or_else(|| RuntimeError::new(format!("unknown car {car}")))?;
-        sim_car.state.mode = mode;
+        let state = {
+            let sim_car = self
+                .cars
+                .get_mut(car)
+                .ok_or_else(|| RuntimeError::new(format!("unknown car {car}")))?;
+            sim_car.state.mode = mode;
+            sim_car.state.clone()
+        };
+        self.queue_observation(state);
         Ok(())
+    }
+
+    pub fn source_name(&self) -> &str {
+        self.source.as_str()
+    }
+
+    pub fn car_states(&self) -> Vec<CarState> {
+        self.cars.values().map(|car| car.state.clone()).collect()
+    }
+
+    pub fn capabilities(&self, car: &CarId) -> Option<Capabilities> {
+        self.cars
+            .get(car)
+            .map(|sim_car| sim_car.capabilities.clone())
+    }
+
+    pub fn all_capabilities(&self) -> Vec<(CarId, Capabilities)> {
+        self.cars
+            .iter()
+            .map(|(car, sim_car)| (car.clone(), sim_car.capabilities.clone()))
+            .collect()
+    }
+
+    pub fn take_observation_updates(&mut self) -> Vec<CarObservationUpdate> {
+        std::mem::take(&mut self.pending_observations)
     }
 
     /// Arms a one-shot developer control at the simulator boundary.
@@ -104,62 +143,63 @@ impl SimRuntime {
             Intent::ServeFloor { car, floor } | Intent::ParkAt { car, floor } => (car, *floor),
         };
 
-        let sim_car = self
-            .cars
-            .get_mut(car_id)
-            .ok_or_else(|| RuntimeError::new(format!("unknown car {car_id}")))?;
+        let state = {
+            let sim_car = self
+                .cars
+                .get_mut(car_id)
+                .ok_or_else(|| RuntimeError::new(format!("unknown car {car_id}")))?;
 
-        if sim_car.state.mode != OperatingMode::Normal {
-            return Err(RuntimeError::new(format!(
-                "car {car_id} is not available in normal mode"
-            )));
-        }
+            if sim_car.state.mode != OperatingMode::Normal {
+                return Err(RuntimeError::new(format!(
+                    "car {car_id} is not available in normal mode"
+                )));
+            }
 
-        if !sim_car.capabilities.serve_floor {
-            return Err(RuntimeError::new(format!(
-                "car {car_id} does not expose serve_floor"
-            )));
-        }
+            if !sim_car.capabilities.serve_floor {
+                return Err(RuntimeError::new(format!(
+                    "car {car_id} does not expose serve_floor"
+                )));
+            }
 
-        let current = match sim_car.state.location {
-            CarLocation::Floor(floor) => f64::from(floor.index()),
-            CarLocation::Continuous(position) => position.floor_position,
+            let current = match sim_car.state.location {
+                CarLocation::Floor(floor) => f64::from(floor.index()),
+                CarLocation::Continuous(position) => position.floor_position,
+            };
+            let delta = f64::from(floor.index()) - current;
+            sim_car.state.location = CarLocation::Continuous(Position {
+                floor_position: current,
+                nearest_floor: sim_car.state.location.floor_reference(),
+            });
+            sim_car.desired_target = Some(floor);
+            sim_car.state.reported_destination = ReportedDestination::Known(floor);
+            sim_car.state.door = DoorState::Closed;
+            sim_car.state.motion = if delta > 0.0 {
+                MotionState::Moving(Direction::Up)
+            } else if delta < 0.0 {
+                MotionState::Moving(Direction::Down)
+            } else {
+                MotionState::Stopped
+            };
+            sim_car.state.clone()
         };
-        let delta = f64::from(floor.index()) - current;
-        sim_car.state.location = CarLocation::Continuous(Position {
-            floor_position: current,
-            nearest_floor: sim_car.state.location.floor_reference(),
-        });
-        sim_car.desired_target = Some(floor);
-        sim_car.state.reported_destination = ReportedDestination::Known(floor);
-        sim_car.state.door = DoorState::Closed;
-        sim_car.state.motion = if delta > 0.0 {
-            MotionState::Moving(Direction::Up)
-        } else if delta < 0.0 {
-            MotionState::Moving(Direction::Down)
-        } else {
-            MotionState::Stopped
-        };
 
+        self.queue_observation(state);
         self.pending_events
             .push(RuntimeEvent::IntentAccepted(intent));
         Ok(())
     }
-}
 
-impl ObservationSource for SimRuntime {
-    fn source_name(&self) -> &str {
-        "simulator"
-    }
-
-    fn car_states(&self) -> Vec<CarState> {
-        self.cars.values().map(|car| car.state.clone()).collect()
-    }
-
-    fn capabilities(&self, car: &CarId) -> Option<Capabilities> {
-        self.cars
-            .get(car)
-            .map(|sim_car| sim_car.capabilities.clone())
+    fn queue_observation(&mut self, state: CarState) {
+        let provenance = ObservationProvenance {
+            source: self.source.clone(),
+            sequence: ObservationSequence::new(self.next_sequence),
+        };
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .expect("simulator observation sequence exhausted");
+        self.pending_observations
+            .push(CarObservationUpdate::from_state(provenance, &state));
     }
 }
 
@@ -177,7 +217,14 @@ impl IntentSink for SimRuntime {
 impl SimulationDriver for SimRuntime {
     fn advance(&mut self, elapsed: Duration) -> Vec<RuntimeEvent> {
         let mut events = std::mem::take(&mut self.pending_events);
+        events.extend(
+            self.take_observation_updates()
+                .into_iter()
+                .map(RuntimeEvent::Observation),
+        );
         let step = self.speed_floors_per_second * elapsed.as_secs_f64();
+        let source = self.source.clone();
+        let mut next_sequence = self.next_sequence;
 
         for sim_car in self.cars.values_mut() {
             let Some(target) = sim_car.desired_target else {
@@ -200,7 +247,11 @@ impl SimulationDriver for SimRuntime {
                 sim_car.state.reported_destination = ReportedDestination::None;
                 sim_car.state.door = DoorState::Open;
 
-                events.push(RuntimeEvent::PositionChanged(sim_car.state.clone()));
+                events.push(RuntimeEvent::Observation(observation_from_state(
+                    &source,
+                    &mut next_sequence,
+                    &sim_car.state,
+                )));
                 events.push(RuntimeEvent::Arrived {
                     car: sim_car.state.id.clone(),
                     floor: target,
@@ -225,11 +276,31 @@ impl SimulationDriver for SimRuntime {
             sim_car.state.motion = MotionState::Moving(direction);
             sim_car.state.door = DoorState::Closed;
 
-            events.push(RuntimeEvent::PositionChanged(sim_car.state.clone()));
+            events.push(RuntimeEvent::Observation(observation_from_state(
+                &source,
+                &mut next_sequence,
+                &sim_car.state,
+            )));
         }
+        self.next_sequence = next_sequence;
 
         events
     }
+}
+
+fn observation_from_state(
+    source: &ObservationSourceId,
+    next_sequence: &mut u64,
+    state: &CarState,
+) -> CarObservationUpdate {
+    let provenance = ObservationProvenance {
+        source: source.clone(),
+        sequence: ObservationSequence::new(*next_sequence),
+    };
+    *next_sequence = next_sequence
+        .checked_add(1)
+        .expect("simulator observation sequence exhausted");
+    CarObservationUpdate::from_state(provenance, state)
 }
 
 #[cfg(test)]
@@ -239,6 +310,7 @@ mod tests {
     #[test]
     fn serve_floor_reaches_target_deterministically() {
         let mut runtime = SimRuntime::reference_two_car();
+        runtime.take_observation_updates();
         runtime
             .submit_intent(Intent::ServeFloor {
                 car: CarId::new("A"),
@@ -267,6 +339,7 @@ mod tests {
     #[test]
     fn one_shot_intent_rejection_preserves_state_and_then_recovers() {
         let mut runtime = SimRuntime::reference_two_car();
+        runtime.take_observation_updates();
         let initial = runtime.car_states();
         let intent = Intent::ServeFloor {
             car: CarId::new("A"),

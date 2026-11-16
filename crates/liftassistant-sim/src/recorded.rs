@@ -1,9 +1,13 @@
 use std::{collections::BTreeMap, collections::VecDeque, time::Duration};
 
 use liftassistant_model::{
-    Capabilities, CarId, CarLocation, CarState, Intent, MotionState, ReportedDestination,
+    Capabilities, CarId, CarObservationUpdate, CarState, Intent, ObservationProvenance,
+    ObservationSequence, ObservationSourceId,
 };
-use liftassistant_runtime::{ObservationSource, RuntimeError, RuntimeEvent, SimulationDriver};
+use liftassistant_runtime::{
+    CarStateResolution, ObservationAssembler, RuntimeError, RuntimeEvent, SimulationDriver,
+    resolve_car_observation,
+};
 
 /// A timed batch of native LiftAssistant observations.
 ///
@@ -25,6 +29,8 @@ impl RecordedFrame {
 pub struct RecordedRuntime {
     states: BTreeMap<CarId, CarState>,
     capabilities: BTreeMap<CarId, Capabilities>,
+    assembler: ObservationAssembler,
+    initial_observations: Vec<CarObservationUpdate>,
     frames: VecDeque<RecordedFrame>,
     until_next_frame: Option<Duration>,
 }
@@ -43,7 +49,30 @@ impl RecordedRuntime {
             }
         }
 
+        let mut assembler = ObservationAssembler::new();
+        let source = ObservationSourceId::new("recorded-read-only");
+        let mut next_sequence = 1_u64;
+        let initial_observations = states
+            .values()
+            .map(|state| {
+                let update = CarObservationUpdate::from_state(
+                    ObservationProvenance {
+                        source: source.clone(),
+                        sequence: ObservationSequence::new(next_sequence),
+                    },
+                    state,
+                );
+                next_sequence = next_sequence
+                    .checked_add(1)
+                    .expect("recorded initial observation sequence exhausted");
+                assembler
+                    .apply(update.clone())
+                    .expect("generated initial observations are ordered");
+                update
+            })
+            .collect();
         let frames: VecDeque<_> = frames.into_iter().collect();
+        let mut validation_assembler = assembler.clone();
         for frame in &frames {
             for event in &frame.events {
                 let car = event_car(event);
@@ -51,6 +80,21 @@ impl RecordedRuntime {
                     return Err(RuntimeError::new(format!(
                         "recorded event references unknown car {car}"
                     )));
+                }
+                if let RuntimeEvent::Observation(update) = event {
+                    if update.provenance.source != source {
+                        return Err(RuntimeError::new(format!(
+                            "recorded observation source {} does not match feed source {source}",
+                            update.provenance.source
+                        )));
+                    }
+                    validation_assembler
+                        .apply(update.clone())
+                        .map_err(|error| {
+                            RuntimeError::new(format!(
+                                "recorded observation sequence is invalid: {error:?}"
+                            ))
+                        })?;
                 }
             }
         }
@@ -74,6 +118,8 @@ impl RecordedRuntime {
         Ok(Self {
             states,
             capabilities,
+            assembler,
+            initial_observations,
             frames,
             until_next_frame,
         })
@@ -83,42 +129,45 @@ impl RecordedRuntime {
         self.frames.len()
     }
 
-    fn apply(&mut self, event: &RuntimeEvent) {
-        match event {
-            RuntimeEvent::IntentAccepted(_) => {}
-            RuntimeEvent::PositionChanged(state) => {
-                self.states.insert(state.id.clone(), state.clone());
-            }
-            RuntimeEvent::Arrived { car, floor } => {
-                let state = self
-                    .states
-                    .get_mut(car)
-                    .expect("recorded event cars are validated at construction");
-                state.location = CarLocation::Floor(*floor);
-                state.motion = MotionState::Stopped;
-                state.reported_destination = ReportedDestination::None;
-            }
-            RuntimeEvent::DoorStateChanged { car, state: door } => {
-                self.states
-                    .get_mut(car)
-                    .expect("recorded event cars are validated at construction")
-                    .door = *door;
-            }
-        }
-    }
-}
-
-impl ObservationSource for RecordedRuntime {
-    fn source_name(&self) -> &str {
+    pub fn source_name(&self) -> &str {
         "recorded-read-only"
     }
 
-    fn car_states(&self) -> Vec<CarState> {
+    pub fn car_states(&self) -> Vec<CarState> {
         self.states.values().cloned().collect()
     }
 
-    fn capabilities(&self, car: &CarId) -> Option<Capabilities> {
+    pub fn capabilities(&self, car: &CarId) -> Option<Capabilities> {
         self.capabilities.get(car).cloned()
+    }
+
+    pub fn take_observation_updates(&mut self) -> Vec<CarObservationUpdate> {
+        std::mem::take(&mut self.initial_observations)
+    }
+
+    fn apply(&mut self, event: &RuntimeEvent) {
+        match event {
+            RuntimeEvent::IntentAccepted(_) => {}
+            RuntimeEvent::Observation(update) => {
+                let car = update.car.clone();
+                let assembled = self
+                    .assembler
+                    .apply(update.clone())
+                    .expect("recorded observation sequences are validated while applying");
+                match assembled
+                    .snapshot()
+                    .map(|snapshot| resolve_car_observation(&snapshot))
+                {
+                    Some(CarStateResolution::Resolved(state)) => {
+                        self.states.insert(car, state);
+                    }
+                    Some(CarStateResolution::Unresolved { .. }) | None => {
+                        self.states.remove(&car);
+                    }
+                }
+            }
+            RuntimeEvent::Arrived { .. } | RuntimeEvent::DoorStateChanged { .. } => {}
+        }
     }
 }
 
@@ -152,14 +201,17 @@ fn event_car(event: &RuntimeEvent) -> &CarId {
         | RuntimeEvent::IntentAccepted(Intent::ParkAt { car, .. })
         | RuntimeEvent::Arrived { car, .. }
         | RuntimeEvent::DoorStateChanged { car, .. } => car,
-        RuntimeEvent::PositionChanged(state) => &state.id,
+        RuntimeEvent::Observation(update) => &update.car,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{Direction, DoorState, Floor, OperatingMode, Position};
+    use liftassistant_model::{
+        CarLocation, Direction, DoorState, Floor, MotionState, OperatingMode, Position,
+        PositionEvidence, ReportedDestination,
+    };
 
     fn moving_state(position: f64) -> CarState {
         CarState {
@@ -175,17 +227,32 @@ mod tests {
         }
     }
 
+    fn observation(sequence: u64, state: &CarState) -> RuntimeEvent {
+        RuntimeEvent::Observation(CarObservationUpdate::from_state(
+            ObservationProvenance {
+                source: ObservationSourceId::new("recorded-read-only"),
+                sequence: ObservationSequence::new(sequence),
+            },
+            state,
+        ))
+    }
+
     fn recording() -> RecordedRuntime {
         RecordedRuntime::new(
             [CarState::new("A", Floor::new(3))],
             [
                 RecordedFrame::after(
                     Duration::from_millis(500),
-                    vec![RuntimeEvent::PositionChanged(moving_state(3.5))],
+                    vec![observation(2, &moving_state(3.5))],
                 ),
                 RecordedFrame::after(
                     Duration::from_millis(500),
                     vec![
+                        observation(3, &{
+                            let mut state = CarState::new("A", Floor::new(4));
+                            state.door = DoorState::Open;
+                            state
+                        }),
                         RuntimeEvent::Arrived {
                             car: CarId::new("A"),
                             floor: Floor::new(4),
@@ -220,7 +287,7 @@ mod tests {
         );
         assert_eq!(runtime.advance(Duration::from_millis(499)).len(), 0);
         assert_eq!(runtime.remaining_frames(), 1);
-        assert_eq!(runtime.advance(Duration::from_millis(1)).len(), 2);
+        assert_eq!(runtime.advance(Duration::from_millis(1)).len(), 3);
 
         let final_state = &runtime.car_states()[0];
         assert_eq!(final_state.location, CarLocation::Floor(Floor::new(4)));
@@ -251,14 +318,42 @@ mod tests {
 
         let events = runtime.advance(Duration::from_secs(2));
 
-        assert!(matches!(events[0], RuntimeEvent::PositionChanged(_)));
-        assert!(matches!(events[1], RuntimeEvent::Arrived { .. }));
-        assert!(matches!(events[2], RuntimeEvent::DoorStateChanged { .. }));
+        assert!(matches!(events[0], RuntimeEvent::Observation(_)));
+        assert!(matches!(events[1], RuntimeEvent::Observation(_)));
+        assert!(matches!(events[2], RuntimeEvent::Arrived { .. }));
+        assert!(matches!(events[3], RuntimeEvent::DoorStateChanged { .. }));
         assert_eq!(runtime.remaining_frames(), 0);
         assert_eq!(
             runtime.car_states()[0].location,
             CarLocation::Floor(Floor::new(4))
         );
+    }
+
+    #[test]
+    fn lifecycle_events_do_not_bypass_canonical_observation_state() {
+        let mut runtime = RecordedRuntime::new(
+            [CarState::new("A", Floor::new(3))],
+            [RecordedFrame::after(
+                Duration::ZERO,
+                vec![
+                    RuntimeEvent::Arrived {
+                        car: CarId::new("A"),
+                        floor: Floor::new(4),
+                    },
+                    RuntimeEvent::DoorStateChanged {
+                        car: CarId::new("A"),
+                        state: DoorState::Open,
+                    },
+                ],
+            )],
+        )
+        .expect("recorded car is known");
+
+        runtime.advance(Duration::ZERO);
+
+        let state = &runtime.car_states()[0];
+        assert_eq!(state.location, CarLocation::Floor(Floor::new(3)));
+        assert_eq!(state.door, DoorState::Closed);
     }
 
     #[test]
@@ -275,5 +370,65 @@ mod tests {
         );
 
         assert!(matches!(result, Err(error) if error.to_string().contains("unknown car missing")));
+    }
+
+    #[test]
+    fn recording_rejects_non_increasing_observation_sequence_before_playback() {
+        let state = CarState::new("A", Floor::new(3));
+        let result = RecordedRuntime::new(
+            [state.clone()],
+            [RecordedFrame::after(
+                Duration::ZERO,
+                vec![observation(1, &state)],
+            )],
+        );
+
+        assert!(
+            matches!(result, Err(error) if error.to_string().contains("NonIncreasingSequence"))
+        );
+    }
+
+    #[test]
+    fn recording_rejects_cross_source_observation_mixing() {
+        let state = CarState::new("A", Floor::new(3));
+        let mut update = match observation(2, &state) {
+            RuntimeEvent::Observation(update) => update,
+            _ => unreachable!("observation helper always returns an observation"),
+        };
+        update.provenance.source = ObservationSourceId::new("fixture/other");
+
+        let result = RecordedRuntime::new(
+            [state],
+            [RecordedFrame::after(
+                Duration::ZERO,
+                vec![RuntimeEvent::Observation(update)],
+            )],
+        );
+
+        assert!(
+            matches!(result, Err(error) if error.to_string().contains("does not match feed source"))
+        );
+    }
+
+    #[test]
+    fn explicit_unknown_removes_stale_resolved_runtime_view() {
+        let state = CarState::new("A", Floor::new(3));
+        let mut update = match observation(2, &state) {
+            RuntimeEvent::Observation(update) => update,
+            _ => unreachable!("observation helper always returns an observation"),
+        };
+        update.position = Some(PositionEvidence::Unknown);
+        let mut runtime = RecordedRuntime::new(
+            [state],
+            [RecordedFrame::after(
+                Duration::ZERO,
+                vec![RuntimeEvent::Observation(update)],
+            )],
+        )
+        .expect("recorded car is known");
+
+        runtime.advance(Duration::ZERO);
+
+        assert!(runtime.car_states().is_empty());
     }
 }

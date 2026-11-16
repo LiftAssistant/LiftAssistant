@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 
-use liftassistant_model::{CarObservation, Intent, ObservationSequence, ObservationSourceId};
+use liftassistant_model::{CarObservationUpdate, Intent, ObservationSequence, ObservationSourceId};
 use liftassistant_runtime::RuntimeEvent;
 
 use crate::EngineEvent;
@@ -33,7 +33,7 @@ pub enum DiagnosticAnomaly {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DiagnosticEvent {
-    Observation(CarObservation),
+    Observation(CarObservationUpdate),
     Engine(EngineEvent),
     Anomaly(DiagnosticAnomaly),
 }
@@ -94,8 +94,8 @@ impl FlightRecorder {
         self.incidents.iter()
     }
 
-    pub(crate) fn record_observation(&mut self, observation: CarObservation) {
-        self.record(DiagnosticEvent::Observation(observation));
+    pub(crate) fn record_observation(&mut self, update: CarObservationUpdate) {
+        self.record(DiagnosticEvent::Observation(update));
     }
 
     pub(crate) fn record_engine_events(&mut self, events: &[EngineEvent]) {

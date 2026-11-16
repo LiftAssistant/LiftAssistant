@@ -1,5 +1,4 @@
 use liftassistant_model::MotionState;
-use liftassistant_runtime::ObservationSource;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout},
@@ -37,7 +36,7 @@ pub fn render(frame: &mut Frame, app: &App) {
     );
 
     let columns = Layout::horizontal([Constraint::Length(25), Constraint::Min(40)]).split(rows[1]);
-    let states = app.runtime.car_states();
+    let states = app.engine.car_states();
     let building: Vec<Line> = app
         .engine
         .topology()

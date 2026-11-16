@@ -8,6 +8,8 @@ Updated: 2026-11-16
 
 M1 Interactive Simulator is closed and human-accepted.
 
+M4.9 Observation Semantics Hardening is implemented through M4.9d and awaits HUMAN-CHECK. The live read-only external-input blocker remains unchanged, so M5 is not READY.
+
 ## Validated baseline
 
 M1 established and validated:
@@ -248,14 +250,14 @@ Implemented behavior:
 - every string floor label requires explicit configuration, and reported current/destination floors must also appear in `available_floors`;
 - lift name, stopped/open at-floor position, Fire/Offline mode, destination, available floors, source modes, and session identity are mapped/preserved;
 - `DOOR_MOVING` is rejected because LiftAssistant distinguishes Opening from Closing;
-- a closed door does not confirm the exact at-floor position required by `CarState`, so that complete-state mapping is rejected;
-- `MOTION_UP`/`MOTION_DOWN` are rejected because a string `current_floor` does not provide LiftAssistant's continuous position; `MOTION_UNKNOWN` is also rejected;
+- a closed door did not confirm the exact at-floor position required by the then-current `CarState`, so that complete-state mapping was rejected;
+- `MOTION_UP`/`MOTION_DOWN` were rejected because a string `current_floor` did not provide the then-current model's continuous position; `MOTION_UNKNOWN` was also rejected;
 - Human/AGV control modes are rejected rather than conflated with LiftAssistant operating modes; unsupported/unknown/emergency modes remain explicit errors;
 - mapped observations feed the existing recorded/read-only runtime, which still rejects every intent;
 - `cargo run -p liftassistant-tui -- --scenario rmf-recorded-read-only` verifies two identical mappings/playbacks, retained session context, final observed state, no-write behavior, and visible ambiguity errors;
 - no live ROS/network connection, request publication, hardware I/O, public protocol schema, or write path was introduced.
 
-Self-review evidence preserved: the first moving-state implementation mapped `MOTION_UP` plus `current_floor=L3` to an exact `3.0F` position. That fabricated precision was removed; moving states now fail mapping until a source provides continuous position or the canonical model explicitly represents qualitative position. The review then applied the same rule to stopped/closed states, which do not confirm exact at-floor position; the accepted fixture is stopped/open. A subsequent focused build also exposed and removed one unused import.
+Self-review evidence preserved: the first moving-state implementation mapped `MOTION_UP` plus `current_floor=L3` to an exact `3.0F` position. That fabricated precision was removed; moving states failed mapping until M4.9b added an explicit floor-level operational location. The review then applied the same rule to stopped/closed states, which do not confirm an exact continuous at-floor coordinate. A subsequent focused build also exposed and removed one unused import.
 
 Validation: formatting, all-target linting, 39 workspace tests, and the real Open-RMF recorded/read-only command passed.
 
@@ -324,7 +326,7 @@ Implemented behavior:
 - the internal canonical `CarObservation` carries configured source identity, deterministic source sequence, car identity, and explicit position/motion/door/operating-mode evidence;
 - floor-reference-only position, unknown motion, undirected door movement, unknown mode, and source-specific mode are represented without fabricating an exact position, door direction, or LiftAssistant operating mode;
 - the deterministic resolver returns either a complete `CarState` or machine-readable unresolved fields; it does no history inference, probability, or source-specific reasoning;
-- a floor reference becomes exact at-floor position only for the currently proven stopped/open evidence combination;
+- this slice initially promoted a stopped/open floor reference to an exact at-floor position; M4.9b later corrected that overstatement by preserving it as `CarLocation::Floor`;
 - the Open-RMF mapper now produces canonical observations and separately retains raw current/destination labels, available/current source modes, and session identity;
 - declared Open-RMF `MOTION_UNKNOWN` and Human/AGV/Emergency modes are valid partial evidence, while unrecognized enum values and invalid/unconfigured floor labels remain mapping errors;
 - the real `rmf-recorded-read-only` scenario runs the mapper/resolver flow twice and checks the expected incomplete `L3 + UP + DOOR_MOVING` result, the resolved `L4 + STOPPED + OPEN` result, source-specific AGV-mode non-resolution, provenance/sequence, and the existing no-write boundary;
@@ -340,12 +342,11 @@ Validation: formatting, all-target linting, 43 workspace tests, and the real Ope
 
 Implemented behavior:
 
-- the all-in-one `ElevatorRuntime` trait is replaced by three internal contracts: `ObservationSource`, `IntentSink`, and `SimulationDriver`;
-- `ObservationSource` exposes resolved operational state and capabilities without granting a write method;
+- the all-in-one `ElevatorRuntime` trait was replaced by separate read, intent, and driving responsibilities; the then-current resolved-state `ObservationSource` trait was later retired by M4.9d in favor of canonical update ingestion plus Engine-owned state;
 - `IntentSink` accepts only LiftAssistant high-level `Intent`; no low-level motion, drive, door-force, or safety primitive was introduced;
 - `SimulationDriver::advance(Duration)` owns explicit-time simulator/replay progression and is not required by observation sources or intent sinks in general;
-- `SimRuntime` implements all three contracts because it is an active deterministic simulator;
-- `RecordedRuntime` implements only observation and replay-driving contracts; the previous always-error `submit_intent` method and its `IntentSink` capability are gone;
+- `SimRuntime` is an active deterministic simulator that emits canonical observation updates and implements intent plus driving behavior;
+- `RecordedRuntime` emits canonical observation updates and implements replay driving only; the previous always-error `submit_intent` method and its `IntentSink` capability are gone;
 - TUI composition imports only the contracts it actually uses, and recorded/Open-RMF scenarios exercise observation/replay without attempting a write;
 - existing simulator replay, runtime feedback, timing, partial-observation resolution, and scenario behavior remain deterministic.
 
@@ -360,7 +361,7 @@ Validation: formatting, all-target linting, 43 workspace tests, and all four exe
 Implemented behavior:
 
 - a focused `liftassistant-engine` crate now owns building topology, call registry/lifecycle, dispatch, pending scheduling, high-level intent submission/result handling, runtime-feedback transitions, and machine-readable `EngineEvent` output;
-- Engine exposes canonical observation resolution through the existing deterministic resolver rather than making the TUI or source adapter decide operational truth;
+- Engine exposes canonical observation resolution through the existing deterministic resolver rather than making the TUI or source adapter decide operational truth; M4.9d later added Engine-owned assembly and operational state;
 - Core remains deterministic and I/O-free; Engine depends on Core/model/runtime but not simulator, terminal UI, networking, storage, or wall-clock time;
 - the TUI `App` retains only simulator instance/control, selection/pause/step state, bounded display trace, and replay input recording;
 - interactive execution and non-interactive simulator scenarios now use the same Engine orchestration; the recorded Open-RMF scenario uses the same Engine resolution boundary;
@@ -396,7 +397,7 @@ Validation: formatting, all-target linting, 46 workspace tests, and all five exe
 Implemented behavior:
 
 - a focused `liftassistant-headless` binary is the first non-TUI Engine composition and depends only on Engine/model/runtime, not the TUI, simulator, transport, or an `IntentSink` implementation;
-- its internal recorded source exposes only canonical observations and has no submission/write method;
+- its internal recorded feed exposes only canonical observations and has no submission/write method;
 - lifecycle and readiness are distinct: the process starts `Starting/NotReady`, partial evidence remains `Synchronizing/NotReady`, sufficient complete evidence reaches `ReadyReadOnly/ReadOnly`, and a duplicate source sequence produces `Degraded/NotReady`;
 - the host preserves the last resolved state for inspection after degradation but does not treat it as current readiness evidence;
 - Engine observation resolution and structured diagnostics run in the headless process, and the sequence anomaly is the machine-readable degradation trigger rather than an equipment-fault or root-cause assertion;
@@ -482,15 +483,15 @@ The pre-M4.9b resolver promoted `FloorReference(floor) + Stopped + DoorOpen` int
 
 The reviewed standards do not justify that precision in general: Open-RMF reports a floor label; BACnet `Car_Position` reports a universal floor number; CiA 417 defines a distinct car-position unit for measured physical position. Stopped/open may establish landing/floor presence, but not an exact continuous encoder coordinate.
 
-### Finding D — Engine does not yet own operational state
+### Finding D — Engine did not own operational state (resolved by M4.9d)
 
-`Engine::resolve_observation` records and resolves evidence but does not retain the resulting operational state. Headless/TUI callers retain or query state outside Engine, and dispatch still reads `car_states()` from the backend through the current `ObservationSource` trait.
+Before M4.9d, `Engine::resolve_observation` recorded and resolved evidence but did not retain the resulting operational state. Headless/TUI callers retained or queried state outside Engine, and dispatch read `car_states()` from the backend through the then-current `ObservationSource` trait.
 
-The current trait name is therefore misleading: it is a resolved operational-state view, while canonical `CarObservation` input bypasses it. A production Engine should ingest observations, own the current resolved snapshot/evidence state, and dispatch from that owned state rather than reaching back into adapters for truth.
+M4.9d replaces that split path with canonical update ingestion, Engine-owned assembly/evidence/resolved state and capabilities, and Engine-owned dispatch/read views. The misleading resolved-state trait is removed; `IntentSink` remains independent.
 
 ## M4.9 — Observation semantics hardening
 
-**IN PROGRESS — M4.9a–M4.9c implemented; M4.9d is next.**
+**IMPLEMENTED — M4.9a–M4.9d complete; awaiting HUMAN-CHECK. M5 is not READY.**
 
 Work through these sub-slices in order. Keep all changes internal/reversible and run the prior-art gate before changing the model.
 
@@ -533,16 +534,19 @@ Validation: formatting, warning-free workspace clippy, all 66 workspace tests, a
 
 ### M4.9d — Make Engine own resolved operational state
 
-**READY — next implementation work.**
+**IMPLEMENTED.**
 
-- canonical observations should enter Engine through one clear ingestion boundary;
-- Engine should own the current resolved operational snapshot/evidence state used by dispatch and read-side clients;
-- adapters/sources should supply observations, not remain the authoritative state store for Engine decisions;
-- rename/remove the current `ObservationSource` abstraction if its real responsibility becomes a resolved state view;
-- keep `IntentSink` separate;
-- preserve deterministic replay and the no-write read-only host.
+- canonical `CarObservationUpdate` values enter Engine through one ingestion boundary;
+- Engine owns incremental per-source/car evidence, resolved operational state, and capabilities used by dispatch and read-side clients;
+- incomplete or unresolved evidence removes the affected resolved state instead of leaving a stale operational snapshot;
+- dispatch reads only Engine-owned state/capabilities; its backend generic requires `IntentSink` alone and cannot provide state;
+- the old resolved-state `ObservationSource` trait is removed, while `IntentSink` stays separate;
+- simulator and recorded runtimes emit canonical updates; TUI, scenarios, and headless lifecycle read Engine state;
+- arrival and door lifecycle events no longer bypass canonical observations to mutate the recorded operational view;
+- runtime-event ordering is preserved: dispatch cannot see an adapter state update that appears later in the same event batch;
+- diagnostics record canonical incremental updates, and deterministic replay plus the no-write read-only host remain intact.
 
-After M4.9, rerun Open-RMF and BACnet scenarios and add regression coverage for omitted-vs-unknown, reported-vs-desired destination, and floor-level-vs-continuous position.
+Validation: formatting, warning-free workspace clippy, all 71 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass. Open-RMF and BACnet both pass through the corrected Engine ingestion path. Focused regressions cover omitted-vs-explicit-unknown merge, stale-state invalidation, reported-vs-desired destination, floor-level-vs-continuous position, per-field provenance, source isolation, recorded-feed cross-source rejection, construction-time recorded-sequence rejection, lifecycle-event non-mutation, non-increasing sequence rejection, and event-order-visible dispatch. No new blocker was found; the live read-only external-input blocker remains unchanged.
 
 ## M4 exit / M5 promotion rule after audit
 
@@ -555,4 +559,4 @@ Before promoting a production read-only M5 slice, require:
 3. Engine owns its operational state rather than querying adapter-owned truth;
 4. live read-only evidence or an explicitly supplied sanitized real capture/test endpoint exists for the next live slice.
 
-The existing live-environment blocker remains valid. Do not invent a live source or install privileged system components merely to advance the milestone.
+M4.9 satisfies items 1–3. Item 4 remains blocked by the existing live environment: no ROS/Open-RMF runtime, BACnet read/listener path, CAN/vcan interface, or external fixture is available. No network scan, package installation, privileged interface creation, real-controller connection, or invented packet/capture is authorized. M4.9 has no remaining machine-actionable implementation work; HUMAN-CHECK and explicitly supplied live read-only evidence remain external gates. Do not invent a live source or install privileged system components merely to advance the milestone.

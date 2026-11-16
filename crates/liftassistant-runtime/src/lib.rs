@@ -3,15 +3,15 @@
 use std::{collections::BTreeMap, error::Error, fmt, time::Duration};
 
 use liftassistant_model::{
-    Capabilities, CarId, CarLocation, CarObservation, CarObservationUpdate, CarState, DoorEvidence,
-    DoorState, Floor, Intent, MotionEvidence, ObservationProvenance, ObservationSequence,
-    ObservationSourceId, OperatingModeEvidence, PositionEvidence, ReportedDestination,
+    CarId, CarLocation, CarObservation, CarObservationUpdate, CarState, DoorEvidence, DoorState,
+    Floor, Intent, MotionEvidence, ObservationProvenance, ObservationSequence, ObservationSourceId,
+    OperatingModeEvidence, PositionEvidence, ReportedDestination,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RuntimeEvent {
     IntentAccepted(Intent),
-    PositionChanged(CarState),
+    Observation(CarObservationUpdate),
     Arrived { car: CarId, floor: Floor },
     DoorStateChanged { car: CarId, state: DoorState },
 }
@@ -246,15 +246,6 @@ pub fn resolve_car_observation(observation: &CarObservation) -> CarStateResoluti
             reasons,
         },
     }
-}
-
-/// Read-side access to resolved operational state.
-///
-/// Canonical partial observations must pass through the resolver before entering this view.
-pub trait ObservationSource {
-    fn source_name(&self) -> &str;
-    fn car_states(&self) -> Vec<CarState>;
-    fn capabilities(&self, car: &CarId) -> Option<Capabilities>;
 }
 
 /// Submission boundary for LiftAssistant high-level intents.

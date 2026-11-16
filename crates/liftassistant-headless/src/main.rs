@@ -2,11 +2,12 @@
 
 use std::{collections::VecDeque, env, process::ExitCode};
 
-use liftassistant_engine::{DiagnosticAnomaly, DiagnosticEvent, Engine};
+use liftassistant_engine::{DiagnosticAnomaly, DiagnosticEvent, Engine, ObservationIngestResult};
 use liftassistant_model::{
-    BuildingTopology, CarId, CarLocation, CarObservation, DoorEvidence, DoorState, Floor,
-    MotionEvidence, MotionState, ObservationProvenance, ObservationSequence, ObservationSourceId,
-    OperatingMode, OperatingModeEvidence, Position, PositionEvidence, ReportedDestination,
+    BuildingTopology, CarId, CarLocation, CarObservation, CarObservationUpdate, DoorEvidence,
+    DoorState, Floor, MotionEvidence, MotionState, ObservationProvenance, ObservationSequence,
+    ObservationSourceId, OperatingMode, OperatingModeEvidence, Position, PositionEvidence,
+    ReportedDestination,
 };
 use liftassistant_runtime::{CarStateResolution, UnresolvedCarStateReason};
 
@@ -53,18 +54,21 @@ enum HostEvent {
 
 /// Internal in-memory source for the headless proof. It exposes observations only.
 #[derive(Debug)]
-struct RecordedObservationSource {
-    frames: VecDeque<CarObservation>,
+struct RecordedObservationFeed {
+    frames: VecDeque<CarObservationUpdate>,
 }
 
-impl RecordedObservationSource {
-    fn new(frames: impl IntoIterator<Item = CarObservation>) -> Self {
+impl RecordedObservationFeed {
+    fn new<T>(frames: impl IntoIterator<Item = T>) -> Self
+    where
+        T: Into<CarObservationUpdate>,
+    {
         Self {
-            frames: frames.into_iter().collect(),
+            frames: frames.into_iter().map(Into::into).collect(),
         }
     }
 
-    fn next_observation(&mut self) -> Option<CarObservation> {
+    fn next_observation(&mut self) -> Option<CarObservationUpdate> {
         self.frames.pop_front()
     }
 }
@@ -73,7 +77,6 @@ impl RecordedObservationSource {
 struct ReadOnlyHost {
     engine: Engine,
     lifecycle: HostLifecycle,
-    latest_state: Option<liftassistant_model::CarState>,
     events: Vec<HostEvent>,
 }
 
@@ -82,7 +85,6 @@ impl ReadOnlyHost {
         Self {
             engine: Engine::new(topology),
             lifecycle: HostLifecycle::Starting,
-            latest_state: None,
             events: vec![HostEvent::LifecycleChanged(HostLifecycle::Starting)],
         }
     }
@@ -95,7 +97,7 @@ impl ReadOnlyHost {
         self.lifecycle.readiness()
     }
 
-    fn poll(&mut self, source: &mut RecordedObservationSource) -> bool {
+    fn poll(&mut self, source: &mut RecordedObservationFeed) -> bool {
         let Some(observation) = source.next_observation() else {
             return false;
         };
@@ -108,7 +110,7 @@ impl ReadOnlyHost {
         }
 
         let incident_marker = latest_incident_marker(&self.engine);
-        let resolution = self.engine.resolve_observation(&observation);
+        let resolution = self.engine.ingest_observation_update(observation);
         if latest_incident_marker(&self.engine) != incident_marker {
             let anomaly = self
                 .engine
@@ -127,17 +129,28 @@ impl ReadOnlyHost {
         }
 
         match resolution {
-            CarStateResolution::Resolved(state) => {
-                self.latest_state = Some(state.clone());
+            ObservationIngestResult::Resolution(CarStateResolution::Resolved(state)) => {
                 self.events.push(HostEvent::StateUpdated(state));
                 self.transition(HostLifecycle::ReadyReadOnly);
             }
-            CarStateResolution::Unresolved { car, reasons } => {
+            ObservationIngestResult::Resolution(CarStateResolution::Unresolved {
+                car,
+                reasons,
+            }) => {
                 self.events
                     .push(HostEvent::ObservationUnresolved { car, reasons });
                 if !matches!(self.lifecycle, HostLifecycle::Synchronizing) {
                     self.transition(HostLifecycle::Synchronizing);
                 }
+            }
+            ObservationIngestResult::Incomplete(assembled) => {
+                if !matches!(self.lifecycle, HostLifecycle::Synchronizing) {
+                    self.transition(HostLifecycle::Synchronizing);
+                }
+                debug_assert!(assembled.snapshot().is_none());
+            }
+            ObservationIngestResult::Rejected(_) => {
+                unreachable!("assembly rejection creates the diagnostic incident handled above")
             }
         }
         true
@@ -231,7 +244,7 @@ fn execute_proof() -> ProofRun {
     ProofRun {
         snapshots,
         events: host.events.clone(),
-        latest_state: host.latest_state.clone(),
+        latest_state: host.engine.car_states().into_iter().next(),
         diagnostic_entries: host.engine.diagnostics().entries().count(),
         incidents: host.engine.diagnostics().incidents().count(),
     }
@@ -244,7 +257,7 @@ fn snapshot(host: &ReadOnlyHost) -> LifecycleSnapshot {
     }
 }
 
-fn reference_source() -> RecordedObservationSource {
+fn reference_source() -> RecordedObservationFeed {
     let mut complete = observation(2);
     complete.position = PositionEvidence::Exact(Position::at_floor(Floor::new(4)));
     complete.motion = MotionEvidence::Known(MotionState::Stopped);
@@ -252,7 +265,7 @@ fn reference_source() -> RecordedObservationSource {
     complete.reported_destination = ReportedDestination::None;
 
     let duplicate = complete.clone();
-    RecordedObservationSource::new([observation(1), complete, duplicate])
+    RecordedObservationFeed::new([observation(1), complete, duplicate])
 }
 
 fn observation(sequence: u64) -> CarObservation {
@@ -415,7 +428,7 @@ mod tests {
         complete.reported_destination = ReportedDestination::None;
         let mut frames = vec![observation(1), complete.clone()];
         frames.extend(std::iter::repeat_n(complete, 10));
-        let mut source = RecordedObservationSource::new(frames);
+        let mut source = RecordedObservationFeed::new(frames);
         let mut host = ReadOnlyHost::new(BuildingTopology::reference_eight_floor());
 
         while host.poll(&mut source) {}

@@ -36,7 +36,7 @@ developer TUI
 
 M2 evolved this from one-shot dispatch into persistent call semantics: call identity/lifecycle, multiple pending calls, runtime-feedback-driven completion, explainable decisions, and explicit served-floor topology. That semantic vertical path is implemented and machine-reviewed.
 
-M3 turned the deterministic simulator and replay path into a small research laboratory with executable scenarios, trace inspection, expected-outcome checks, and one-shot integration-failure injection. M4 starts with a native-semantic recorded/read-only runtime before any protocol or hardware writes. None of this implies certification or conformance claims.
+M3 turned the deterministic simulator and replay path into a small research laboratory with executable scenarios, trace inspection, expected-outcome checks, and one-shot integration-failure injection. M4 starts with native-semantic recorded/read-only inputs before any protocol or hardware writes. Canonical observation updates now enter Engine through one boundary, and Engine owns the assembled evidence and resolved operational state used by dispatch and read-side clients. None of this implies certification or conformance claims.
 
 The TUI is a composition/debugging client, not the architecture.
 
@@ -62,7 +62,7 @@ Inspect the recorded/read-only runtime boundary:
 cargo run -p liftassistant-tui -- --scenario recorded-read-only-observation
 ~~~
 
-This scenario replays native semantic observations at explicit elapsed times. The recorded source implements observation and deterministic replay contracts only; it has no intent-submission interface. It performs no protocol, network, device, or hardware I/O.
+This scenario replays native semantic observation updates at explicit elapsed times. The recorded feed provides observations and deterministic replay only; it has no intent-submission interface. Engine, rather than the feed, owns the operational view consumed by the scenario. It performs no protocol, network, device, or hardware I/O.
 
 Inspect the recorded Open-RMF state-mapping boundary:
 
@@ -78,7 +78,7 @@ Inspect the independent recorded BACnet Lift-object mapping boundary:
 cargo run -p liftassistant-tui -- --scenario bacnet-recorded-read-only
 ~~~
 
-This experiment maps a typed in-memory projection of decoded BACnet Lift properties into the same canonical observation/resolver path. Universal floor numbers remain configured floor references; multi-door status is not collapsed when doors disagree; and BACnet object `Out_Of_Service` decoupling makes operational evidence unknown rather than pretending the car is in LiftAssistant's `OutOfService` mode. It implements no BACnet packet codec, transport, discovery, property write, live connection, or conformance claim.
+This experiment maps a typed in-memory projection of decoded BACnet Lift properties into the same canonical observation/Engine ingestion path. Universal floor numbers remain configured floor references; multi-door status is not collapsed when doors disagree; and BACnet object `Out_Of_Service` decoupling makes operational evidence unknown rather than pretending the car is in LiftAssistant's `OutOfService` mode. It implements no BACnet packet codec, transport, discovery, property write, live connection, or conformance claim.
 
 Inspect bounded diagnostic capture and deterministic incident replay:
 

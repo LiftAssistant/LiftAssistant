@@ -4,8 +4,9 @@ use liftassistant_core::{DispatchRejection, HallCallRejection};
 use liftassistant_engine::Engine;
 use liftassistant_model::{
     BuildingTopology, CallState, CarId, Direction, Floor, HallCall, Intent, OperatingMode,
+    PositionEvidence,
 };
-use liftassistant_runtime::{ObservationSource, RuntimeEvent, SimulationDriver};
+use liftassistant_runtime::{RuntimeEvent, SimulationDriver};
 use liftassistant_sim::SimRuntime;
 
 use crate::replay::{Command, SemanticEvent, run_with_topology};
@@ -33,9 +34,17 @@ impl App {
     pub(crate) fn with_topology(topology: BuildingTopology) -> Self {
         let floors = topology.served_floors();
         let selected_floor = floors[floors.len().saturating_sub(2)];
+        let mut runtime = SimRuntime::reference_two_car();
+        let mut engine = Engine::new(topology);
+        for (car, capabilities) in runtime.all_capabilities() {
+            engine.set_capabilities(car, capabilities);
+        }
+        for update in runtime.take_observation_updates() {
+            engine.ingest_observation_update(update);
+        }
         Self {
-            runtime: SimRuntime::reference_two_car(),
-            engine: Engine::new(topology),
+            runtime,
+            engine,
             selected_floor,
             paused: false,
             steps: 0,
@@ -70,14 +79,19 @@ impl App {
             self.log("Recording full: replay unavailable until R reset".into());
         }
         let events = match command {
-            Command::HallCall(call) => self
-                .engine
-                .submit_call(call, &mut self.runtime)
-                .into_iter()
-                .map(Into::into)
-                .collect(),
+            Command::HallCall(call) => {
+                let events = self
+                    .engine
+                    .submit_call(call, &mut self.runtime)
+                    .into_iter()
+                    .map(Into::into)
+                    .collect();
+                self.sync_pending_observations();
+                events
+            }
             Command::SetMode { car, mode } => match self.runtime.set_mode(&car, mode) {
                 Ok(()) => {
+                    self.sync_pending_observations();
                     let mut events = vec![SemanticEvent::ModeChanged { car, mode }];
                     events.extend(
                         self.engine
@@ -85,6 +99,7 @@ impl App {
                             .into_iter()
                             .map(SemanticEvent::from),
                     );
+                    self.sync_pending_observations();
                     events
                 }
                 Err(error) => vec![SemanticEvent::RuntimeError(error.to_string())],
@@ -96,11 +111,14 @@ impl App {
             Command::Step => {
                 self.steps += 1;
                 let runtime_events = self.runtime.advance(FIXED_STEP);
-                self.engine
+                let events = self
+                    .engine
                     .consume_runtime_events(runtime_events, &mut self.runtime)
                     .into_iter()
                     .map(Into::into)
-                    .collect()
+                    .collect();
+                self.sync_pending_observations();
+                events
             }
         };
         for event in &events {
@@ -147,7 +165,7 @@ impl App {
     pub fn toggle_availability(&mut self, id: &str) {
         let car = CarId::new(id);
         let mode = self
-            .runtime
+            .engine
             .car_states()
             .iter()
             .find(|state| state.id == car)
@@ -169,6 +187,12 @@ impl App {
         let topology = self.engine.topology().clone();
         *self = Self::with_topology(topology);
         self.log("RESET: two-car simulator with configured topology".into());
+    }
+
+    fn sync_pending_observations(&mut self) {
+        for update in self.runtime.take_observation_updates() {
+            self.engine.ingest_observation_update(update);
+        }
     }
 
     fn log(&mut self, message: String) {
@@ -273,10 +297,20 @@ fn rejection_label(rejection: &DispatchRejection) -> &'static str {
 pub(crate) fn event_label(event: &RuntimeEvent) -> String {
     match event {
         RuntimeEvent::IntentAccepted(intent) => format!("IntentAccepted {}", intent_label(intent)),
-        RuntimeEvent::PositionChanged(car) => format!(
-            "PositionChanged {} {} {:?} door={:?}",
-            car.id, car.location, car.motion, car.door
-        ),
+        RuntimeEvent::Observation(update) => {
+            let position = match update.position {
+                Some(PositionEvidence::Exact(position)) => {
+                    format!("{:.2}F", position.floor_position)
+                }
+                Some(PositionEvidence::FloorReference(floor)) => format!("floor {floor}"),
+                Some(PositionEvidence::Unknown) => "unknown".into(),
+                None => "omitted".into(),
+            };
+            format!(
+                "Observation {} {position} motion={:?} door={:?}",
+                update.car, update.motion, update.door
+            )
+        }
         RuntimeEvent::Arrived { car, floor } => format!("Arrived {car} at {floor}"),
         RuntimeEvent::DoorStateChanged { car, state } => {
             format!("DoorStateChanged {car} {state:?}")
@@ -341,14 +375,14 @@ mod tests {
                 floor: Floor::new(7)
             })
         );
-        let before = app.runtime.car_states();
+        let before = app.engine.car_states();
         app.advance();
         assert_eq!(app.steps, 0);
-        assert_eq!(app.runtime.car_states(), before);
+        assert_eq!(app.engine.car_states(), before);
         app.step();
         assert_eq!(app.steps, 1);
         assert_eq!(
-            app.runtime.car_states()[0].location,
+            app.engine.car_states()[0].location,
             CarLocation::Continuous(Position {
                 floor_position: 3.75,
                 nearest_floor: Floor::new(4),
@@ -357,7 +391,8 @@ mod tests {
         for _ in 0..5 {
             app.step();
         }
-        let a = &app.runtime.car_states()[0];
+        let states = app.engine.car_states();
+        let a = &states[0];
         assert_eq!(
             a.location,
             CarLocation::Continuous(Position::at_floor(Floor::new(7)))
@@ -376,10 +411,7 @@ mod tests {
                 .any(|line| line.contains("Arrived A at 7F"))
         );
         app.reset();
-        assert_eq!(
-            app.runtime.car_states(),
-            SimRuntime::reference_two_car().car_states()
-        );
+        assert_eq!(app.engine.car_states(), App::new().engine.car_states());
         assert!(app.engine.decision().is_none() && app.engine.last_call().is_none());
         assert!(app.engine.calls().calls().next().is_none());
         assert_eq!(app.steps, 0);
@@ -393,7 +425,7 @@ mod tests {
         let mut app = App::new();
         app.paused = true;
         app.call(Direction::Up);
-        let states = app.runtime.car_states();
+        let states = app.engine.car_states();
 
         let events = app.execute(Command::HallCall(HallCall {
             floor: Floor::new(7),
@@ -402,7 +434,7 @@ mod tests {
 
         assert!(events.contains(&SemanticEvent::CallDeduplicated(CallId::new(1))));
         assert_eq!(app.engine.calls().calls().count(), 1);
-        assert_eq!(app.runtime.car_states(), states);
+        assert_eq!(app.engine.car_states(), states);
     }
 
     #[test]

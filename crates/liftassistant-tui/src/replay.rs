@@ -101,7 +101,6 @@ pub fn run_with_topology(commands: &[Command], topology: BuildingTopology) -> Re
 mod tests {
     use super::*;
     use liftassistant_model::{Direction, DoorState, Floor, ReportedDestination};
-    use liftassistant_runtime::ObservationSource;
 
     #[test]
     fn identical_inputs_replay_the_complete_semantic_flow() {
@@ -114,8 +113,8 @@ mod tests {
         let second = run(&commands);
         assert_eq!(first.events, second.events);
         assert_eq!(
-            first.app.runtime.car_states(),
-            second.app.runtime.car_states()
+            first.app.engine.car_states(),
+            second.app.engine.car_states()
         );
         assert!(first.events.contains(&SemanticEvent::DispatchSelected {
             id: CallId::new(1),
@@ -153,8 +152,8 @@ mod tests {
         let shorter = run(&commands[..commands.len() - 1]);
         assert_ne!(first.events, shorter.events);
         assert_ne!(
-            first.app.runtime.car_states(),
-            shorter.app.runtime.car_states()
+            first.app.engine.car_states(),
+            shorter.app.engine.car_states()
         );
     }
 
@@ -165,11 +164,11 @@ mod tests {
         app.step();
         app.step();
         let commands = app.recording.clone();
-        let states = app.runtime.car_states();
+        let states = app.engine.car_states();
         app.replay();
         assert!(app.paused);
         assert_eq!(app.recording, commands);
-        assert_eq!(app.runtime.car_states(), states);
+        assert_eq!(app.engine.car_states(), states);
         assert!(app.trace.back().unwrap().contains("REPLAY verified"));
         app.step();
         assert_eq!(app.steps, 3);
@@ -213,7 +212,7 @@ mod tests {
 
         let first = run(&commands);
         let second = run(&commands);
-        let states = first.app.runtime.car_states();
+        let states = first.app.engine.car_states();
 
         assert_eq!(first.events, second.events);
         assert_eq!(
@@ -305,7 +304,7 @@ mod tests {
             Some(&CallState::Assigned(CarId::new("A")))
         );
         assert_eq!(
-            app.runtime.car_states()[0].reported_destination,
+            app.engine.car_states()[0].reported_destination,
             ReportedDestination::Known(Floor::new(2))
         );
         assert!(lifecycle_events.contains(&SemanticEvent::CallStateChanged {
@@ -328,7 +327,9 @@ mod tests {
                     mode: OperatingMode::Normal,
                     busy: true,
                     serve_floor: Some(true),
-                    distance_floors: 3.0,
+                    // Dispatch uses the latest observation already consumed by the Engine.
+                    // B's 5.0F observation occurs later in this runtime-event batch.
+                    distance_floors: 2.75,
                     rejections: vec![DispatchRejection::Busy],
                 },
             })
@@ -349,7 +350,7 @@ mod tests {
         let second = run(&app.recording);
         assert_eq!(first.events, second.events);
         assert_eq!(first.app.engine, app.engine);
-        assert_eq!(first.app.runtime.car_states(), app.runtime.car_states());
+        assert_eq!(first.app.engine.car_states(), app.engine.car_states());
     }
 }
 
@@ -359,7 +360,6 @@ mod availability_tests {
     use liftassistant_model::{
         CarLocation, Direction, DoorState, Floor, OperatingMode, Position, ReportedDestination,
     };
-    use liftassistant_runtime::ObservationSource;
 
     #[test]
     fn unavailable_preferred_car_falls_back_end_to_end_and_replays() {
@@ -375,7 +375,7 @@ mod availability_tests {
         for _ in 0..8 {
             app.step();
         }
-        let states = app.runtime.car_states();
+        let states = app.engine.car_states();
         assert_eq!(states[0].mode, OperatingMode::OutOfService);
         assert_eq!(
             states[0].location,
@@ -421,10 +421,10 @@ mod availability_tests {
                 }))
         );
         app.replay();
-        assert_eq!(app.runtime.car_states(), states);
+        assert_eq!(app.engine.car_states(), states);
         assert!(app.trace.back().unwrap().contains("REPLAY verified"));
         app.reset();
-        assert!(app.runtime.car_states().iter().all(|car| {
+        assert!(app.engine.car_states().iter().all(|car| {
             car.mode == OperatingMode::Normal
                 && car.reported_destination == ReportedDestination::None
         }));
@@ -447,7 +447,7 @@ mod availability_tests {
         );
         assert!(app.engine.decision().is_none());
         assert!(
-            app.runtime
+            app.engine
                 .car_states()
                 .iter()
                 .all(|car| car.reported_destination == ReportedDestination::None)
@@ -478,7 +478,7 @@ mod availability_tests {
         assert!(app.engine.decision().is_some());
         app.step();
         assert_eq!(
-            app.runtime.car_states()[0].location,
+            app.engine.car_states()[0].location,
             CarLocation::Continuous(Position {
                 floor_position: 3.75,
                 nearest_floor: Floor::new(4),
