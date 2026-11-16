@@ -75,15 +75,17 @@ Goal: make the prototype architecture honest about incomplete real-world observa
 
 Ordered direction:
 
-1. canonical partial observation proof while keeping operational state complete;
-2. separate observation-source, high-level intent-sink, and simulator/replay driving responsibilities;
-3. extract a shared Engine boundary once duplicated orchestration demonstrates the need;
-4. prove a minimal diagnostics/flight-recorder/replay substrate;
-5. prove a headless read-only host/lifecycle;
-6. validate the observation model with at least one additional independent source/protocol family;
-7. expand recorded/virtual/live-read-only adapters;
-8. controlled non-passenger HIL/bench observation work;
-9. only later consider any high-level write path under explicit HUMAN-REVIEW.
+1. canonical partial observation proof while keeping operational state complete — implemented;
+2. separate observation-source, high-level intent-sink, and simulator/replay driving responsibilities — implemented;
+3. extract a shared Engine boundary once duplicated orchestration demonstrates the need — implemented;
+4. prove a minimal diagnostics/flight-recorder/replay substrate — implemented;
+5. prove a headless read-only host/lifecycle — implemented;
+6. validate the observation model with at least one additional independent source/protocol family — implemented with recorded BACnet evidence;
+7. harden observation semantics for reported-vs-desired state, location precision, incremental updates, and Engine-owned operational state — current;
+8. obtain live read-only evidence or a supplied sanitized real capture/test endpoint;
+9. expand recorded/virtual/live-read-only adapters only when they add new semantic or deployment evidence;
+10. controlled non-passenger HIL/bench observation work;
+11. only later consider any high-level write path under explicit HUMAN-REVIEW.
 
 Candidate bridge work after the boundary is sound:
 
@@ -95,13 +97,15 @@ Candidate bridge work after the boundary is sound:
 - documented controller APIs;
 - sanitized recorded controller/protocol fixtures.
 
-Exit evidence for M4 should include more than one external observation source and a headless read-only path. A single Open-RMF mapper is not sufficient to stabilize public semantics.
+Exit evidence for M4 includes more than one external observation source and a headless read-only path, but the 2026-11-16 semantic audit found additional internal hardening required before M5: reported destination must remain distinct from desired intent, floor references must not be promoted to fabricated continuous position, incremental updates must distinguish omission from explicit unknown, and Engine must own the resolved operational state used for decisions. Live read-only evidence is still externally blocked.
 
 Any passenger-elevator control, safety-authority change, normative public-schema freeze, or first real write path requires HUMAN-REVIEW.
 
-## M5 — Production Read-only Platform
+## M5 — Production Read-only Platform — gated by M4 semantic hardening + live evidence
 
 Goal: make LiftAssistant genuinely useful on real sites without requiring control authority.
+
+Entry is not automatic. M4.9 semantic hardening must be complete, and the first M5 implementation slice must have concrete live/read-only environment or sanitized real-capture evidence. Roadmap candidates alone do not make M5 READY.
 
 Candidate scope, only as demonstrated by M4:
 
