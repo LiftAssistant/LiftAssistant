@@ -43,7 +43,7 @@ M1 established deterministic one-shot dispatch. M2.1 through M2.5 added persiste
 
 M3 added developer-only executable scenarios, complete trace/final-state inspection, expected-outcome verification, and a one-shot simulator intent-rejection control. These remain composition/simulator tools rather than Core semantics, equipment diagnostics, a public scenario format, or a certification/conformance system.
 
-M4 read-only experiments demonstrate that the operational `CarState` is intentionally complete: it requires exact position, directed door state, and LiftAssistant operating mode. External sources that report only a floor label, undirected door movement, or source-specific control modes must not fabricate those fields. Whether a separate partial/uncertain observation type belongs at the runtime boundary is a foundational semantic decision, not an adapter-local workaround.
+M4 read-only experiments demonstrate that the operational `CarState` is intentionally complete: it requires exact position, directed door state, and LiftAssistant operating mode. External sources that report only a floor label, undirected door movement, or source-specific control modes enter a separate canonical `CarObservation` and must not fabricate those fields. A deterministic resolver is the only promotion path from this partial evidence to complete operational state; source-specific context stays outside Core. The observation model remains internal and reversible rather than a frozen public schema.
 
 Core must not own networking, field buses, wall-clock time, persistence, terminal/UI frameworks, or vendor SDKs.
 

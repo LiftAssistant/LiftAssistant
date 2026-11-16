@@ -3,13 +3,17 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_model::{
-    BuildingTopology, CallId, CallState, Capabilities, CarId, CarState, Direction, DoorState,
-    Floor, HallCall, Intent, MotionState, OperatingMode, Position,
+    BuildingTopology, CallId, CallState, Capabilities, CarId, CarState, Direction, DoorEvidence,
+    DoorState, Floor, HallCall, Intent, MotionEvidence, MotionState, ObservationProvenance,
+    ObservationSequence, ObservationSourceId, OperatingMode, OperatingModeEvidence, Position,
+    PositionEvidence,
 };
-use liftassistant_runtime::{ElevatorRuntime, RuntimeEvent};
+use liftassistant_runtime::{
+    CarStateResolution, ElevatorRuntime, RuntimeEvent, UnresolvedCarStateReason,
+    resolve_car_observation,
+};
 use liftassistant_sim::{
-    MappedRmfLiftState, RecordedFrame, RecordedRuntime, RmfLiftState, RmfMappingError,
-    map_rmf_lift_state,
+    MappedRmfObservation, RecordedFrame, RecordedRuntime, RmfLiftState, map_rmf_lift_state,
 };
 
 use crate::{
@@ -59,13 +63,13 @@ struct RecordedPlayback {
 
 #[derive(Debug, PartialEq)]
 struct RmfRecordedExperiment {
-    initial: MappedRmfLiftState,
-    final_observation: MappedRmfLiftState,
+    incomplete: MappedRmfObservation,
+    incomplete_resolution: CarStateResolution,
+    final_observation: MappedRmfObservation,
+    final_resolution: CarStateResolution,
+    source_specific_mode: MappedRmfObservation,
+    source_specific_mode_resolution: CarStateResolution,
     write_error: String,
-    ambiguous_door_error: RmfMappingError,
-    motion_error: RmfMappingError,
-    control_mode_error: RmfMappingError,
-    emitted: Vec<RuntimeEvent>,
     final_states: Vec<CarState>,
 }
 
@@ -227,66 +231,64 @@ fn recorded_runtime() -> Result<RecordedRuntime, String> {
 
 fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     let labels = rmf_floor_labels();
-    let initial_source = rmf_source_state();
-    let initial =
-        map_rmf_lift_state(&initial_source, &labels).map_err(|error| error.to_string())?;
-    let mut final_source = initial_source.clone();
+    let incomplete_source = rmf_source_state();
+    let incomplete = map_rmf_lift_state(&incomplete_source, &labels, rmf_provenance(1))
+        .map_err(|error| error.to_string())?;
+    let incomplete_resolution = resolve_car_observation(&incomplete.observation);
+
+    let mut final_source = incomplete_source.clone();
     final_source.current_floor = "L4".into();
     final_source.destination_floor.clear();
     final_source.door_state = RmfLiftState::DOOR_OPEN;
     final_source.motion_state = RmfLiftState::MOTION_STOPPED;
-    let final_observation =
-        map_rmf_lift_state(&final_source, &labels).map_err(|error| error.to_string())?;
-
-    let mut ambiguous_door = initial_source.clone();
-    ambiguous_door.door_state = RmfLiftState::DOOR_MOVING;
-    let ambiguous_door_error = match map_rmf_lift_state(&ambiguous_door, &labels) {
-        Ok(_) => return Err("Open-RMF DOOR_MOVING was guessed instead of rejected".into()),
-        Err(error) => error,
-    };
-    let mut control_mode = initial_source;
-    let mut moving = control_mode.clone();
-    moving.motion_state = RmfLiftState::MOTION_UP;
-    let motion_error = match map_rmf_lift_state(&moving, &labels) {
-        Ok(_) => return Err("Open-RMF moving state was given fabricated precision".into()),
-        Err(error) => error,
-    };
-    control_mode.current_mode = RmfLiftState::MODE_AGV;
-    let control_mode_error = match map_rmf_lift_state(&control_mode, &labels) {
-        Ok(_) => return Err("Open-RMF AGV control mode was guessed instead of rejected".into()),
-        Err(error) => error,
+    let final_observation = map_rmf_lift_state(&final_source, &labels, rmf_provenance(2))
+        .map_err(|error| error.to_string())?;
+    let final_resolution = resolve_car_observation(&final_observation.observation);
+    let final_state = match &final_resolution {
+        CarStateResolution::Resolved(state) => state.clone(),
+        CarStateResolution::Unresolved { reasons, .. } => {
+            return Err(format!(
+                "sufficient Open-RMF observation stayed unresolved: {reasons:?}"
+            ));
+        }
     };
 
-    let mut runtime = RecordedRuntime::new(
-        [initial.car_state.clone()],
-        [RecordedFrame::after(
-            Duration::from_millis(500),
-            vec![RuntimeEvent::PositionChanged(
-                final_observation.car_state.clone(),
-            )],
-        )],
-    )
-    .map_err(|error| error.to_string())?;
+    let mut source_specific_mode_source = final_source;
+    source_specific_mode_source.current_mode = RmfLiftState::MODE_AGV;
+    let source_specific_mode =
+        map_rmf_lift_state(&source_specific_mode_source, &labels, rmf_provenance(3))
+            .map_err(|error| error.to_string())?;
+    let source_specific_mode_resolution =
+        resolve_car_observation(&source_specific_mode.observation);
+
+    let mut runtime =
+        RecordedRuntime::new([final_state.clone()], []).map_err(|error| error.to_string())?;
     let write_error = match runtime.submit_intent(Intent::ServeFloor {
-        car: initial.car_state.id.clone(),
+        car: final_state.id.clone(),
         floor: Floor::new(1),
     }) {
         Ok(()) => return Err("recorded Open-RMF experiment accepted an intent".into()),
         Err(error) => error.to_string(),
     };
-    let emitted = runtime.tick(Duration::from_millis(500));
     let final_states = runtime.car_states();
 
     Ok(RmfRecordedExperiment {
-        initial,
+        incomplete,
+        incomplete_resolution,
         final_observation,
+        final_resolution,
+        source_specific_mode,
+        source_specific_mode_resolution,
         write_error,
-        ambiguous_door_error,
-        motion_error,
-        control_mode_error,
-        emitted,
         final_states,
     })
+}
+
+fn rmf_provenance(sequence: u64) -> ObservationProvenance {
+    ObservationProvenance {
+        source: ObservationSourceId::new("fixture/open-rmf"),
+        sequence: ObservationSequence::new(sequence),
+    }
 }
 
 fn rmf_floor_labels() -> BTreeMap<String, Floor> {
@@ -302,8 +304,8 @@ fn rmf_source_state() -> RmfLiftState {
         available_floors: vec!["L1".into(), "L2".into(), "L3".into(), "L4".into()],
         current_floor: "L3".into(),
         destination_floor: "L4".into(),
-        door_state: RmfLiftState::DOOR_OPEN,
-        motion_state: RmfLiftState::MOTION_STOPPED,
+        door_state: RmfLiftState::DOOR_MOVING,
+        motion_state: RmfLiftState::MOTION_UP,
         available_modes: vec![RmfLiftState::MODE_HUMAN, RmfLiftState::MODE_FIRE],
         current_mode: RmfLiftState::MODE_FIRE,
         session_id: "recorded-session".into(),
@@ -501,34 +503,67 @@ fn verify_recorded_outcome(playback: &RecordedPlayback) -> Result<(), String> {
 }
 
 fn verify_rmf_experiment(experiment: &RmfRecordedExperiment) -> Result<(), String> {
-    if experiment.initial.car_state.id != CarId::new("lift-A")
-        || experiment.initial.car_state.position != Position::at_floor(Floor::new(3))
-        || experiment.initial.car_state.motion != MotionState::Stopped
-        || experiment.initial.car_state.door != DoorState::Open
-        || experiment.initial.car_state.mode != OperatingMode::FireService
-        || experiment.initial.car_state.target != Some(Floor::new(4))
-        || experiment.initial.source_session_id != "recorded-session"
-        || experiment.initial.topology.served_floors()
+    if experiment.incomplete.observation.provenance != rmf_provenance(1)
+        || experiment.incomplete.observation.car != CarId::new("lift-A")
+        || experiment.incomplete.observation.position
+            != PositionEvidence::FloorReference(Floor::new(3))
+        || experiment.incomplete.observation.motion
+            != MotionEvidence::Known(MotionState::Moving(Direction::Up))
+        || experiment.incomplete.observation.door != DoorEvidence::MovingUnknownDirection
+        || experiment.incomplete.observation.mode
+            != OperatingModeEvidence::Known(OperatingMode::FireService)
+        || experiment.incomplete.observation.target != Some(Floor::new(4))
+        || experiment.incomplete.source_context.current_floor_label != "L3"
+        || experiment.incomplete.source_context.source_session_id != "recorded-session"
+        || experiment.incomplete.topology.served_floors()
             != [Floor::new(1), Floor::new(2), Floor::new(3), Floor::new(4)]
     {
-        return Err("unambiguous Open-RMF fields did not map as expected".into());
+        return Err("incomplete Open-RMF fields did not preserve their exact evidence".into());
     }
-    if experiment.ambiguous_door_error != RmfMappingError::AmbiguousDoorMoving
-        || experiment.motion_error
-            != RmfMappingError::MotionLacksContinuousPosition(RmfLiftState::MOTION_UP)
-        || experiment.control_mode_error
-            != RmfMappingError::ControlModeIsNotOperatingMode(RmfLiftState::MODE_AGV)
+    if experiment.incomplete_resolution
+        != (CarStateResolution::Unresolved {
+            car: CarId::new("lift-A"),
+            reasons: vec![
+                UnresolvedCarStateReason::ExactPositionUnavailable,
+                UnresolvedCarStateReason::DoorDirectionUnknown,
+            ],
+        })
     {
-        return Err("ambiguous Open-RMF fields were not rejected explicitly".into());
+        return Err("incomplete Open-RMF evidence was forced into operational state".into());
+    }
+
+    let expected_final = CarState {
+        id: CarId::new("lift-A"),
+        position: Position::at_floor(Floor::new(4)),
+        motion: MotionState::Stopped,
+        door: DoorState::Open,
+        mode: OperatingMode::FireService,
+        target: None,
+    };
+    if experiment.final_observation.observation.provenance != rmf_provenance(2)
+        || experiment.final_observation.observation.position
+            != PositionEvidence::FloorReference(Floor::new(4))
+        || experiment.final_resolution != CarStateResolution::Resolved(expected_final.clone())
+    {
+        return Err("sufficient Open-RMF evidence did not resolve to expected state".into());
+    }
+    if experiment.source_specific_mode.observation.provenance != rmf_provenance(3)
+        || experiment.source_specific_mode.observation.mode != OperatingModeEvidence::SourceSpecific
+        || experiment.source_specific_mode.source_context.source_mode != RmfLiftState::MODE_AGV
+        || experiment.source_specific_mode_resolution
+            != (CarStateResolution::Unresolved {
+                car: CarId::new("lift-A"),
+                reasons: vec![UnresolvedCarStateReason::OperatingModeSourceSpecific],
+            })
+    {
+        return Err("Open-RMF source mode leaked into operational mode semantics".into());
     }
     if experiment.write_error != "recorded runtime is read-only and rejects all intents"
-        || experiment.emitted
-            != [RuntimeEvent::PositionChanged(
-                experiment.final_observation.car_state.clone(),
-            )]
-        || experiment.final_states != [experiment.final_observation.car_state.clone()]
+        || experiment.final_states != [expected_final]
     {
-        return Err("mapped Open-RMF recording did not preserve the no-write playback path".into());
+        return Err(
+            "resolved Open-RMF state did not preserve the no-write runtime boundary".into(),
+        );
     }
     Ok(())
 }
@@ -616,27 +651,41 @@ fn render_recorded_report(playback: &RecordedPlayback) -> String {
 }
 
 fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
-    let initial = &experiment.initial.car_state;
-    let final_state = &experiment.final_observation.car_state;
+    let incomplete = &experiment.incomplete.observation;
+    let CarStateResolution::Resolved(final_state) = &experiment.final_resolution else {
+        unreachable!("verified experiment has a resolved final observation")
+    };
     [
         format!("scenario: {RMF_RECORDED_SCENARIO}"),
         "source: recorded Open-RMF LiftState fields; no ROS or network connection".into(),
-        "determinism: PASS (2 identical mappings and playbacks)".into(),
+        "determinism: PASS (2 identical mappings and resolutions)".into(),
         format!("write boundary: PASS ({})", experiment.write_error),
         format!(
-            "mapped initial: {} position={} motion={:?} door={:?} mode={:?} target={} session={}",
-            initial.id,
-            initial.position.nearest_floor,
-            initial.motion,
-            initial.door,
-            initial.mode,
-            initial
+            "incomplete observation: source={} sequence={} car={} position={:?} motion={:?} door={:?} mode={:?} target={} session={}",
+            incomplete.provenance.source,
+            incomplete.provenance.sequence.value(),
+            incomplete.car,
+            incomplete.position,
+            incomplete.motion,
+            incomplete.door,
+            incomplete.mode,
+            incomplete
                 .target
                 .map_or_else(|| "-".into(), |floor| floor.to_string()),
-            experiment.initial.source_session_id
+            experiment.incomplete.source_context.source_session_id
         ),
         format!(
-            "mapped final: {} position={} motion={:?} door={:?} mode={:?} target=-",
+            "incomplete resolution: {:?}",
+            experiment.incomplete_resolution
+        ),
+        format!(
+            "resolved final: sequence={} {} position={} motion={:?} door={:?} mode={:?} target=-",
+            experiment
+                .final_observation
+                .observation
+                .provenance
+                .sequence
+                .value(),
             final_state.id,
             final_state.position.nearest_floor,
             final_state.motion,
@@ -644,13 +693,12 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
             final_state.mode
         ),
         format!(
-            "rejected ambiguous door: {}",
-            experiment.ambiguous_door_error
+            "source-specific mode: raw={} canonical={:?} resolution={:?}",
+            experiment.source_specific_mode.source_context.source_mode,
+            experiment.source_specific_mode.observation.mode,
+            experiment.source_specific_mode_resolution
         ),
-        format!("rejected imprecise motion: {}", experiment.motion_error),
-        format!("rejected control mode: {}", experiment.control_mode_error),
-        "outcome: PASS (unambiguous observations mapped; ambiguous semantics preserved as errors)"
-            .into(),
+        "outcome: PASS (partial evidence preserved; only sufficient evidence became CarState)".into(),
         String::new(),
     ]
     .join("\n")
@@ -702,23 +750,17 @@ mod tests {
     }
 
     #[test]
-    fn rmf_recorded_scenario_maps_only_unambiguous_read_only_state() {
+    fn rmf_recorded_scenario_preserves_partial_evidence_before_resolution() {
         let report = run(RMF_RECORDED_SCENARIO).expect("recorded RMF scenario should pass");
 
-        assert!(report.contains("determinism: PASS (2 identical mappings and playbacks)"));
-        assert!(report.contains("mapped initial: lift-A position=3F motion=Stopped door=Open"));
-        assert!(report.contains("mode=FireService target=4F session=recorded-session"));
-        assert!(report.contains("mapped final: lift-A position=4F motion=Stopped door=Open"));
-        assert!(report.contains(
-            "rejected ambiguous door: Open-RMF DOOR_MOVING does not distinguish opening from closing"
-        ));
-        assert!(report.contains(
-            "rejected imprecise motion: Open-RMF motion_state 1 has no continuous position to map"
-        ));
-        assert!(report.contains(
-            "rejected control mode: Open-RMF control mode 2 is not a LiftAssistant operating mode"
-        ));
-        assert!(report.contains("ambiguous semantics preserved as errors"));
+        assert!(report.contains("determinism: PASS (2 identical mappings and resolutions)"));
+        assert!(report.contains("source=fixture/open-rmf sequence=1 car=lift-A"));
+        assert!(report.contains("position=FloorReference(Floor(3))"));
+        assert!(report.contains("motion=Known(Moving(Up)) door=MovingUnknownDirection"));
+        assert!(report.contains("reasons: [ExactPositionUnavailable, DoorDirectionUnknown]"));
+        assert!(report.contains("resolved final: sequence=2 lift-A position=4F motion=Stopped"));
+        assert!(report.contains("source-specific mode: raw=2 canonical=SourceSpecific"));
+        assert!(report.contains("only sufficient evidence became CarState"));
     }
 
     #[test]

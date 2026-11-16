@@ -316,25 +316,31 @@ The current recorded/Open-RMF experiments have supplied enough evidence to move 
 
 ### M4.3 — Canonical partial observation proof
 
-**READY — next implementation slice.**
+**Implemented.**
 
-Direction approved for internal/reversible work:
+Implemented behavior:
 
-- keep complete operational `CarState` intact;
-- introduce the smallest separate canonical observation representation needed to express the demonstrated Open-RMF ambiguities without fabricating precision;
-- carry explicit provenance/source identity and deterministic sequencing;
-- distinguish unknown/uncertain/unavailable information explicitly rather than collapsing everything into `Option<T>`;
-- do not expose the new observation type directly to Core as trusted operational state;
-- add a resolver path that produces complete `CarState` only when evidence is sufficient;
-- migrate the recorded Open-RMF experiment to produce canonical observations rather than failing merely because a complete `CarState` cannot yet be constructed;
-- preserve raw/source-specific context for diagnostics and later mapping review;
-- remain internal/experimental; no public schema freeze.
+- complete operational `CarState` remains unchanged;
+- the internal canonical `CarObservation` carries configured source identity, deterministic source sequence, car identity, and explicit position/motion/door/operating-mode evidence;
+- floor-reference-only position, unknown motion, undirected door movement, unknown mode, and source-specific mode are represented without fabricating an exact position, door direction, or LiftAssistant operating mode;
+- the deterministic resolver returns either a complete `CarState` or machine-readable unresolved fields; it does no history inference, probability, or source-specific reasoning;
+- a floor reference becomes exact at-floor position only for the currently proven stopped/open evidence combination;
+- the Open-RMF mapper now produces canonical observations and separately retains raw current/destination labels, available/current source modes, and session identity;
+- declared Open-RMF `MOTION_UNKNOWN` and Human/AGV/Emergency modes are valid partial evidence, while unrecognized enum values and invalid/unconfigured floor labels remain mapping errors;
+- the real `rmf-recorded-read-only` scenario runs the mapper/resolver flow twice and checks the expected incomplete `L3 + UP + DOOR_MOVING` result, the resolved `L4 + STOPPED + OPEN` result, source-specific AGV-mode non-resolution, provenance/sequence, and the existing no-write boundary;
+- the model remains internal/reversible: no generic quality/confidence/timestamp system, storage format, ROS dependency, live transport, or public schema was added.
 
-Keep this slice narrow. Do not design a universal telemetry framework, generic confidence model, database, or persistence format.
+Focused prior-art review rechecked the official Open-RMF `LiftState` definition and OPC UA `DataValue`. The implementation preserves the demonstrated source semantics and provenance distinction without copying OPC UA quality/timestamp machinery that has no current caller.
+
+Validation: formatting, all-target linting, 43 workspace tests, and the real Open-RMF recorded/read-only scenario passed.
 
 ### M4.4 — Separate observation, intent, and simulation-driving contracts
 
-After M4.3 is working:
+**READY — next implementation slice.**
+
+Promotion evidence: M4.3 now has a real observation/resolution path outside `ElevatorRuntime`, while `RecordedRuntime` is still forced to implement a write method that can only reject and both recorded/live-shaped backends would inherit simulator/replay-only `tick(Duration)` semantics. These are concrete incompatible responsibilities in current callers, not a roadmap-only abstraction.
+
+Implement incrementally:
 
 - split the prototype `ElevatorRuntime` responsibilities so read-only observation sources do not need a write API;
 - separate observation ingestion from high-level intent submission;

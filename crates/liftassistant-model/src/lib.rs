@@ -180,6 +180,90 @@ impl CarState {
     }
 }
 
+/// Identifies the configured source that produced an observation.
+///
+/// This remains an internal provenance value, not a public adapter identifier schema.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ObservationSourceId(String);
+
+impl ObservationSourceId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ObservationSourceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ObservationSequence(u64);
+
+impl ObservationSequence {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservationProvenance {
+    pub source: ObservationSourceId,
+    pub sequence: ObservationSequence,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PositionEvidence {
+    Exact(Position),
+    /// The source named a floor but did not establish an exact at-floor position.
+    FloorReference(Floor),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MotionEvidence {
+    Known(MotionState),
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DoorEvidence {
+    Known(DoorState),
+    /// The source reports movement without saying whether the door opens or closes.
+    MovingUnknownDirection,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OperatingModeEvidence {
+    Known(OperatingMode),
+    Unknown,
+    /// The source mode is real context but is not a LiftAssistant operating mode.
+    SourceSpecific,
+}
+
+/// Vendor-neutral evidence that may be insufficient to construct an operational [`CarState`].
+///
+/// Source-specific context is deliberately retained by the adapter beside this value instead of
+/// being promoted into canonical domain semantics.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CarObservation {
+    pub provenance: ObservationProvenance,
+    pub car: CarId,
+    pub position: PositionEvidence,
+    pub motion: MotionEvidence,
+    pub door: DoorEvidence,
+    pub mode: OperatingModeEvidence,
+    pub target: Option<Floor>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HallCall {
     pub floor: Floor,

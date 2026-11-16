@@ -69,11 +69,13 @@ cargo run -p liftassistant-tui -- --scenario rmf-recorded-read-only
 
 This experiment uses in-memory fields from the official Open-RMF `LiftState`
 message. Explicit configuration maps `L1` through `L4` to LiftAssistant floors.
-Stable stopped/open at-floor and Fire mode observations map into the recorded runtime;
-the RMF session and source modes are retained. `DOOR_MOVING`, moving state without
-continuous position, stopped/closed state without exact-position evidence, and
-AGV/Human control modes are displayed as mapping errors instead of being guessed.
-No ROS node, network subscription, lift request, or file format is involved.
+The first observation preserves `L3 + UP + DOOR_MOVING` as canonical partial
+evidence without inventing continuous position or door direction, so resolution
+remains explicit and incomplete. A later `L4 + STOPPED + OPEN` observation resolves
+to complete operational state. Source identity/sequence, RMF floor labels, session,
+and source modes are retained; AGV/Human control modes are not guessed as
+LiftAssistant operating modes. Two runs must match and the expected outcomes are
+checked. No ROS node, network subscription, lift request, or file format is involved.
 
 ## Availability fallback
 

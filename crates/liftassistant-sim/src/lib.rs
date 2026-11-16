@@ -12,7 +12,9 @@ use liftassistant_model::{
 use liftassistant_runtime::{ElevatorRuntime, RuntimeError, RuntimeEvent};
 
 pub use recorded::{RecordedFrame, RecordedRuntime};
-pub use rmf_recorded::{MappedRmfLiftState, RmfLiftState, RmfMappingError, map_rmf_lift_state};
+pub use rmf_recorded::{
+    MappedRmfObservation, RmfLiftState, RmfMappingError, RmfSourceContext, map_rmf_lift_state,
+};
 
 #[derive(Debug)]
 struct SimCar {

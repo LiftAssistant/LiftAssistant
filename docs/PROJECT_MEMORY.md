@@ -89,9 +89,9 @@ These call semantics remain an internal, reversible model informed by CiA 417, B
 
 The first non-simulator backend is a deterministic, native-semantic recorded runtime. It advertises observation capabilities only, rejects every submitted intent, and advances timed observation frames solely through explicit elapsed input. It defines no file format or live transport.
 
-The first external mapping experiment uses recorded Open-RMF `LiftState` fields. Explicit floor-label configuration and stopped/open at-floor evidence can produce a complete internal `CarState` for Fire/Offline modes while retaining source session/mode context. Moving/unknown position, undirected door movement, closed-door position uncertainty, Human/AGV control modes, unsupported modes, and unknown/unadvertised floors remain structured errors rather than guessed values.
+The first external mapping experiment uses recorded Open-RMF `LiftState` fields. External partial state enters a separate internal `CarObservation` with explicit source identity, deterministic sequence, and semantic evidence. Moving-with-floor-reference-only position, undirected door movement, declared unknowns, and source-specific modes remain honest evidence instead of mapping failures or guessed operational fields. Source floor labels, modes, and session identity remain adapter context.
 
-This evidence shows a boundary between complete operational state and partial external observations. No partial-observation model, normative mapping, live middleware dependency, protocol write, or hardware path has been approved or frozen.
+Operational `CarState` remains complete. A deterministic resolver promotes an observation only when position, motion, directed door state, and LiftAssistant operating mode are all sufficiently established; the currently proven stopped/open floor-reference combination establishes exact at-floor position. This observation model and mapping remain internal and reversible. No normative schema, generic telemetry framework, live middleware dependency, protocol write, or hardware path is approved or frozen.
 
 ## License
 

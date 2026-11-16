@@ -1,7 +1,9 @@
 use std::{collections::BTreeMap, error::Error, fmt};
 
 use liftassistant_model::{
-    BuildingTopology, CarId, CarState, DoorState, Floor, MotionState, OperatingMode, Position,
+    BuildingTopology, CarId, CarObservation, Direction, DoorEvidence, DoorState, Floor,
+    MotionEvidence, MotionState, ObservationProvenance, OperatingMode, OperatingModeEvidence,
+    PositionEvidence,
 };
 
 /// Recorded fields from Open-RMF `rmf_lift_msgs/LiftState` used by this experiment.
@@ -38,13 +40,20 @@ impl RmfLiftState {
     pub const MODE_EMERGENCY: u8 = 5;
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct MappedRmfLiftState {
-    pub car_state: CarState,
-    pub topology: BuildingTopology,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RmfSourceContext {
+    pub current_floor_label: String,
+    pub destination_floor_label: String,
     pub source_mode: u8,
     pub available_source_modes: Vec<u8>,
     pub source_session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MappedRmfObservation {
+    pub observation: CarObservation,
+    pub topology: BuildingTopology,
+    pub source_context: RmfSourceContext,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -53,13 +62,9 @@ pub enum RmfMappingError {
     NoAvailableFloors,
     UnknownFloorLabel(String),
     FloorNotAdvertised(String),
-    AmbiguousDoorMoving,
     UnknownDoorState(u8),
-    MotionLacksContinuousPosition(u8),
     UnknownMotionState(u8),
-    PositionNotConfirmedAtFloor,
-    ControlModeIsNotOperatingMode(u8),
-    UnsupportedOperatingMode(u8),
+    UnknownOperatingMode(u8),
 }
 
 impl fmt::Display for RmfMappingError {
@@ -77,28 +82,14 @@ impl fmt::Display for RmfMappingError {
                 f,
                 "Open-RMF floor label {label:?} is not present in available_floors"
             ),
-            Self::AmbiguousDoorMoving => {
-                f.write_str("Open-RMF DOOR_MOVING does not distinguish opening from closing")
-            }
             Self::UnknownDoorState(value) => {
                 write!(f, "unknown Open-RMF door_state {value}")
             }
-            Self::MotionLacksContinuousPosition(value) => write!(
-                f,
-                "Open-RMF motion_state {value} has no continuous position to map"
-            ),
             Self::UnknownMotionState(value) => {
-                write!(f, "unsupported Open-RMF motion_state {value}")
+                write!(f, "unknown Open-RMF motion_state {value}")
             }
-            Self::PositionNotConfirmedAtFloor => {
-                f.write_str("Open-RMF state does not confirm an exact at-floor position")
-            }
-            Self::ControlModeIsNotOperatingMode(value) => write!(
-                f,
-                "Open-RMF control mode {value} is not a LiftAssistant operating mode"
-            ),
-            Self::UnsupportedOperatingMode(value) => {
-                write!(f, "unsupported Open-RMF operating mode {value}")
+            Self::UnknownOperatingMode(value) => {
+                write!(f, "unknown Open-RMF current_mode {value}")
             }
         }
     }
@@ -109,7 +100,8 @@ impl Error for RmfMappingError {}
 pub fn map_rmf_lift_state(
     source: &RmfLiftState,
     floor_labels: &BTreeMap<String, Floor>,
-) -> Result<MappedRmfLiftState, RmfMappingError> {
+    provenance: ObservationProvenance,
+) -> Result<MappedRmfObservation, RmfMappingError> {
     if source.lift_name.is_empty() {
         return Err(RmfMappingError::EmptyLiftName);
     }
@@ -149,47 +141,46 @@ pub fn map_rmf_lift_state(
         Some(mapped_floor(&source.destination_floor, floor_labels)?)
     };
     let door = match source.door_state {
-        RmfLiftState::DOOR_CLOSED => DoorState::Closed,
-        RmfLiftState::DOOR_OPEN => DoorState::Open,
-        RmfLiftState::DOOR_MOVING => return Err(RmfMappingError::AmbiguousDoorMoving),
+        RmfLiftState::DOOR_CLOSED => DoorEvidence::Known(DoorState::Closed),
+        RmfLiftState::DOOR_OPEN => DoorEvidence::Known(DoorState::Open),
+        RmfLiftState::DOOR_MOVING => DoorEvidence::MovingUnknownDirection,
         other => return Err(RmfMappingError::UnknownDoorState(other)),
     };
     let motion = match source.motion_state {
-        RmfLiftState::MOTION_STOPPED => MotionState::Stopped,
-        RmfLiftState::MOTION_UP | RmfLiftState::MOTION_DOWN => {
-            return Err(RmfMappingError::MotionLacksContinuousPosition(
-                source.motion_state,
-            ));
-        }
+        RmfLiftState::MOTION_STOPPED => MotionEvidence::Known(MotionState::Stopped),
+        RmfLiftState::MOTION_UP => MotionEvidence::Known(MotionState::Moving(Direction::Up)),
+        RmfLiftState::MOTION_DOWN => MotionEvidence::Known(MotionState::Moving(Direction::Down)),
+        RmfLiftState::MOTION_UNKNOWN => MotionEvidence::Unknown,
         other => return Err(RmfMappingError::UnknownMotionState(other)),
     };
-    if door != DoorState::Open {
-        return Err(RmfMappingError::PositionNotConfirmedAtFloor);
-    }
     let mode = match source.current_mode {
-        RmfLiftState::MODE_FIRE => OperatingMode::FireService,
-        RmfLiftState::MODE_OFFLINE => OperatingMode::OutOfService,
-        RmfLiftState::MODE_HUMAN | RmfLiftState::MODE_AGV => {
-            return Err(RmfMappingError::ControlModeIsNotOperatingMode(
-                source.current_mode,
-            ));
+        RmfLiftState::MODE_FIRE => OperatingModeEvidence::Known(OperatingMode::FireService),
+        RmfLiftState::MODE_OFFLINE => OperatingModeEvidence::Known(OperatingMode::OutOfService),
+        RmfLiftState::MODE_UNKNOWN => OperatingModeEvidence::Unknown,
+        RmfLiftState::MODE_HUMAN | RmfLiftState::MODE_AGV | RmfLiftState::MODE_EMERGENCY => {
+            OperatingModeEvidence::SourceSpecific
         }
-        other => return Err(RmfMappingError::UnsupportedOperatingMode(other)),
+        other => return Err(RmfMappingError::UnknownOperatingMode(other)),
     };
 
-    Ok(MappedRmfLiftState {
-        car_state: CarState {
-            id: CarId::new(&source.lift_name),
-            position: Position::at_floor(current_floor),
+    Ok(MappedRmfObservation {
+        observation: CarObservation {
+            provenance,
+            car: CarId::new(&source.lift_name),
+            position: PositionEvidence::FloorReference(current_floor),
             motion,
             door,
             mode,
             target,
         },
         topology,
-        source_mode: source.current_mode,
-        available_source_modes: source.available_modes.clone(),
-        source_session_id: source.session_id.clone(),
+        source_context: RmfSourceContext {
+            current_floor_label: source.current_floor.clone(),
+            destination_floor_label: source.destination_floor.clone(),
+            source_mode: source.current_mode,
+            available_source_modes: source.available_modes.clone(),
+            source_session_id: source.session_id.clone(),
+        },
     })
 }
 
@@ -206,12 +197,23 @@ fn mapped_floor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use liftassistant_model::{ObservationSequence, ObservationSourceId, Position};
+    use liftassistant_runtime::{
+        CarStateResolution, UnresolvedCarStateReason, resolve_car_observation,
+    };
 
     fn floor_labels() -> BTreeMap<String, Floor> {
         [("L1", 1), ("L2", 2), ("L3", 3), ("L4", 4)]
             .into_iter()
             .map(|(label, floor)| (label.to_owned(), Floor::new(floor)))
             .collect()
+    }
+
+    fn provenance(sequence: u64) -> ObservationProvenance {
+        ObservationProvenance {
+            source: ObservationSourceId::new("fixture/open-rmf"),
+            sequence: ObservationSequence::new(sequence),
+        }
     }
 
     fn fire_service_state() -> RmfLiftState {
@@ -229,87 +231,110 @@ mod tests {
     }
 
     #[test]
-    fn unambiguous_recorded_fields_map_and_source_context_is_preserved() {
-        let mapped = map_rmf_lift_state(&fire_service_state(), &floor_labels())
-            .expect("fire/offline modes and stable door/motion map directly");
+    fn incomplete_fields_are_valid_evidence_without_fabricated_precision() {
+        let mut source = fire_service_state();
+        source.door_state = RmfLiftState::DOOR_MOVING;
+        source.motion_state = RmfLiftState::MOTION_UP;
 
-        assert_eq!(mapped.car_state.id, CarId::new("lift-A"));
-        assert_eq!(mapped.car_state.position, Position::at_floor(Floor::new(3)));
-        assert_eq!(mapped.car_state.motion, MotionState::Stopped);
-        assert_eq!(mapped.car_state.door, DoorState::Open);
-        assert_eq!(mapped.car_state.mode, OperatingMode::FireService);
-        assert_eq!(mapped.car_state.target, Some(Floor::new(4)));
+        let mapped = map_rmf_lift_state(&source, &floor_labels(), provenance(1))
+            .expect("known partial evidence is a valid observation");
+
+        assert_eq!(
+            mapped.observation.position,
+            PositionEvidence::FloorReference(Floor::new(3))
+        );
+        assert_eq!(
+            mapped.observation.motion,
+            MotionEvidence::Known(MotionState::Moving(Direction::Up))
+        );
+        assert_eq!(
+            mapped.observation.door,
+            DoorEvidence::MovingUnknownDirection
+        );
+        assert_eq!(
+            resolve_car_observation(&mapped.observation),
+            CarStateResolution::Unresolved {
+                car: CarId::new("lift-A"),
+                reasons: vec![
+                    UnresolvedCarStateReason::ExactPositionUnavailable,
+                    UnresolvedCarStateReason::DoorDirectionUnknown,
+                ],
+            }
+        );
+    }
+
+    #[test]
+    fn stopped_open_floor_reference_resolves_and_context_is_preserved() {
+        let mut source = fire_service_state();
+        source.current_floor = "L4".into();
+        source.destination_floor.clear();
+
+        let mapped = map_rmf_lift_state(&source, &floor_labels(), provenance(2))
+            .expect("known source fields map to canonical evidence");
+        let CarStateResolution::Resolved(state) = resolve_car_observation(&mapped.observation)
+        else {
+            panic!("stopped/open floor reference should resolve");
+        };
+
+        assert_eq!(state.id, CarId::new("lift-A"));
+        assert_eq!(state.position, Position::at_floor(Floor::new(4)));
+        assert_eq!(state.motion, MotionState::Stopped);
+        assert_eq!(state.door, DoorState::Open);
+        assert_eq!(state.mode, OperatingMode::FireService);
+        assert_eq!(state.target, None);
+        assert_eq!(mapped.observation.provenance, provenance(2));
+        assert_eq!(mapped.source_context.current_floor_label, "L4");
+        assert_eq!(mapped.source_context.destination_floor_label, "");
+        assert_eq!(mapped.source_context.source_mode, RmfLiftState::MODE_FIRE);
+        assert_eq!(mapped.source_context.source_session_id, "recorded-session");
         assert_eq!(
             mapped.topology.served_floors(),
             &[Floor::new(1), Floor::new(2), Floor::new(3), Floor::new(4)]
         );
-        assert_eq!(mapped.source_mode, RmfLiftState::MODE_FIRE);
-        assert_eq!(mapped.source_session_id, "recorded-session");
-
-        let mut offline = fire_service_state();
-        offline.current_mode = RmfLiftState::MODE_OFFLINE;
-        assert_eq!(
-            map_rmf_lift_state(&offline, &floor_labels())
-                .expect("offline maps to out of service")
-                .car_state
-                .mode,
-            OperatingMode::OutOfService
-        );
     }
 
     #[test]
-    fn ambiguous_external_fields_are_not_guessed() {
+    fn source_control_modes_remain_context_instead_of_operating_modes() {
         let mut source = fire_service_state();
-        source.door_state = RmfLiftState::DOOR_MOVING;
-        assert_eq!(
-            map_rmf_lift_state(&source, &floor_labels()),
-            Err(RmfMappingError::AmbiguousDoorMoving)
-        );
-
-        source.door_state = RmfLiftState::DOOR_OPEN;
         source.current_mode = RmfLiftState::MODE_AGV;
-        assert_eq!(
-            map_rmf_lift_state(&source, &floor_labels()),
-            Err(RmfMappingError::ControlModeIsNotOperatingMode(
-                RmfLiftState::MODE_AGV
-            ))
-        );
 
-        source.current_mode = RmfLiftState::MODE_FIRE;
-        source.motion_state = RmfLiftState::MOTION_UP;
-        assert_eq!(
-            map_rmf_lift_state(&source, &floor_labels()),
-            Err(RmfMappingError::MotionLacksContinuousPosition(
-                RmfLiftState::MOTION_UP
-            ))
-        );
+        let mapped = map_rmf_lift_state(&source, &floor_labels(), provenance(1))
+            .expect("source-specific mode remains valid observation context");
 
-        source.motion_state = RmfLiftState::MOTION_STOPPED;
-        source.door_state = RmfLiftState::DOOR_CLOSED;
         assert_eq!(
-            map_rmf_lift_state(&source, &floor_labels()),
-            Err(RmfMappingError::PositionNotConfirmedAtFloor)
+            mapped.observation.mode,
+            OperatingModeEvidence::SourceSpecific
+        );
+        assert_eq!(mapped.source_context.source_mode, RmfLiftState::MODE_AGV);
+        assert_eq!(
+            resolve_car_observation(&mapped.observation),
+            CarStateResolution::Unresolved {
+                car: CarId::new("lift-A"),
+                reasons: vec![UnresolvedCarStateReason::OperatingModeSourceSpecific],
+            }
         );
     }
 
     #[test]
-    fn unknown_and_unsupported_values_remain_explicit_errors() {
+    fn source_unknowns_are_evidence_but_unrecognized_values_are_errors() {
         let mut source = fire_service_state();
         source.motion_state = RmfLiftState::MOTION_UNKNOWN;
-        assert_eq!(
-            map_rmf_lift_state(&source, &floor_labels()),
-            Err(RmfMappingError::UnknownMotionState(
-                RmfLiftState::MOTION_UNKNOWN
-            ))
-        );
+        source.current_mode = RmfLiftState::MODE_UNKNOWN;
+        let mapped = map_rmf_lift_state(&source, &floor_labels(), provenance(1))
+            .expect("declared unknown values remain valid evidence");
+        assert_eq!(mapped.observation.motion, MotionEvidence::Unknown);
+        assert_eq!(mapped.observation.mode, OperatingModeEvidence::Unknown);
 
-        source.motion_state = RmfLiftState::MOTION_STOPPED;
-        source.current_mode = RmfLiftState::MODE_EMERGENCY;
+        source.motion_state = 99;
         assert_eq!(
-            map_rmf_lift_state(&source, &floor_labels()),
-            Err(RmfMappingError::UnsupportedOperatingMode(
-                RmfLiftState::MODE_EMERGENCY
-            ))
+            map_rmf_lift_state(&source, &floor_labels(), provenance(1)),
+            Err(RmfMappingError::UnknownMotionState(99))
+        );
+        source.motion_state = RmfLiftState::MOTION_STOPPED;
+        source.current_mode = 99;
+        assert_eq!(
+            map_rmf_lift_state(&source, &floor_labels(), provenance(1)),
+            Err(RmfMappingError::UnknownOperatingMode(99))
         );
     }
 
@@ -320,7 +345,7 @@ mod tests {
         source.destination_floor = "ROOF".into();
 
         assert_eq!(
-            map_rmf_lift_state(&source, &floor_labels()),
+            map_rmf_lift_state(&source, &floor_labels(), provenance(1)),
             Err(RmfMappingError::UnknownFloorLabel("ROOF".into()))
         );
 
@@ -329,7 +354,7 @@ mod tests {
         let mut labels = floor_labels();
         labels.insert("ROOF".into(), Floor::new(8));
         assert_eq!(
-            map_rmf_lift_state(&source, &labels),
+            map_rmf_lift_state(&source, &labels, provenance(1)),
             Err(RmfMappingError::FloorNotAdvertised("ROOF".into()))
         );
     }
