@@ -428,6 +428,21 @@ This second independent source exercises different ambiguity than Open-RMF witho
 
 Validation: formatting, all-target linting, 59 workspace tests, all six TUI scenarios, and the headless lifecycle scenario passed.
 
+### Live read-only environment proof
+
+**BLOCKED BY EXTERNAL INPUT — not READY for implementation.**
+
+Read-only host inspection on 2026-11-16 found:
+
+- no `ros2` executable or `/opt/ros` installation and no running ROS/Open-RMF process;
+- no BACnet read tools (`bacwi`/`bacrp`), no process exposing a known local BACnet source, and no listener on BACnet UDP port 47808;
+- no `candump`/`cansend`, no CAN or vcan network interface, and no running SocketCAN capture;
+- no external packet/bag/pcap/controller fixture in the repository; the only relevant inputs are the typed in-memory Open-RMF and BACnet recordings implemented above.
+
+No network scan, package installation, privileged interface creation, controller connection, or message send was attempted. A live proof needs an explicitly supplied read-only test endpoint/environment, sanitized real capture/fixture, or an already-available virtual interface. Until one exists, claiming a live adapter would require invented data or unauthorized environment mutation.
+
+M4 now has the roadmap's minimum exit evidence of two independent recorded external-source mappings plus a headless read-only path, but live transport, production freshness/health, supervision, and deployment evidence remain absent. No M5 slice is promoted to READY merely from the roadmap; the next implementation must be justified by concrete environment/caller pressure and recorded here first.
+
 ## Preserved production ideas
 
 Longer-term production/debugging ideas are preserved in `docs/PRODUCTION_DESIGN_NOTES.md`. They are constraints/candidates, not a mandate to implement them all during M4.
