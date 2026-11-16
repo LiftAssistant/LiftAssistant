@@ -3,25 +3,25 @@
 ## Current composition
 
 ~~~text
-Developer TUI (current composition root)
-        |
-        | hall calls / developer controls
-        v
-LiftAssistant Core
-        |
-        | high-level intents
-        v
-     IntentSink -----------------> Simulator
-                                    ^      |
-            explicit duration       |      | runtime events
-     SimulationDriver --------------+      |
-                                           v
-Developer TUI <---------------- ObservationSource
+Developer TUI / Scenario runner
+              |
+              | hall calls / runtime feedback / observations
+              v
+            Engine ----------> LiftAssistant Core
+              |
+              | high-level intents
+              v
+          IntentSink -----------------> Simulator
+                                         ^      |
+                 explicit duration       |      | runtime events
+          SimulationDriver --------------+------+
+                                         |
+                                  ObservationSource
 ~~~
 
 The simulator is the first active runtime backend and implements observation, high-level-intent, and deterministic-driving contracts. M4 adds a second, recorded/read-only source that implements observation and replay driving but has no intent-submission contract. Live sources and intent backends should implement only the responsibilities they actually provide; explicit `advance(Duration)` is not a universal live-adapter requirement.
 
-The TUI currently performs the small amount of application composition needed to connect core and runtime. Do not extract an application/service layer until another frontend or composition target creates real duplication.
+The shared Engine owns topology, call lifecycle, dispatch, pending scheduling, high-level intent submission/result handling, runtime-feedback processing, and canonical observation resolution. The developer TUI composition retains only UI state, simulator-specific controls, explicit time driving, bounded display trace, and replay input recording. Interactive and non-interactive scenario callers use the same Engine path.
 
 ## Functional core
 
@@ -63,11 +63,12 @@ Low-level motion and safety primitives remain outside Core.
 
 - `liftassistant-model`: canonical domain types.
 - `liftassistant-core`: deterministic vendor-neutral semantic decisions/state transitions.
+- `liftassistant-engine`: shared deterministic semantic orchestration and observation resolution.
 - `liftassistant-runtime`: semantic execution contract and runtime events.
 - `liftassistant-sim`: deterministic active simulator, native-semantic recorded/read-only backend, and recorded external-state mapping experiments.
-- `liftassistant-tui`: developer UI and current composition root.
+- `liftassistant-tui`: developer simulator composition, scenario runner, and UI.
 
-These five packages remain sufficient for the current work. New packages require demonstrated ownership/lifecycle pressure, not speculative layering.
+These six packages reflect demonstrated ownership boundaries. Further packages still require real lifecycle/reuse pressure rather than speculative layering.
 
 ## Determinism boundary
 

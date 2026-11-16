@@ -97,9 +97,10 @@ agent.md                   compatibility/navigation pointer
 crates/
   liftassistant-model/     canonical domain types
   liftassistant-core/      deterministic semantic decisions
+  liftassistant-engine/    shared semantic orchestration
   liftassistant-runtime/   semantic runtime contract
   liftassistant-sim/       deterministic reference backend
-  liftassistant-tui/       developer composition root / UI
+  liftassistant-tui/       developer simulator composition / UI
 
 docs/
   PROJECT_MEMORY.md        durable decisions / validated long-lived facts

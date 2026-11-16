@@ -39,7 +39,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     let columns = Layout::horizontal([Constraint::Length(25), Constraint::Min(40)]).split(rows[1]);
     let states = app.runtime.car_states();
     let building: Vec<Line> = app
-        .topology
+        .engine
+        .topology()
         .served_floors()
         .iter()
         .rev()
@@ -101,18 +102,19 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
     frame.render_widget(Paragraph::new(details).block(panel("Cars")), columns[1]);
 
-    let last = app.last_call.map_or_else(
+    let last = app.engine.last_call().map_or_else(
         || "none".into(),
         |call| format!("{} {}", call.floor, direction_name(call.direction)),
     );
     let decision = app
-        .decision
-        .as_ref()
+        .engine
+        .decision()
         .map_or_else(|| "-".into(), intent_label);
     let lower_columns =
         Layout::horizontal([Constraint::Length(32), Constraint::Min(32)]).split(rows[2]);
     let calls: Vec<Line> = app
-        .calls
+        .engine
+        .calls()
         .calls()
         .map(|record| {
             Line::from(format!(
@@ -140,8 +142,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         Paragraph::new(trace).block(panel(&format!("Events | {last} -> {decision}"))),
         lower_columns[1],
     );
-    let lowest = app.topology.lowest_floor();
-    let highest = app.topology.highest_floor();
+    let lowest = app.engine.topology().lowest_floor();
+    let highest = app.engine.topology().highest_floor();
     let terminals = if lowest == highest {
         format!("{lowest}: no hall direction")
     } else {

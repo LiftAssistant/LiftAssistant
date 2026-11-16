@@ -217,6 +217,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "liftassistant-engine"
+version = "0.1.0"
+dependencies = [
+ "liftassistant-core",
+ "liftassistant-model",
+ "liftassistant-runtime",
+]
+
+[[package]]
 name = "liftassistant-model"
 version = "0.1.0"
 
@@ -241,6 +250,7 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "liftassistant-core",
+ "liftassistant-engine",
  "liftassistant-model",
  "liftassistant-runtime",
  "liftassistant-sim",

@@ -1,5 +1,6 @@
 //! Developer-only, in-memory simulator inputs; not a public elevator schema.
 use liftassistant_core::{DispatchCandidate, DispatchSelection, HallCallRejection};
+use liftassistant_engine::EngineEvent;
 use liftassistant_model::{
     BuildingTopology, CallId, CallState, CarId, HallCall, Intent, OperatingMode,
 };
@@ -53,6 +54,28 @@ pub enum SemanticEvent {
     SimulatorIntentRejectionArmed,
     RuntimeError(String),
     Runtime(RuntimeEvent),
+}
+
+impl From<EngineEvent> for SemanticEvent {
+    fn from(event: EngineEvent) -> Self {
+        match event {
+            EngineEvent::HallCall(call) => Self::HallCall(call),
+            EngineEvent::InvalidCall(reason) => Self::InvalidCall(reason),
+            EngineEvent::CallRegistered(id) => Self::CallRegistered(id),
+            EngineEvent::CallDeduplicated(id) => Self::CallDeduplicated(id),
+            EngineEvent::CallStateChanged { id, state } => Self::CallStateChanged { id, state },
+            EngineEvent::DispatchCandidate { id, candidate } => {
+                Self::DispatchCandidate { id, candidate }
+            }
+            EngineEvent::NoEligibleCar(id) => Self::NoEligibleCar(id),
+            EngineEvent::DispatchSelected { id, selection } => {
+                Self::DispatchSelected { id, selection }
+            }
+            EngineEvent::IntentGenerated { id, intent } => Self::IntentGenerated { id, intent },
+            EngineEvent::RuntimeError(error) => Self::RuntimeError(error),
+            EngineEvent::Runtime(event) => Self::Runtime(event),
+        }
+    }
 }
 
 pub struct Replay {
@@ -164,10 +187,10 @@ mod tests {
 
         app.replay();
 
-        assert_eq!(app.topology, topology);
+        assert_eq!(app.engine.topology(), &topology);
         assert!(app.trace.back().unwrap().contains("REPLAY verified"));
         app.reset();
-        assert_eq!(app.topology, topology);
+        assert_eq!(app.engine.topology(), &topology);
         assert_eq!(app.selected_floor, Floor::new(3));
     }
 
@@ -198,7 +221,8 @@ mod tests {
         assert_eq!(
             first
                 .app
-                .calls
+                .engine
+                .calls()
                 .get(CallId::new(1))
                 .map(|record| &record.state),
             Some(&CallState::Assigned(CarId::new("A")))
@@ -206,7 +230,8 @@ mod tests {
         assert_eq!(
             first
                 .app
-                .calls
+                .engine
+                .calls()
                 .get(CallId::new(2))
                 .map(|record| &record.state),
             Some(&CallState::Assigned(CarId::new("B")))
@@ -214,7 +239,8 @@ mod tests {
         assert_eq!(
             first
                 .app
-                .calls
+                .engine
+                .calls()
                 .get(CallId::new(3))
                 .map(|record| &record.state),
             Some(&CallState::Pending)
@@ -252,15 +278,24 @@ mod tests {
         }
 
         assert_eq!(
-            app.calls.get(CallId::new(1)).map(|record| &record.state),
+            app.engine
+                .calls()
+                .get(CallId::new(1))
+                .map(|record| &record.state),
             Some(&CallState::Completed)
         );
         assert_eq!(
-            app.calls.get(CallId::new(2)).map(|record| &record.state),
+            app.engine
+                .calls()
+                .get(CallId::new(2))
+                .map(|record| &record.state),
             Some(&CallState::Completed)
         );
         assert_eq!(
-            app.calls.get(CallId::new(3)).map(|record| &record.state),
+            app.engine
+                .calls()
+                .get(CallId::new(3))
+                .map(|record| &record.state),
             Some(&CallState::Assigned(CarId::new("A")))
         );
         assert_eq!(app.runtime.car_states()[0].target, Some(Floor::new(2)));
@@ -294,14 +329,17 @@ mod tests {
             app.execute(Command::Step);
         }
         assert_eq!(
-            app.calls.get(CallId::new(3)).map(|record| &record.state),
+            app.engine
+                .calls()
+                .get(CallId::new(3))
+                .map(|record| &record.state),
             Some(&CallState::Completed)
         );
 
         let first = run(&app.recording);
         let second = run(&app.recording);
         assert_eq!(first.events, second.events);
-        assert_eq!(first.app.calls, app.calls);
+        assert_eq!(first.app.engine, app.engine);
         assert_eq!(first.app.runtime.car_states(), app.runtime.car_states());
     }
 }
@@ -322,7 +360,7 @@ mod availability_tests {
             car: CarId::new("B"),
             floor: Floor::new(7),
         };
-        assert_eq!(app.decision, Some(intent.clone()));
+        assert_eq!(app.engine.decision(), Some(&intent));
         for _ in 0..8 {
             app.step();
         }
@@ -392,7 +430,7 @@ mod availability_tests {
                 .iter()
                 .any(|event| matches!(event, SemanticEvent::IntentGenerated { .. }))
         );
-        assert!(app.decision.is_none());
+        assert!(app.engine.decision().is_none());
         assert!(
             app.runtime
                 .car_states()
@@ -402,8 +440,8 @@ mod availability_tests {
         app.toggle_availability("A");
         app.call(Direction::Up);
         assert_eq!(
-            app.decision,
-            Some(Intent::ServeFloor {
+            app.engine.decision(),
+            Some(&Intent::ServeFloor {
                 car: CarId::new("A"),
                 floor: Floor::new(7)
             })
@@ -422,7 +460,7 @@ mod availability_tests {
         );
         assert!(app.trace.back().unwrap().contains("Runtime error"));
         app.call(Direction::Up);
-        assert!(app.decision.is_some());
+        assert!(app.engine.decision().is_some());
         app.step();
         assert_eq!(app.runtime.car_states()[0].position.floor_position, 3.75);
     }

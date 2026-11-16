@@ -93,6 +93,8 @@ The first external mapping experiment uses recorded Open-RMF `LiftState` fields.
 
 Operational `CarState` remains complete. A deterministic resolver promotes an observation only when position, motion, directed door state, and LiftAssistant operating mode are all sufficiently established; the currently proven stopped/open floor-reference combination establishes exact at-floor position. This observation model and mapping remain internal and reversible. No normative schema, generic telemetry framework, live middleware dependency, protocol write, or hardware path is approved or frozen.
 
+The shared internal `liftassistant-engine` owns topology, call lifecycle, dispatch and pending scheduling, high-level intent submission/result handling, runtime-feedback transitions, semantic events, and canonical observation resolution. Core remains deterministic and I/O-free. The developer TUI retains presentation, simulator-only controls, explicit driving, display trace, and replay input recording; both interactive and non-interactive scenario paths use the same Engine orchestration.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

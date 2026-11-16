@@ -355,23 +355,29 @@ Validation: formatting, all-target linting, 43 workspace tests, and all four exe
 
 ### M4.5 — Extract the demonstrated Engine boundary
 
-**READY — next implementation slice.**
+**Implemented.**
 
-Promotion evidence: after the contract split, `App` still owns call registry/lifecycle, dispatch, pending scheduling, high-level intent submission, runtime-feedback processing, semantic events, and simulator-specific developer controls alongside TUI selection/pause/trace/recording state. Both interactive TUI and non-interactive scenarios already call this orchestration, while the Open-RMF scenario separately composes resolver output. This is concrete mixed/shared ownership. Start with an internal Engine boundary; add a crate only if extraction proves package-level reuse is required.
+Implemented behavior:
 
-Implement incrementally:
+- a focused `liftassistant-engine` crate now owns building topology, call registry/lifecycle, dispatch, pending scheduling, high-level intent submission/result handling, runtime-feedback transitions, and machine-readable `EngineEvent` output;
+- Engine exposes canonical observation resolution through the existing deterministic resolver rather than making the TUI or source adapter decide operational truth;
+- Core remains deterministic and I/O-free; Engine depends on Core/model/runtime but not simulator, terminal UI, networking, storage, or wall-clock time;
+- the TUI `App` retains only simulator instance/control, selection/pause/step state, bounded display trace, and replay input recording;
+- interactive execution and non-interactive simulator scenarios now use the same Engine orchestration; the recorded Open-RMF scenario uses the same Engine resolution boundary;
+- simulator-specific mode/rejection controls remain in the developer composition and do not leak into Engine events;
+- one direct Engine test protects intent generation, Assigned/Serving/Completed lifecycle, and runtime-feedback processing, while all existing replay/scenario tests protect migration parity.
 
-- move common semantic orchestration/state resolution out of the TUI composition layer;
-- keep Core deterministic and I/O-free;
-- make TUI/scenario execution consume the same Engine boundary;
-- do not add network/API/daemon concerns to Engine;
-- add a new crate only if concrete duplicated ownership now justifies it.
+The sixth crate was justified by actual reuse across interactive, non-interactive, resolver, and upcoming headless callers; no service framework or generic application platform was introduced.
 
-This is the first point where the previously deferred application/orchestration extraction is expected to have real caller pressure.
+Validation: formatting, final all-target linting, 44 workspace tests with the updated lockfile, and all four executable developer scenarios passed.
 
 ### M4.6 — Diagnostics substrate
 
-Once observation flow and Engine ownership are clear:
+**READY — next implementation slice.**
+
+Promotion evidence: Engine now has stable machine-readable observation-resolution and semantic-event boundaries used by both interactive and scenario callers, while diagnostics still collapse into a TUI-only bounded `String` trace and the Open-RMF evidence path has no shared recorder. This is concrete caller pressure for a bounded structured flight recorder and a very small deterministic detector set.
+
+Implement incrementally:
 
 - add a bounded in-memory flight recorder over canonical observations, semantic transitions, decisions and intents;
 - define a small internal machine-readable diagnostic-event shape;

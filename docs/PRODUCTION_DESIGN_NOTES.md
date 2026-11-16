@@ -93,7 +93,7 @@ validated/certified controller
 
 TUI and WebUI should become replaceable clients. A UI failure must not imply Engine failure.
 
-An Engine crate/service should only be extracted after the common orchestration boundary is demonstrated by real callers; do not create a generic framework merely because this diagram exists.
+M4 real callers demonstrated enough shared orchestration to extract an internal `liftassistant-engine` crate. It is not a service or external protocol: networking, persistence, process supervision, and public API concerns remain outside it.
 
 ## Reconciliation direction
 

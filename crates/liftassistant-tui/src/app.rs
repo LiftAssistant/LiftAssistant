@@ -1,13 +1,11 @@
 use std::{collections::VecDeque, time::Duration};
 
-use liftassistant_core::{
-    CallRegistration, CallRegistry, DispatchRejection, HallCallRejection, dispatch,
-    validate_hall_call,
-};
+use liftassistant_core::{DispatchRejection, HallCallRejection};
+use liftassistant_engine::Engine;
 use liftassistant_model::{
     BuildingTopology, CallState, CarId, Direction, Floor, HallCall, Intent, OperatingMode,
 };
-use liftassistant_runtime::{IntentSink, ObservationSource, RuntimeEvent, SimulationDriver};
+use liftassistant_runtime::{ObservationSource, RuntimeEvent, SimulationDriver};
 use liftassistant_sim::SimRuntime;
 
 use crate::replay::{Command, SemanticEvent, run_with_topology};
@@ -18,13 +16,10 @@ const RECORDING_LIMIT: usize = 2048;
 
 pub struct App {
     pub runtime: SimRuntime,
-    pub topology: BuildingTopology,
+    pub engine: Engine,
     pub selected_floor: Floor,
     pub paused: bool,
     pub steps: u64,
-    pub last_call: Option<HallCall>,
-    pub decision: Option<Intent>,
-    pub calls: CallRegistry,
     pub trace: VecDeque<String>,
     pub recording: Vec<Command>,
     pub recording_full: bool,
@@ -40,13 +35,10 @@ impl App {
         let selected_floor = floors[floors.len().saturating_sub(2)];
         Self {
             runtime: SimRuntime::reference_two_car(),
-            topology,
+            engine: Engine::new(topology),
             selected_floor,
             paused: false,
             steps: 0,
-            last_call: None,
-            decision: None,
-            calls: CallRegistry::new(),
             trace: VecDeque::new(),
             recording: Vec::new(),
             recording_full: false,
@@ -54,7 +46,7 @@ impl App {
     }
 
     pub fn select_floor(&mut self, delta: i16) {
-        let floors = self.topology.served_floors();
+        let floors = self.engine.topology().served_floors();
         let current = floors
             .binary_search(&self.selected_floor)
             .expect("selected floor belongs to the building topology");
@@ -78,11 +70,21 @@ impl App {
             self.log("Recording full: replay unavailable until R reset".into());
         }
         let events = match command {
-            Command::HallCall(call) => self.submit_call(call),
+            Command::HallCall(call) => self
+                .engine
+                .submit_call(call, &mut self.runtime)
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             Command::SetMode { car, mode } => match self.runtime.set_mode(&car, mode) {
                 Ok(()) => {
                     let mut events = vec![SemanticEvent::ModeChanged { car, mode }];
-                    events.extend(self.dispatch_pending());
+                    events.extend(
+                        self.engine
+                            .retry_pending(&mut self.runtime)
+                            .into_iter()
+                            .map(SemanticEvent::from),
+                    );
                     events
                 }
                 Err(error) => vec![SemanticEvent::RuntimeError(error.to_string())],
@@ -94,130 +96,15 @@ impl App {
             Command::Step => {
                 self.steps += 1;
                 let runtime_events = self.runtime.advance(FIXED_STEP);
-                self.consume_runtime_events(runtime_events)
+                self.engine
+                    .consume_runtime_events(runtime_events, &mut self.runtime)
+                    .into_iter()
+                    .map(Into::into)
+                    .collect()
             }
         };
         for event in &events {
             self.log(semantic_label(event));
-        }
-        events
-    }
-
-    fn submit_call(&mut self, call: HallCall) -> Vec<SemanticEvent> {
-        let mut events = vec![SemanticEvent::HallCall(call)];
-        self.last_call = Some(call);
-        if let Err(reason) = validate_hall_call(&call, &self.topology) {
-            self.decision = None;
-            events.push(SemanticEvent::InvalidCall(reason));
-            return events;
-        }
-        match self.calls.register(call) {
-            CallRegistration::Created(id) => {
-                self.decision = None;
-                events.push(SemanticEvent::CallRegistered(id));
-            }
-            CallRegistration::Duplicate(id) => {
-                events.push(SemanticEvent::CallDeduplicated(id));
-                if self
-                    .calls
-                    .get(id)
-                    .is_some_and(|record| record.state != CallState::Pending)
-                {
-                    return events;
-                }
-                self.decision = None;
-            }
-        }
-        events.extend(self.dispatch_pending());
-        events
-    }
-
-    fn dispatch_pending(&mut self) -> Vec<SemanticEvent> {
-        let pending: Vec<_> = self.calls.pending_calls().collect();
-        let mut events = Vec::new();
-
-        for (id, call) in pending {
-            let states = self.runtime.car_states();
-            let occupied_cars = self.calls.occupied_cars();
-            let capabilities = states
-                .iter()
-                .filter_map(|car| {
-                    self.runtime
-                        .capabilities(&car.id)
-                        .map(|caps| (car.id.clone(), caps))
-                })
-                .collect();
-            let decision = dispatch(&call, &states, &capabilities, &occupied_cars);
-            events.extend(
-                decision
-                    .candidates
-                    .iter()
-                    .cloned()
-                    .map(|candidate| SemanticEvent::DispatchCandidate { id, candidate }),
-            );
-            let Some(selection) = decision.selection else {
-                events.push(SemanticEvent::NoEligibleCar(id));
-                continue;
-            };
-            let intent = decision
-                .intent
-                .expect("a dispatch selection must produce an intent");
-            let car = selection.car.clone();
-            events.push(SemanticEvent::DispatchSelected { id, selection });
-            events.push(SemanticEvent::IntentGenerated {
-                id,
-                intent: intent.clone(),
-            });
-            self.decision = Some(intent.clone());
-            match self.runtime.submit_intent(intent) {
-                Ok(()) => {
-                    let assigned = CallState::Assigned(car.clone());
-                    assert!(self.calls.assign(id, car));
-                    events.push(SemanticEvent::CallStateChanged {
-                        id,
-                        state: assigned,
-                    });
-                }
-                Err(error) => events.push(SemanticEvent::RuntimeError(error.to_string())),
-            }
-        }
-        events
-    }
-
-    fn consume_runtime_events(&mut self, runtime_events: Vec<RuntimeEvent>) -> Vec<SemanticEvent> {
-        let mut events = Vec::new();
-
-        for runtime_event in runtime_events {
-            events.push(SemanticEvent::Runtime(runtime_event.clone()));
-            match &runtime_event {
-                RuntimeEvent::IntentAccepted(Intent::ServeFloor { car, floor }) => {
-                    if let Some(id) = self.calls.assigned_call(car, *floor) {
-                        assert!(self.calls.mark_serving(id, car));
-                        events.push(SemanticEvent::CallStateChanged {
-                            id,
-                            state: CallState::Serving(car.clone()),
-                        });
-                    }
-                }
-                RuntimeEvent::IntentAccepted(Intent::ParkAt { .. }) => {}
-                RuntimeEvent::Arrived { car, floor } => {
-                    self.calls.note_arrival(car, *floor);
-                }
-                RuntimeEvent::DoorStateChanged {
-                    car,
-                    state: liftassistant_model::DoorState::Open,
-                } => {
-                    let Some(id) = self.calls.complete_open_call(car) else {
-                        continue;
-                    };
-                    events.push(SemanticEvent::CallStateChanged {
-                        id,
-                        state: CallState::Completed,
-                    });
-                    events.extend(self.dispatch_pending());
-                }
-                RuntimeEvent::PositionChanged(_) | RuntimeEvent::DoorStateChanged { .. } => {}
-            }
         }
         events
     }
@@ -227,16 +114,14 @@ impl App {
             self.log("Replay unavailable: recording full; R reset to record a new session".into());
             return;
         }
-        let first = run_with_topology(&self.recording, self.topology.clone());
-        let second = run_with_topology(&self.recording, self.topology.clone());
+        let topology = self.engine.topology().clone();
+        let first = run_with_topology(&self.recording, topology.clone());
+        let second = run_with_topology(&self.recording, topology);
         if first.events != second.events
             || first.app.runtime.car_states() != second.app.runtime.car_states()
             || first.app.runtime.car_states() != self.runtime.car_states()
             || first.app.steps != self.steps
-            || first.app.last_call != self.last_call
-            || first.app.decision != self.decision
-            || first.app.calls != self.calls
-            || first.app.topology != self.topology
+            || first.app.engine != self.engine
         {
             self.log("REPLAY mismatch: live state preserved".into());
             return;
@@ -281,7 +166,7 @@ impl App {
     }
 
     pub fn reset(&mut self) {
-        let topology = self.topology.clone();
+        let topology = self.engine.topology().clone();
         *self = Self::with_topology(topology);
         self.log("RESET: two-car simulator with configured topology".into());
     }
@@ -435,10 +320,10 @@ mod tests {
                 direction: Direction::Down,
             }
         )));
-        assert!(app.calls.calls().next().is_none());
+        assert!(app.engine.calls().calls().next().is_none());
 
         app.reset();
-        assert_eq!(app.topology, topology);
+        assert_eq!(app.engine.topology(), &topology);
         assert_eq!(app.selected_floor, Floor::new(3));
     }
 
@@ -448,8 +333,8 @@ mod tests {
         app.paused = true;
         app.call(Direction::Up);
         assert_eq!(
-            app.decision,
-            Some(Intent::ServeFloor {
+            app.engine.decision(),
+            Some(&Intent::ServeFloor {
                 car: CarId::new("A"),
                 floor: Floor::new(7)
             })
@@ -468,7 +353,10 @@ mod tests {
         assert_eq!(a.position.floor_position, 7.0);
         assert_eq!(a.door, DoorState::Open);
         assert_eq!(
-            app.calls.get(CallId::new(1)).map(|record| &record.state),
+            app.engine
+                .calls()
+                .get(CallId::new(1))
+                .map(|record| &record.state),
             Some(&CallState::Completed)
         );
         assert!(
@@ -481,8 +369,8 @@ mod tests {
             app.runtime.car_states(),
             SimRuntime::reference_two_car().car_states()
         );
-        assert!(app.decision.is_none() && app.last_call.is_none());
-        assert!(app.calls.calls().next().is_none());
+        assert!(app.engine.decision().is_none() && app.engine.last_call().is_none());
+        assert!(app.engine.calls().calls().next().is_none());
         assert_eq!(app.steps, 0);
         assert_eq!(app.trace.len(), 1);
         assert_eq!(app.selected_floor, Floor::new(7));
@@ -502,7 +390,7 @@ mod tests {
         }));
 
         assert!(events.contains(&SemanticEvent::CallDeduplicated(CallId::new(1))));
-        assert_eq!(app.calls.calls().count(), 1);
+        assert_eq!(app.engine.calls().calls().count(), 1);
         assert_eq!(app.runtime.car_states(), states);
     }
 
@@ -513,7 +401,7 @@ mod tests {
         for _ in 0..150 {
             app.call(Direction::Up);
         }
-        assert!(app.decision.is_none());
+        assert!(app.engine.decision().is_none());
         assert!(
             app.runtime
                 .car_states()

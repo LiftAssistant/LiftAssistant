@@ -2,6 +2,7 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
+use liftassistant_engine::Engine;
 use liftassistant_model::{
     BuildingTopology, CallId, CallState, Capabilities, CarId, CarState, Direction, DoorEvidence,
     DoorState, Floor, HallCall, MotionEvidence, MotionState, ObservationProvenance,
@@ -9,8 +10,7 @@ use liftassistant_model::{
     PositionEvidence,
 };
 use liftassistant_runtime::{
-    CarStateResolution, ObservationSource, RuntimeEvent, SimulationDriver,
-    UnresolvedCarStateReason, resolve_car_observation,
+    CarStateResolution, ObservationSource, RuntimeEvent, SimulationDriver, UnresolvedCarStateReason,
 };
 use liftassistant_sim::{
     MappedRmfObservation, RecordedFrame, RecordedRuntime, RmfLiftState, map_rmf_lift_state,
@@ -220,7 +220,8 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     let incomplete_source = rmf_source_state();
     let incomplete = map_rmf_lift_state(&incomplete_source, &labels, rmf_provenance(1))
         .map_err(|error| error.to_string())?;
-    let incomplete_resolution = resolve_car_observation(&incomplete.observation);
+    let engine = Engine::new(incomplete.topology.clone());
+    let incomplete_resolution = engine.resolve_observation(&incomplete.observation);
 
     let mut final_source = incomplete_source.clone();
     final_source.current_floor = "L4".into();
@@ -229,7 +230,7 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     final_source.motion_state = RmfLiftState::MOTION_STOPPED;
     let final_observation = map_rmf_lift_state(&final_source, &labels, rmf_provenance(2))
         .map_err(|error| error.to_string())?;
-    let final_resolution = resolve_car_observation(&final_observation.observation);
+    let final_resolution = engine.resolve_observation(&final_observation.observation);
     let final_state = match &final_resolution {
         CarStateResolution::Resolved(state) => state.clone(),
         CarStateResolution::Unresolved { reasons, .. } => {
@@ -245,7 +246,7 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
         map_rmf_lift_state(&source_specific_mode_source, &labels, rmf_provenance(3))
             .map_err(|error| error.to_string())?;
     let source_specific_mode_resolution =
-        resolve_car_observation(&source_specific_mode.observation);
+        engine.resolve_observation(&source_specific_mode.observation);
 
     let runtime =
         RecordedRuntime::new([final_state.clone()], []).map_err(|error| error.to_string())?;
@@ -294,10 +295,7 @@ fn verify_determinism(first: &Replay, second: &Replay) -> Result<(), String> {
     if first.events != second.events
         || first.app.runtime.car_states() != second.app.runtime.car_states()
         || first.app.steps != second.app.steps
-        || first.app.last_call != second.app.last_call
-        || first.app.decision != second.app.decision
-        || first.app.calls != second.app.calls
-        || first.app.topology != second.app.topology
+        || first.app.engine != second.app.engine
         || first.app.recording != second.app.recording
     {
         return Err("scenario produced different semantic or physical results on replay".into());
@@ -329,11 +327,12 @@ fn verify_reference_outcome(replay: &Replay) -> Result<(), String> {
             },
         ),
     ];
-    if replay.app.calls.calls().count() != expected_calls.len()
+    if replay.app.engine.calls().calls().count() != expected_calls.len()
         || expected_calls.iter().any(|(id, call)| {
             replay
                 .app
-                .calls
+                .engine
+                .calls()
                 .get(*id)
                 .is_none_or(|record| record.call != *call || record.state != CallState::Completed)
         })
@@ -380,10 +379,15 @@ fn verify_rejection_outcome(replay: &Replay) -> Result<(), String> {
         floor: Floor::new(7),
         direction: Direction::Up,
     };
-    if replay.app.calls.calls().count() != 1
-        || replay.app.calls.get(CallId::new(1)).is_none_or(|record| {
-            record.call != expected_call || record.state != CallState::Completed
-        })
+    if replay.app.engine.calls().calls().count() != 1
+        || replay
+            .app
+            .engine
+            .calls()
+            .get(CallId::new(1))
+            .is_none_or(|record| {
+                record.call != expected_call || record.state != CallState::Completed
+            })
     {
         return Err("rejection scenario did not recover and complete call #1".into());
     }
@@ -557,7 +561,7 @@ fn render_report(name: &str, outcome: &str, commands: &[Command], replay: &Repla
     lines.extend(replay.app.trace.iter().map(|line| format!("  {line}")));
     lines.push(String::new());
     lines.push("final calls:".into());
-    lines.extend(replay.app.calls.calls().map(|record| {
+    lines.extend(replay.app.engine.calls().calls().map(|record| {
         format!(
             "  {} {} {} -> {}",
             record.id,
