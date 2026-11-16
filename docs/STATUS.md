@@ -467,9 +467,9 @@ Core also treated `car.target.is_some()` as one busy signal. That was safe for t
 
 Open-RMF itself separates reported `LiftState.destination_floor` from requested `LiftRequest.destination_floor`; BACnet `Next_Stopping_Floor` is optional. Desired/reported state must therefore remain distinct.
 
-### Finding B — one whole-car observation cannot represent live partial updates cleanly
+### Finding B — one whole-car observation cannot represent live partial updates cleanly (resolved by M4.9c)
 
-Current `CarObservation` is a whole-car evidence snapshot. A live protocol may update only one property/frame at a time. The model currently cannot distinguish:
+The pre-M4.9c model exposed only whole-car `CarObservation` snapshots. A live protocol may update only one property/frame at a time, so it could not distinguish:
 
 - this update omitted a field / did not change it;
 - the source explicitly reports that field as unknown.
@@ -490,7 +490,7 @@ The current trait name is therefore misleading: it is a resolved operational-sta
 
 ## M4.9 — Observation semantics hardening
 
-**IN PROGRESS — M4.9a–M4.9b implemented; M4.9c is next.**
+**IN PROGRESS — M4.9a–M4.9c implemented; M4.9d is next.**
 
 Work through these sub-slices in order. Keep all changes internal/reversible and run the prior-art gate before changing the model.
 
@@ -521,14 +521,19 @@ Validation: formatting, all 63 workspace tests, focused Open-RMF/BACnet/recorded
 
 ### M4.9c — Add incremental observation assembly
 
-**READY — next implementation work.**
+**IMPLEMENTED.**
 
-- distinguish field omitted/not-updated from field explicitly unknown/unavailable;
-- add the smallest deterministic in-memory assembler/store needed to merge partial updates into current evidence;
-- retain source/sequence provenance per evidence where required by the implementation;
-- do not add persistence, wall-clock freshness, probability/confidence, or a generic telemetry framework yet.
+- `CarObservationUpdate` uses outer optional fields for omitted/not-updated values while existing evidence variants retain explicit unknown/unavailable semantics;
+- `ObservationAssembler` merges updates deterministically per source and car without cross-source evidence mixing;
+- each assembled field retains the provenance of the update that last supplied it, while a snapshot records the latest accepted update provenance;
+- non-increasing per-source sequence is rejected without mutating current evidence; sequence remains ordering evidence, not freshness;
+- no persistence, clock/freshness policy, probability, history smoothing, or telemetry framework was added.
+
+Validation: formatting, warning-free workspace clippy, all 66 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass. Focused regressions cover omitted-vs-explicit-unknown merge, per-field provenance, rejection without mutation, and source isolation. No new blocker was found; the live read-only external-input blocker remains unchanged.
 
 ### M4.9d — Make Engine own resolved operational state
+
+**READY — next implementation work.**
 
 - canonical observations should enter Engine through one clear ingestion boundary;
 - Engine should own the current resolved operational snapshot/evidence state used by dispatch and read-side clients;

@@ -1,10 +1,11 @@
 #![forbid(unsafe_code)]
 
-use std::{error::Error, fmt, time::Duration};
+use std::{collections::BTreeMap, error::Error, fmt, time::Duration};
 
 use liftassistant_model::{
-    Capabilities, CarId, CarLocation, CarObservation, CarState, DoorEvidence, DoorState, Floor,
-    Intent, MotionEvidence, OperatingModeEvidence, PositionEvidence,
+    Capabilities, CarId, CarLocation, CarObservation, CarObservationUpdate, CarState, DoorEvidence,
+    DoorState, Floor, Intent, MotionEvidence, ObservationProvenance, ObservationSequence,
+    ObservationSourceId, OperatingModeEvidence, PositionEvidence, ReportedDestination,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -53,6 +54,135 @@ pub enum CarStateResolution {
         car: CarId,
         reasons: Vec<UnresolvedCarStateReason>,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EvidenceSample<T> {
+    pub value: T,
+    pub provenance: ObservationProvenance,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AssembledCarObservation {
+    pub latest_provenance: ObservationProvenance,
+    pub car: CarId,
+    pub position: Option<EvidenceSample<PositionEvidence>>,
+    pub motion: Option<EvidenceSample<MotionEvidence>>,
+    pub door: Option<EvidenceSample<DoorEvidence>>,
+    pub mode: Option<EvidenceSample<OperatingModeEvidence>>,
+    pub reported_destination: Option<EvidenceSample<ReportedDestination>>,
+}
+
+impl AssembledCarObservation {
+    /// Returns a whole-car snapshot only after every canonical field has evidence.
+    pub fn snapshot(&self) -> Option<CarObservation> {
+        Some(CarObservation {
+            provenance: self.latest_provenance.clone(),
+            car: self.car.clone(),
+            position: self.position.as_ref()?.value,
+            motion: self.motion.as_ref()?.value,
+            door: self.door.as_ref()?.value,
+            mode: self.mode.as_ref()?.value,
+            reported_destination: self.reported_destination.as_ref()?.value,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObservationAssemblyError {
+    NonIncreasingSequence {
+        source: ObservationSourceId,
+        previous: ObservationSequence,
+        received: ObservationSequence,
+    },
+}
+
+/// Deterministic in-memory assembly of incremental canonical evidence.
+///
+/// Evidence is never merged across configured sources. Sequence establishes ordering only; it
+/// carries no wall-clock freshness meaning.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ObservationAssembler {
+    observations: BTreeMap<(ObservationSourceId, CarId), AssembledCarObservation>,
+    last_sequence: BTreeMap<ObservationSourceId, ObservationSequence>,
+}
+
+impl ObservationAssembler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn apply(
+        &mut self,
+        update: CarObservationUpdate,
+    ) -> Result<AssembledCarObservation, ObservationAssemblyError> {
+        let CarObservationUpdate {
+            provenance,
+            car,
+            position,
+            motion,
+            door,
+            mode,
+            reported_destination,
+        } = update;
+        if let Some(previous) = self.last_sequence.get(&provenance.source)
+            && provenance.sequence <= *previous
+        {
+            return Err(ObservationAssemblyError::NonIncreasingSequence {
+                source: provenance.source,
+                previous: *previous,
+                received: provenance.sequence,
+            });
+        }
+
+        let key = (provenance.source.clone(), car.clone());
+        let current = self
+            .observations
+            .entry(key)
+            .or_insert_with(|| AssembledCarObservation {
+                latest_provenance: provenance.clone(),
+                car,
+                position: None,
+                motion: None,
+                door: None,
+                mode: None,
+                reported_destination: None,
+            });
+        current.latest_provenance = provenance.clone();
+        merge_sample(&mut current.position, position, &provenance);
+        merge_sample(&mut current.motion, motion, &provenance);
+        merge_sample(&mut current.door, door, &provenance);
+        merge_sample(&mut current.mode, mode, &provenance);
+        merge_sample(
+            &mut current.reported_destination,
+            reported_destination,
+            &provenance,
+        );
+        self.last_sequence
+            .insert(provenance.source, provenance.sequence);
+        Ok(current.clone())
+    }
+
+    pub fn current(
+        &self,
+        source: &ObservationSourceId,
+        car: &CarId,
+    ) -> Option<&AssembledCarObservation> {
+        self.observations.get(&(source.clone(), car.clone()))
+    }
+}
+
+fn merge_sample<T>(
+    current: &mut Option<EvidenceSample<T>>,
+    update: Option<T>,
+    provenance: &ObservationProvenance,
+) {
+    if let Some(value) = update {
+        *current = Some(EvidenceSample {
+            value,
+            provenance: provenance.clone(),
+        });
+    }
 }
 
 /// Resolves one canonical observation without history, probability, or source-specific inference.
@@ -232,5 +362,144 @@ mod tests {
             );
             assert_eq!(state.reported_destination, reported_destination);
         }
+    }
+
+    fn update(sequence: u64) -> CarObservationUpdate {
+        CarObservationUpdate {
+            provenance: ObservationProvenance {
+                source: ObservationSourceId::new("fixture/incremental"),
+                sequence: ObservationSequence::new(sequence),
+            },
+            car: CarId::new("lift-A"),
+            position: None,
+            motion: None,
+            door: None,
+            mode: None,
+            reported_destination: None,
+        }
+    }
+
+    #[test]
+    fn omitted_fields_preserve_evidence_but_explicit_unknown_replaces_it() {
+        let mut assembler = ObservationAssembler::new();
+        let mut first = update(1);
+        first.position = Some(PositionEvidence::FloorReference(Floor::new(3)));
+        first.motion = Some(MotionEvidence::Known(MotionState::Moving(Direction::Up)));
+        let first = assembler.apply(first).expect("first update is ordered");
+        assert!(first.snapshot().is_none());
+
+        let mut second = update(2);
+        second.door = Some(DoorEvidence::MovingUnknownDirection);
+        let second = assembler.apply(second).expect("second update is ordered");
+        assert_eq!(
+            second.position,
+            Some(EvidenceSample {
+                value: PositionEvidence::FloorReference(Floor::new(3)),
+                provenance: ObservationProvenance {
+                    source: ObservationSourceId::new("fixture/incremental"),
+                    sequence: ObservationSequence::new(1),
+                },
+            })
+        );
+        assert!(second.snapshot().is_none());
+
+        let mut third = update(3);
+        third.position = Some(PositionEvidence::Unknown);
+        let third = assembler.apply(third).expect("third update is ordered");
+        assert_eq!(
+            third.position,
+            Some(EvidenceSample {
+                value: PositionEvidence::Unknown,
+                provenance: ObservationProvenance {
+                    source: ObservationSourceId::new("fixture/incremental"),
+                    sequence: ObservationSequence::new(3),
+                },
+            })
+        );
+        assert_eq!(
+            third
+                .motion
+                .as_ref()
+                .map(|sample| sample.provenance.sequence),
+            Some(ObservationSequence::new(1))
+        );
+
+        let mut fourth = update(4);
+        fourth.door = Some(DoorEvidence::Known(DoorState::Closed));
+        fourth.mode = Some(OperatingModeEvidence::Known(OperatingMode::Normal));
+        fourth.reported_destination = Some(ReportedDestination::Unknown);
+        let snapshot = assembler
+            .apply(fourth)
+            .expect("fourth update is ordered")
+            .snapshot()
+            .expect("every field now has evidence, including explicit unknown");
+        assert_eq!(snapshot.position, PositionEvidence::Unknown);
+        assert_eq!(
+            resolve_car_observation(&snapshot),
+            CarStateResolution::Unresolved {
+                car: CarId::new("lift-A"),
+                reasons: vec![UnresolvedCarStateReason::PositionUnknown],
+            }
+        );
+    }
+
+    #[test]
+    fn non_increasing_sequence_is_rejected_without_mutating_evidence() {
+        let mut assembler = ObservationAssembler::new();
+        let mut first = update(2);
+        first.position = Some(PositionEvidence::FloorReference(Floor::new(3)));
+        assembler.apply(first).expect("first update is ordered");
+
+        let mut duplicate = update(2);
+        duplicate.position = Some(PositionEvidence::Unknown);
+        assert_eq!(
+            assembler.apply(duplicate),
+            Err(ObservationAssemblyError::NonIncreasingSequence {
+                source: ObservationSourceId::new("fixture/incremental"),
+                previous: ObservationSequence::new(2),
+                received: ObservationSequence::new(2),
+            })
+        );
+        assert_eq!(
+            assembler
+                .current(
+                    &ObservationSourceId::new("fixture/incremental"),
+                    &CarId::new("lift-A"),
+                )
+                .and_then(|current| current.position.as_ref())
+                .map(|sample| sample.value),
+            Some(PositionEvidence::FloorReference(Floor::new(3)))
+        );
+    }
+
+    #[test]
+    fn evidence_is_not_merged_across_sources() {
+        let mut assembler = ObservationAssembler::new();
+        let mut first = update(1);
+        first.position = Some(PositionEvidence::FloorReference(Floor::new(3)));
+        assembler.apply(first).expect("first source is ordered");
+
+        let mut second = update(1);
+        second.provenance.source = ObservationSourceId::new("fixture/other");
+        second.motion = Some(MotionEvidence::Known(MotionState::Stopped));
+        assembler
+            .apply(second)
+            .expect("second source has independent ordering");
+
+        let first = assembler
+            .current(
+                &ObservationSourceId::new("fixture/incremental"),
+                &CarId::new("lift-A"),
+            )
+            .expect("first source remains available");
+        let second = assembler
+            .current(
+                &ObservationSourceId::new("fixture/other"),
+                &CarId::new("lift-A"),
+            )
+            .expect("second source remains available");
+        assert!(first.motion.is_none());
+        assert!(second.position.is_none());
+        assert!(first.snapshot().is_none() && second.snapshot().is_none());
     }
 }

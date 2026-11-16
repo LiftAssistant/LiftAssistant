@@ -337,6 +337,42 @@ pub struct CarObservation {
     pub reported_destination: ReportedDestination,
 }
 
+/// Incremental canonical observation update.
+///
+/// An outer [`Option::None`] means that this update omitted the field and must not change
+/// previously assembled evidence. An evidence enum's `Unknown` variant is an explicit source
+/// statement and replaces the previous value.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CarObservationUpdate {
+    pub provenance: ObservationProvenance,
+    pub car: CarId,
+    pub position: Option<PositionEvidence>,
+    pub motion: Option<MotionEvidence>,
+    pub door: Option<DoorEvidence>,
+    pub mode: Option<OperatingModeEvidence>,
+    pub reported_destination: Option<ReportedDestination>,
+}
+
+impl From<CarObservation> for CarObservationUpdate {
+    fn from(observation: CarObservation) -> Self {
+        Self {
+            provenance: observation.provenance,
+            car: observation.car,
+            position: Some(observation.position),
+            motion: Some(observation.motion),
+            door: Some(observation.door),
+            mode: Some(observation.mode),
+            reported_destination: Some(observation.reported_destination),
+        }
+    }
+}
+
+impl From<&CarObservation> for CarObservationUpdate {
+    fn from(observation: &CarObservation) -> Self {
+        observation.clone().into()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HallCall {
     pub floor: Floor,
