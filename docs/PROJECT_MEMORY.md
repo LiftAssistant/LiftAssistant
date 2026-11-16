@@ -2,7 +2,9 @@
 
 Last consolidated: 2026-11-14
 
-Durable decisions and validated long-lived facts only. Current task status belongs in `docs/STATUS.md`.
+This file contains durable project facts and decisions only.
+
+Current milestone/progress belongs in `docs/STATUS.md`. Agent workflow belongs in `AGENTS.md`. Architecture details belong in `docs/ARCHITECTURE.md`.
 
 ## Identity
 
@@ -37,28 +39,6 @@ It is not primarily a new elevator brand and not merely a monitoring dashboard.
 10. Existing standards are inputs: CiA 417, BACnet, SAREF4LIFT, T/GSET 001-2025, Open-RMF/RFA, THOR/NeXt, and other relevant work.
 11. Adoption can be layered: observe, diagnostics, policy/group semantics, adapters, later native runtime where appropriate.
 12. Avoid premature application/service/plugin layers; extract them only when demonstrated by real callers.
-13. Before introducing or freezing durable domain semantics, protocol mappings, capability/diagnostic models, or external interfaces, review relevant established standards/mature implementations and document meaningful divergences.
-
-## Agent workflow decisions
-
-- `AGENTS.md` at repository root is the single authoritative agent workflow file.
-- Default mode is SELF-ITERATION.
-- HUMAN-REVIEW is required for safety/authority, normative public spec freezes, license, foundational infrastructure/ABI changes, major rewrites, release/security policy, and certification/conformance claims.
-- A HUMAN_PENDING item blocks only dependent work; independent READY work continues.
-- Green CI is a gate, not a milestone.
-- Tests primarily protect implemented behavior and concrete regressions.
-- Prior-art research is targeted and implementation-serving: enough to avoid reinvention, then return to a working vertical slice.
-- `agent.md` is a generic compatibility/navigation pointer only and must not fork the authoritative rules.
-- Project context should remain tool-agnostic and live in repository documentation rather than vendor-specific agent files.
-- Intended GitHub commit identity is the project owner's primary account `Axiaobo7788`, not alternate account `xiaobo-kipfel`.
-
-## Documentation roles
-
-- `docs/PROJECT_MEMORY.md`: durable decisions and validated long-lived facts.
-- `docs/STATUS.md`: current milestone, current progress, READY/HUMAN_PENDING/blockers.
-- `docs/ROADMAP.md`: milestone sequence and future scope.
-- `docs/ARCHITECTURE.md`: architecture and safety boundaries.
-- `README.md`: human-facing overview and runnable entry points.
 
 ## Product philosophy
 
@@ -67,6 +47,7 @@ It is not primarily a new elevator brand and not merely a monitoring dashboard.
 - Developer tooling may expose raw events/protocol details.
 - A future Home Assistant integration is a useful validation target, not an early milestone requirement.
 - Prefer a working vertical slice before adding generalized infrastructure.
+- Review relevant established standards/mature implementations before inventing durable public-facing semantics.
 
 ## Validated M1 baseline
 
@@ -86,7 +67,7 @@ HallCall
 
 The developer TUI also validates fixed-step pause/single-step behavior, deterministic replay, availability fallback, no-eligible-car behavior, and bounded event tracing.
 
-The key limitation intentionally left at M1 close was that calls were one-shot and could replace a car's current target; the M2 section below records the implemented replacement.
+The key limitation intentionally left at M1 close was that calls were one-shot and could replace a car's current target; M2 replaced that behavior with persistent call semantics.
 
 ## Validated M2 call semantics
 
