@@ -448,3 +448,97 @@ M4 now has the roadmap's minimum exit evidence of two independent recorded exter
 Longer-term production/debugging ideas are preserved in `docs/PRODUCTION_DESIGN_NOTES.md`. They are constraints/candidates, not a mandate to implement them all during M4.
 
 The highest-priority future themes include observation quality/freshness, reconciliation, shadow debugging, incident capsules/replay, stable diagnostic codes, adapter validation profiles, sandboxing, semantic maturity/versioning, safe update/rollback, sanitized diagnostic bundles, and a community recorded-fixture corpus.
+
+
+## M4 semantic-boundary audit — 2026-11-16
+
+A cross-project/code audit after M4.8 found that the current read-only prototype is healthy enough to continue, but live adapters would expose four semantic ambiguities that should be corrected before M5 or any write-capable work.
+
+### Finding A — reported destination is not the same as desired intent
+
+Current internal `CarObservation.target: Option<Floor>` and `CarState.target: Option<Floor>` cannot distinguish:
+
+- source explicitly reports no destination;
+- the source does not provide/know a destination;
+- simulator/Engine has a desired target;
+- an external controller reports a next stop/destination.
+
+Core currently also treats `car.target.is_some()` as one busy signal. That is safe for the simulator but is not a reliable production interpretation of optional external state.
+
+Open-RMF itself separates reported `LiftState.destination_floor` from requested `LiftRequest.destination_floor`; BACnet `Next_Stopping_Floor` is optional. Desired/reported state must therefore remain distinct.
+
+### Finding B — one whole-car observation cannot represent live partial updates cleanly
+
+Current `CarObservation` is a whole-car evidence snapshot. A live protocol may update only one property/frame at a time. The model currently cannot distinguish:
+
+- this update omitted a field / did not change it;
+- the source explicitly reports that field as unknown.
+
+This distinction matters for BACnet COV, CiA 417 PDOs, and other incremental streams. A later live source must not erase valid evidence merely because one message did not contain every field.
+
+### Finding C — floor reference is not continuous position
+
+Current resolver promotes `FloorReference(floor) + Stopped + DoorOpen` into `Position::at_floor(floor)`, which encodes an exact continuous coordinate.
+
+The reviewed standards do not justify that precision in general: Open-RMF reports a floor label; BACnet `Car_Position` reports a universal floor number; CiA 417 defines a distinct car-position unit for measured physical position. Stopped/open may establish landing/floor presence, but not an exact continuous encoder coordinate.
+
+### Finding D — Engine does not yet own operational state
+
+`Engine::resolve_observation` records and resolves evidence but does not retain the resulting operational state. Headless/TUI callers retain or query state outside Engine, and dispatch still reads `car_states()` from the backend through the current `ObservationSource` trait.
+
+The current trait name is therefore misleading: it is a resolved operational-state view, while canonical `CarObservation` input bypasses it. A production Engine should ingest observations, own the current resolved snapshot/evidence state, and dispatch from that owned state rather than reaching back into adapters for truth.
+
+## M4.9 — Observation semantics hardening
+
+**READY — next implementation work.**
+
+Work through these sub-slices in order. Keep all changes internal/reversible and run the prior-art gate before changing the model.
+
+### M4.9a — Separate reported destination from desired/control state
+
+- remove the ambiguity between "known no destination" and "destination unknown/not provided";
+- keep external reported next-stop/destination evidence separate from Engine desired intents;
+- do not use missing external destination as evidence that a car is idle;
+- reassess whether simulator target belongs in canonical operational `CarState` at all;
+- preserve existing deterministic simulator behavior during migration.
+
+Do not design the future authority/lease model here.
+
+### M4.9b — Correct location precision semantics
+
+- stop promoting a floor reference into a fabricated exact continuous position;
+- introduce the smallest internal location/position distinction that lets a complete operational state truthfully say "at/associated with floor N" without claiming an encoder coordinate;
+- keep simulator continuous position available where it is genuinely measured/simulated;
+- update dispatch distance logic only as required by the new truthful location semantics;
+- do not introduce a universal spatial graph.
+
+### M4.9c — Add incremental observation assembly
+
+- distinguish field omitted/not-updated from field explicitly unknown/unavailable;
+- add the smallest deterministic in-memory assembler/store needed to merge partial updates into current evidence;
+- retain source/sequence provenance per evidence where required by the implementation;
+- do not add persistence, wall-clock freshness, probability/confidence, or a generic telemetry framework yet.
+
+### M4.9d — Make Engine own resolved operational state
+
+- canonical observations should enter Engine through one clear ingestion boundary;
+- Engine should own the current resolved operational snapshot/evidence state used by dispatch and read-side clients;
+- adapters/sources should supply observations, not remain the authoritative state store for Engine decisions;
+- rename/remove the current `ObservationSource` abstraction if its real responsibility becomes a resolved state view;
+- keep `IntentSink` separate;
+- preserve deterministic replay and the no-write read-only host.
+
+After M4.9, rerun Open-RMF and BACnet scenarios and add regression coverage for omitted-vs-unknown, reported-vs-desired destination, and floor-level-vs-continuous position.
+
+## M4 exit / M5 promotion rule after audit
+
+M4.3–M4.8 remain valid prototype evidence. M5 is **not READY** yet.
+
+Before promoting a production read-only M5 slice, require:
+
+1. M4.9 semantic hardening complete;
+2. Open-RMF and BACnet mappings still pass through the same corrected observation/Engine path;
+3. Engine owns its operational state rather than querying adapter-owned truth;
+4. live read-only evidence or an explicitly supplied sanitized real capture/test endpoint exists for the next live slice.
+
+The existing live-environment blocker remains valid. Do not invent a live source or install privileged system components merely to advance the milestone.
