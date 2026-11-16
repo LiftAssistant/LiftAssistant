@@ -218,3 +218,40 @@ https://opentelemetry.io/docs/specs/semconv/general/semantic-convention-groups/
 Useful idea: semantic groups progress through explicit maturity/stability levels and stable groups are not casually broken. This is prior art for future LiftAssistant semantic maturity/versioning.
 
 Additional production patterns such as diagnostic registries, integration quality profiles, process sandboxing, update rollback and sanitized diagnostic bundles should be researched only when their implementation milestone becomes READY.
+
+
+## M4 semantic-boundary audit findings — reported/current/desired state
+
+### Reported state and desired intent must remain distinct
+
+Open-RMF exposes reported lift state and lift requests as separate message types. `LiftState` reports `destination_floor`, current floor, motion, door state, modes, and the granted session; `LiftRequest` separately carries a requester/session, request type, requested `destination_floor`, and requested door state.
+
+AWS IoT Device Shadow similarly separates `desired` and `reported` state and versions updates so stale writers can be forced to resynchronize. Eclipse Ditto explicitly distinguishes reported, desired, and current twin state.
+
+LiftAssistant should therefore not use one optional `target` field to simultaneously mean Engine desired target, controller-reported next stop, and "no target". External destination evidence belongs on the reported/observation side; Engine intent/call state belongs on the desired/orchestration side.
+
+Official/reference sources:
+- https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg
+- https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftRequest.msg
+- https://docs.aws.amazon.com/iot/latest/developerguide/device-shadow-document.html
+- https://eclipse.dev/ditto/
+
+### Omitted update is different from explicit unknown
+
+OPC UA `DataValue` associates an individual value with status and source/server timestamps rather than requiring every device property in one monolithic snapshot. AWS Device Shadow updates affect only fields supplied in an update; omitted fields are not automatically rewritten as "unknown".
+
+This matters for live BACnet COV, CAN/CiA 417 PDOs, and other incremental streams. LiftAssistant needs a deterministic distinction between "this update did not carry/change this field" and "the source explicitly says the field is unknown/unavailable". The current whole-`CarObservation` proof is therefore insufficient as the final live-ingestion contract.
+
+### Floor identity and measured continuous position are different evidence
+
+Open-RMF `LiftState.current_floor` is a floor label. BACnet Lift `Car_Position` is a universal floor number. CiA 417 defines a separate car-position unit whose role is measuring car position and which may optionally provide speed/acceleration/jerk.
+
+A floor reference plus stopped/open evidence may establish that the car is at a landing for operational purposes, but it does not establish an exact continuous encoder coordinate. LiftAssistant should preserve this precision distinction instead of manufacturing `Position::at_floor` from floor-level sources.
+
+### Lifecycle/readiness and diagnostics comparison
+
+ROS 2 managed nodes distinguish lifecycle states and allow an external supervisor to configure/activate/deactivate/recover components. Kubernetes separately distinguishes startup, liveness, and readiness. These support LiftAssistant's current direction that "process alive" is not equivalent to "read-only state is synchronized and ready".
+
+Redfish messages use stable machine-readable `MessageId` plus severity and resolution metadata. Home Assistant separates downloadable diagnostics from actionable Repairs and maintains an explicit integration quality scale. These support keeping LiftAssistant anomalies machine-readable and evidence-backed while delaying a public diagnostic registry, repair taxonomy, or adapter quality tier until real M5 deployment pressure exists.
+
+THOR's event fingerprint/logbook and KONE E-Link traffic-history playback independently validate the value of bounded pre-event evidence and historical playback for elevator field debugging, but LiftAssistant should keep its implementation open, deterministic, and source-neutral rather than copy either product's data model.
