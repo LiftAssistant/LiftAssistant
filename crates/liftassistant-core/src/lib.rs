@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use liftassistant_model::{
-    BuildingTopology, CallId, CallRecord, CallState, Capabilities, CarId, CarState, Direction,
-    Floor, HallCall, Intent, OperatingMode, ReportedDestination,
+    BuildingTopology, CallId, CallRecord, CallState, Capabilities, CarId, CarLocation, CarState,
+    Direction, Floor, HallCall, Intent, OperatingMode, ReportedDestination,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -244,13 +244,16 @@ pub fn dispatch(
                 Some(false) => rejections.push(DispatchRejection::ServeFloorUnsupported),
                 Some(true) => {}
             }
+            let location_floor_position = match car.location {
+                CarLocation::Floor(floor) => f64::from(floor.index()),
+                CarLocation::Continuous(position) => position.floor_position,
+            };
             DispatchCandidate {
                 car: car.id.clone(),
                 mode: car.mode,
                 busy,
                 serve_floor,
-                distance_floors: (car.position.floor_position - f64::from(call.floor.index()))
-                    .abs(),
+                distance_floors: (location_floor_position - f64::from(call.floor.index())).abs(),
                 rejections,
             }
         })
@@ -305,7 +308,7 @@ pub fn dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{Direction, Floor};
+    use liftassistant_model::{Direction, Floor, Position};
 
     fn capabilities(cars: &[CarState]) -> BTreeMap<CarId, Capabilities> {
         cars.iter()
@@ -457,6 +460,37 @@ mod tests {
                 .iter()
                 .all(|candidate| candidate.is_eligible())
         );
+    }
+
+    #[test]
+    fn floor_level_and_continuous_locations_use_deterministic_floor_distance() {
+        let cars = vec![
+            CarState::new("A", Floor::new(3)),
+            CarState::with_continuous_position(
+                "B",
+                Position {
+                    floor_position: 4.5,
+                    nearest_floor: Floor::new(5),
+                },
+            ),
+        ];
+        let call = HallCall {
+            floor: Floor::new(5),
+            direction: Direction::Down,
+        };
+
+        let decision = dispatch(&call, &cars, &capabilities(&cars), &BTreeSet::new());
+
+        assert_eq!(
+            decision.selection,
+            Some(DispatchSelection {
+                car: CarId::new("B"),
+                distance_floors: 0.5,
+                reason: DispatchSelectionReason::Nearest,
+            })
+        );
+        assert_eq!(decision.candidates[0].distance_floors, 2.0);
+        assert_eq!(decision.candidates[1].distance_floors, 0.5);
     }
 
     #[test]

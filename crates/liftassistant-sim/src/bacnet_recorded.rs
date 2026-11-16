@@ -246,7 +246,7 @@ fn map_mode(mode: Option<BacnetLiftCarMode>) -> OperatingModeEvidence {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{ObservationSequence, ObservationSourceId, Position};
+    use liftassistant_model::{CarLocation, ObservationSequence, ObservationSourceId};
     use liftassistant_runtime::{
         CarStateResolution, UnresolvedCarStateReason, resolve_car_observation,
     };
@@ -278,7 +278,7 @@ mod tests {
     }
 
     #[test]
-    fn required_position_motion_and_door_properties_become_partial_evidence() {
+    fn floor_level_properties_resolve_without_continuous_precision() {
         let mapped = map_bacnet_lift_properties(
             &properties(),
             CarId::new("bacnet-lift-1"),
@@ -307,13 +307,12 @@ mod tests {
             mapped.observation.reported_destination,
             ReportedDestination::Known(Floor::new(4))
         );
-        assert_eq!(
-            resolve_car_observation(&mapped.observation),
-            CarStateResolution::Unresolved {
-                car: CarId::new("bacnet-lift-1"),
-                reasons: vec![UnresolvedCarStateReason::ExactPositionUnavailable],
-            }
-        );
+        let CarStateResolution::Resolved(state) = resolve_car_observation(&mapped.observation)
+        else {
+            panic!("floor-level BACnet evidence should resolve without a continuous coordinate")
+        };
+        assert_eq!(state.location, CarLocation::Floor(Floor::new(3)));
+        assert!(state.location.continuous_position().is_none());
     }
 
     #[test]
@@ -336,7 +335,7 @@ mod tests {
         else {
             panic!("stopped/open BACnet floor reference should resolve")
         };
-        assert_eq!(state.position, Position::at_floor(Floor::new(4)));
+        assert_eq!(state.location, CarLocation::Floor(Floor::new(4)));
         assert_eq!(state.mode, OperatingMode::Normal);
         assert_eq!(state.reported_destination, ReportedDestination::Unknown);
         assert_eq!(mapped.source_context.universal_car_position, 4);
@@ -401,10 +400,7 @@ mod tests {
             resolve_car_observation(&mapped.observation),
             CarStateResolution::Unresolved {
                 car: CarId::new("bacnet-lift-1"),
-                reasons: vec![
-                    UnresolvedCarStateReason::ExactPositionUnavailable,
-                    UnresolvedCarStateReason::DoorUnknown,
-                ],
+                reasons: vec![UnresolvedCarStateReason::DoorUnknown],
             }
         );
 

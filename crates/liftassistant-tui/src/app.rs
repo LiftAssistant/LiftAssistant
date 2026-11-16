@@ -274,8 +274,8 @@ pub(crate) fn event_label(event: &RuntimeEvent) -> String {
     match event {
         RuntimeEvent::IntentAccepted(intent) => format!("IntentAccepted {}", intent_label(intent)),
         RuntimeEvent::PositionChanged(car) => format!(
-            "PositionChanged {} {:.2}F {:?} door={:?}",
-            car.id, car.position.floor_position, car.motion, car.door
+            "PositionChanged {} {} {:?} door={:?}",
+            car.id, car.location, car.motion, car.door
         ),
         RuntimeEvent::Arrived { car, floor } => format!("Arrived {car} at {floor}"),
         RuntimeEvent::DoorStateChanged { car, state } => {
@@ -287,7 +287,9 @@ pub(crate) fn event_label(event: &RuntimeEvent) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{CallId, CallState, CarId, DoorState, ReportedDestination};
+    use liftassistant_model::{
+        CallId, CallState, CarId, CarLocation, DoorState, Position, ReportedDestination,
+    };
 
     #[test]
     fn floor_selection_and_call_validation_use_the_configured_topology() {
@@ -345,12 +347,21 @@ mod tests {
         assert_eq!(app.runtime.car_states(), before);
         app.step();
         assert_eq!(app.steps, 1);
-        assert_eq!(app.runtime.car_states()[0].position.floor_position, 3.75);
+        assert_eq!(
+            app.runtime.car_states()[0].location,
+            CarLocation::Continuous(Position {
+                floor_position: 3.75,
+                nearest_floor: Floor::new(4),
+            })
+        );
         for _ in 0..5 {
             app.step();
         }
         let a = &app.runtime.car_states()[0];
-        assert_eq!(a.position.floor_position, 7.0);
+        assert_eq!(
+            a.location,
+            CarLocation::Continuous(Position::at_floor(Floor::new(7)))
+        );
         assert_eq!(a.door, DoorState::Open);
         assert_eq!(
             app.engine

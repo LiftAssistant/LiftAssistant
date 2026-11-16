@@ -4,9 +4,9 @@ use std::{collections::VecDeque, env, process::ExitCode};
 
 use liftassistant_engine::{DiagnosticAnomaly, DiagnosticEvent, Engine};
 use liftassistant_model::{
-    BuildingTopology, CarId, CarObservation, DoorEvidence, DoorState, Floor, MotionEvidence,
-    MotionState, ObservationProvenance, ObservationSequence, ObservationSourceId, OperatingMode,
-    OperatingModeEvidence, Position, PositionEvidence, ReportedDestination,
+    BuildingTopology, CarId, CarLocation, CarObservation, DoorEvidence, DoorState, Floor,
+    MotionEvidence, MotionState, ObservationProvenance, ObservationSequence, ObservationSourceId,
+    OperatingMode, OperatingModeEvidence, Position, PositionEvidence, ReportedDestination,
 };
 use liftassistant_runtime::{CarStateResolution, UnresolvedCarStateReason};
 
@@ -301,8 +301,8 @@ fn verify_proof(run: &ProofRun) -> Result<(), String> {
     if run.snapshots != expected_snapshots {
         return Err("headless lifecycle/readiness transitions did not match the proof".into());
     }
-    if run.latest_state.as_ref().map(|state| state.position)
-        != Some(Position::at_floor(Floor::new(4)))
+    if run.latest_state.as_ref().map(|state| state.location)
+        != Some(CarLocation::Continuous(Position::at_floor(Floor::new(4))))
     {
         return Err("headless host did not retain the last resolved read-only state".into());
     }
@@ -365,15 +365,13 @@ mod tests {
         assert!(run.events.iter().any(|event| matches!(
             event,
             HostEvent::ObservationUnresolved { reasons, .. }
-                if reasons == &[
-                    UnresolvedCarStateReason::ExactPositionUnavailable,
-                    UnresolvedCarStateReason::DoorDirectionUnknown,
-                ]
+                if reasons == &[UnresolvedCarStateReason::DoorDirectionUnknown]
         )));
         assert!(run.events.iter().any(|event| matches!(
             event,
             HostEvent::StateUpdated(state)
-                if state.position == Position::at_floor(Floor::new(4))
+                if state.location
+                    == CarLocation::Continuous(Position::at_floor(Floor::new(4)))
         )));
     }
 

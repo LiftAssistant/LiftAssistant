@@ -356,7 +356,9 @@ mod tests {
 #[cfg(test)]
 mod availability_tests {
     use super::*;
-    use liftassistant_model::{Direction, DoorState, Floor, OperatingMode, ReportedDestination};
+    use liftassistant_model::{
+        CarLocation, Direction, DoorState, Floor, OperatingMode, Position, ReportedDestination,
+    };
     use liftassistant_runtime::ObservationSource;
 
     #[test]
@@ -375,8 +377,14 @@ mod availability_tests {
         }
         let states = app.runtime.car_states();
         assert_eq!(states[0].mode, OperatingMode::OutOfService);
-        assert_eq!(states[0].position.floor_position, 3.0);
-        assert_eq!(states[1].position.floor_position, 7.0);
+        assert_eq!(
+            states[0].location,
+            CarLocation::Continuous(Position::at_floor(Floor::new(3)))
+        );
+        assert_eq!(
+            states[1].location,
+            CarLocation::Continuous(Position::at_floor(Floor::new(7)))
+        );
         assert_eq!(states[1].door, DoorState::Open);
         let first = run(&app.recording);
         let second = run(&app.recording);
@@ -469,6 +477,12 @@ mod availability_tests {
         app.call(Direction::Up);
         assert!(app.engine.decision().is_some());
         app.step();
-        assert_eq!(app.runtime.car_states()[0].position.floor_position, 3.75);
+        assert_eq!(
+            app.runtime.car_states()[0].location,
+            CarLocation::Continuous(Position {
+                floor_position: 3.75,
+                nearest_floor: Floor::new(4),
+            })
+        );
     }
 }

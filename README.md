@@ -70,7 +70,7 @@ Inspect the recorded Open-RMF state-mapping boundary:
 cargo run -p liftassistant-tui -- --scenario rmf-recorded-read-only
 ~~~
 
-The experiment maps recorded `LiftState` fields into canonical partial evidence with source identity and deterministic sequence. It preserves moving-with-floor-reference-only position, undirected door movement, and source-specific modes without guessing, then produces a complete `CarState` only for sufficient stopped/open evidence. It does not connect to ROS or send lift requests.
+The experiment maps recorded `LiftState` fields into canonical partial evidence with source identity and deterministic sequence. It preserves floor-level location without inventing a continuous coordinate, keeps undirected door movement and source-specific modes unresolved, and produces a complete `CarState` only when every required operational field is sufficiently established. It does not connect to ROS or send lift requests.
 
 Inspect the independent recorded BACnet Lift-object mapping boundary:
 
@@ -106,7 +106,7 @@ Controls:
 - R resets the simulator/UI.
 - Q, Esc, or Ctrl-C quits.
 
-The building shows nearest-floor positions; car details show exact positions, mode, controller-reported destination, door state, and serve-floor capability. LiftAssistant's desired destination remains visible through call/intent state rather than being conflated with that report. The latest 100 trace entries show calls, dispatch, intents, runtime events, and errors.
+The building shows floor references; car details distinguish floor-level location from genuine continuous position and also show mode, controller-reported destination, door state, and serve-floor capability. LiftAssistant's desired destination remains visible through call/intent state rather than being conflated with that report. The latest 100 trace entries show calls, dispatch, intents, runtime events, and errors.
 
 Recording is capped at 2,048 commands. Pauses and floor selection do not affect physics and are not scenario commands.
 

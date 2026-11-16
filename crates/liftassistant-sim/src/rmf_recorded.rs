@@ -199,7 +199,7 @@ fn mapped_floor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{ObservationSequence, ObservationSourceId, Position};
+    use liftassistant_model::{CarLocation, ObservationSequence, ObservationSourceId};
     use liftassistant_runtime::{
         CarStateResolution, UnresolvedCarStateReason, resolve_car_observation,
     };
@@ -257,10 +257,7 @@ mod tests {
             resolve_car_observation(&mapped.observation),
             CarStateResolution::Unresolved {
                 car: CarId::new("lift-A"),
-                reasons: vec![
-                    UnresolvedCarStateReason::ExactPositionUnavailable,
-                    UnresolvedCarStateReason::DoorDirectionUnknown,
-                ],
+                reasons: vec![UnresolvedCarStateReason::DoorDirectionUnknown],
             }
         );
     }
@@ -279,7 +276,7 @@ mod tests {
         };
 
         assert_eq!(state.id, CarId::new("lift-A"));
-        assert_eq!(state.position, Position::at_floor(Floor::new(4)));
+        assert_eq!(state.location, CarLocation::Floor(Floor::new(4)));
         assert_eq!(state.motion, MotionState::Stopped);
         assert_eq!(state.door, DoorState::Open);
         assert_eq!(state.mode, OperatingMode::FireService);

@@ -6,8 +6,8 @@ use liftassistant_engine::{
     DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, Engine, IncidentSnapshot,
 };
 use liftassistant_model::{
-    BuildingTopology, CallId, CallState, Capabilities, CarId, CarState, Direction, DoorEvidence,
-    DoorState, Floor, HallCall, MotionEvidence, MotionState, ObservationProvenance,
+    BuildingTopology, CallId, CallState, Capabilities, CarId, CarLocation, CarState, Direction,
+    DoorEvidence, DoorState, Floor, HallCall, MotionEvidence, MotionState, ObservationProvenance,
     ObservationSequence, ObservationSourceId, OperatingMode, OperatingModeEvidence, Position,
     PositionEvidence, ReportedDestination,
 };
@@ -231,10 +231,10 @@ fn play_recording() -> Result<RecordedPlayback, String> {
 fn recorded_runtime() -> Result<RecordedRuntime, String> {
     let moving = CarState {
         id: CarId::new("A"),
-        position: Position {
+        location: CarLocation::Continuous(Position {
             floor_position: 3.5,
             nearest_floor: Floor::new(4),
-        },
+        }),
         motion: MotionState::Moving(Direction::Up),
         door: DoorState::Closed,
         mode: OperatingMode::Normal,
@@ -545,8 +545,7 @@ fn verify_reference_outcome(replay: &Replay) -> Result<(), String> {
                 .iter()
                 .find(|state| state.id.as_str() == *id)
                 .is_none_or(|state| {
-                    state.position.floor_position != f64::from(floor.index())
-                        || state.position.nearest_floor != *floor
+                    state.location != CarLocation::Continuous(Position::at_floor(*floor))
                         || state.motion != MotionState::Stopped
                         || state.door != DoorState::Open
                         || state.reported_destination != ReportedDestination::None
@@ -618,8 +617,7 @@ fn verify_rejection_outcome(replay: &Replay) -> Result<(), String> {
     let states = replay.app.runtime.car_states();
     let recovered = states.iter().any(|state| {
         state.id.as_str() == "A"
-            && state.position.nearest_floor == Floor::new(7)
-            && state.position.floor_position == 7.0
+            && state.location == CarLocation::Continuous(Position::at_floor(Floor::new(7)))
             && state.motion == MotionState::Stopped
             && state.door == DoorState::Open
             && state.reported_destination == ReportedDestination::None
@@ -659,14 +657,18 @@ fn verify_recorded_outcome(playback: &RecordedPlayback) -> Result<(), String> {
     }
     let partial = &playback.batches[1].states;
     if partial.len() != 1
-        || partial[0].position.floor_position != 3.5
+        || partial[0].location
+            != CarLocation::Continuous(Position {
+                floor_position: 3.5,
+                nearest_floor: Floor::new(4),
+            })
         || partial[0].motion != MotionState::Moving(Direction::Up)
     {
         return Err("first recorded observation did not update the intermediate state".into());
     }
     let final_states = &playback.batches[3].states;
     if final_states.len() != 1
-        || final_states[0].position != Position::at_floor(Floor::new(4))
+        || final_states[0].location != CarLocation::Floor(Floor::new(4))
         || final_states[0].motion != MotionState::Stopped
         || final_states[0].door != DoorState::Open
         || final_states[0].reported_destination != ReportedDestination::None
@@ -698,10 +700,7 @@ fn verify_rmf_experiment(experiment: &RmfRecordedExperiment) -> Result<(), Strin
     if experiment.incomplete_resolution
         != (CarStateResolution::Unresolved {
             car: CarId::new("lift-A"),
-            reasons: vec![
-                UnresolvedCarStateReason::ExactPositionUnavailable,
-                UnresolvedCarStateReason::DoorDirectionUnknown,
-            ],
+            reasons: vec![UnresolvedCarStateReason::DoorDirectionUnknown],
         })
     {
         return Err("incomplete Open-RMF evidence was forced into operational state".into());
@@ -709,7 +708,7 @@ fn verify_rmf_experiment(experiment: &RmfRecordedExperiment) -> Result<(), Strin
 
     let expected_final = CarState {
         id: CarId::new("lift-A"),
-        position: Position::at_floor(Floor::new(4)),
+        location: CarLocation::Floor(Floor::new(4)),
         motion: MotionState::Stopped,
         door: DoorState::Open,
         mode: OperatingMode::FireService,
@@ -757,18 +756,23 @@ fn verify_bacnet_experiment(experiment: &BacnetRecordedExperiment) -> Result<(),
     {
         return Err("BACnet required properties did not preserve their exact evidence".into());
     }
-    if experiment.partial_resolution
-        != (CarStateResolution::Unresolved {
-            car: CarId::new("bacnet-lift-1"),
-            reasons: vec![UnresolvedCarStateReason::ExactPositionUnavailable],
-        })
-    {
-        return Err("moving BACnet floor reference was forced into exact position".into());
+    let expected_partial = CarState {
+        id: CarId::new("bacnet-lift-1"),
+        location: CarLocation::Floor(Floor::new(3)),
+        motion: MotionState::Moving(Direction::Up),
+        door: DoorState::Closing,
+        mode: OperatingMode::FireService,
+        reported_destination: ReportedDestination::Known(Floor::new(4)),
+    };
+    if experiment.partial_resolution != CarStateResolution::Resolved(expected_partial) {
+        return Err(
+            "BACnet floor-level location did not resolve without fabricated precision".into(),
+        );
     }
 
     let expected_final = CarState {
         id: CarId::new("bacnet-lift-1"),
-        position: Position::at_floor(Floor::new(4)),
+        location: CarLocation::Floor(Floor::new(4)),
         motion: MotionState::Stopped,
         door: DoorState::Open,
         mode: OperatingMode::Normal,
@@ -806,10 +810,7 @@ fn verify_bacnet_experiment(experiment: &BacnetRecordedExperiment) -> Result<(),
         || experiment.mixed_doors_resolution
             != (CarStateResolution::Unresolved {
                 car: CarId::new("bacnet-lift-1"),
-                reasons: vec![
-                    UnresolvedCarStateReason::ExactPositionUnavailable,
-                    UnresolvedCarStateReason::DoorUnknown,
-                ],
+                reasons: vec![UnresolvedCarStateReason::DoorUnknown],
             })
     {
         return Err("multiple BACnet car doors were collapsed into one false state".into());
@@ -862,10 +863,9 @@ fn render_report(name: &str, outcome: &str, commands: &[Command], replay: &Repla
     lines.push("final cars:".into());
     lines.extend(replay.app.runtime.car_states().into_iter().map(|state| {
         format!(
-            "  {} position={:.2}F nearest={} motion={:?} door={:?} mode={:?} reported_destination={}",
+            "  {} location={} motion={:?} door={:?} mode={:?} reported_destination={}",
             state.id,
-            state.position.floor_position,
-            state.position.nearest_floor,
+            state.location,
             state.motion,
             state.door,
             state.mode,
@@ -900,12 +900,8 @@ fn render_recorded_report(playback: &RecordedPlayback) -> String {
         }
         lines.extend(batch.states.iter().map(|state| {
             format!(
-                "             state {} position={:.2}F motion={:?} door={:?} reported_destination={}",
-                state.id,
-                state.position.floor_position,
-                state.motion,
-                state.door,
-                state.reported_destination
+                "             state {} location={} motion={:?} door={:?} reported_destination={}",
+                state.id, state.location, state.motion, state.door, state.reported_destination
             )
         }));
     }
@@ -940,7 +936,7 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
             experiment.incomplete_resolution
         ),
         format!(
-            "resolved final: sequence={} {} position={} motion={:?} door={:?} mode={:?} reported_destination={}",
+            "resolved final: sequence={} {} location={} motion={:?} door={:?} mode={:?} reported_destination={}",
             experiment
                 .final_observation
                 .observation
@@ -948,7 +944,7 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
                 .sequence
                 .value(),
             final_state.id,
-            final_state.position.nearest_floor,
+            final_state.location,
             final_state.motion,
             final_state.door,
             final_state.mode,
@@ -960,7 +956,7 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
             experiment.source_specific_mode.observation.mode,
             experiment.source_specific_mode_resolution
         ),
-        "outcome: PASS (partial evidence preserved; only sufficient evidence became CarState)".into(),
+        "outcome: PASS (floor precision preserved; only sufficient complete evidence became CarState)".into(),
         String::new(),
     ]
     .join("\n")
@@ -989,10 +985,10 @@ fn render_bacnet_report(experiment: &BacnetRecordedExperiment) -> String {
         ),
         format!("partial resolution: {:?}", experiment.partial_resolution),
         format!(
-            "resolved final: sequence={} {} position={} motion={:?} door={:?} mode={:?} reported_destination={}",
+            "resolved final: sequence={} {} location={} motion={:?} door={:?} mode={:?} reported_destination={}",
             experiment.final_observation.observation.provenance.sequence.value(),
             final_state.id,
-            final_state.position.nearest_floor,
+            final_state.location,
             final_state.motion,
             final_state.door,
             final_state.mode,
@@ -1011,7 +1007,7 @@ fn render_bacnet_report(experiment: &BacnetRecordedExperiment) -> String {
             experiment.mixed_doors.observation.door,
             experiment.mixed_doors_resolution
         ),
-        "outcome: PASS (BACnet partial/decoupled/multi-door evidence stayed honest; only sufficient evidence became CarState)".into(),
+        "outcome: PASS (BACnet floor-level/decoupled/multi-door evidence stayed honest; floor-level location resolved without continuous precision)".into(),
         String::new(),
     ]
     .join("\n")
@@ -1050,8 +1046,8 @@ mod tests {
         assert!(report.contains("outcome: PASS (3 calls completed)"));
         assert!(report.contains("Call #3 -> Completed"));
         assert!(report.contains("#3 2F UP -> Completed"));
-        assert!(report.contains("A position=2.00F"));
-        assert!(report.contains("B position=5.00F"));
+        assert!(report.contains("A location=2.00F"));
+        assert!(report.contains("B location=5.00F"));
     }
 
     #[test]
@@ -1082,11 +1078,9 @@ mod tests {
         assert!(report.contains("[0500 ms] PositionChanged A 3.50F"));
         assert!(report.contains("[0999 ms] no events"));
         assert!(report.contains("[1000 ms] Arrived A at 4F"));
-        assert!(
-            report.contains(
-                "state A position=4.00F motion=Stopped door=Open reported_destination=none"
-            )
-        );
+        assert!(report.contains(
+            "state A location=floor 4F motion=Stopped door=Open reported_destination=none"
+        ));
     }
 
     #[test]
@@ -1097,10 +1091,12 @@ mod tests {
         assert!(report.contains("source=fixture/open-rmf sequence=1 car=lift-A"));
         assert!(report.contains("position=FloorReference(Floor(3))"));
         assert!(report.contains("motion=Known(Moving(Up)) door=MovingUnknownDirection"));
-        assert!(report.contains("reasons: [ExactPositionUnavailable, DoorDirectionUnknown]"));
-        assert!(report.contains("resolved final: sequence=2 lift-A position=4F motion=Stopped"));
+        assert!(report.contains("reasons: [DoorDirectionUnknown]"));
+        assert!(
+            report.contains("resolved final: sequence=2 lift-A location=floor 4F motion=Stopped")
+        );
         assert!(report.contains("source-specific mode: raw=2 canonical=SourceSpecific"));
-        assert!(report.contains("only sufficient evidence became CarState"));
+        assert!(report.contains("only sufficient complete evidence became CarState"));
     }
 
     #[test]
@@ -1111,11 +1107,12 @@ mod tests {
         assert!(report.contains("source=fixture/bacnet-lift sequence=1 car=bacnet-lift-1"));
         assert!(report.contains("position=FloorReference(Floor(3))"));
         assert!(report.contains("door=Known(Closing) mode=Known(FireService)"));
-        assert!(report.contains("reasons: [ExactPositionUnavailable]"));
-        assert!(report.contains("resolved final: sequence=2 bacnet-lift-1 position=4F"));
+        assert!(report.contains("partial resolution: Resolved"));
+        assert!(report.contains("location: Floor(Floor(3))"));
+        assert!(report.contains("resolved final: sequence=2 bacnet-lift-1 location=floor 4F"));
         assert!(report.contains("raw_out_of_service=true canonical_position=Unknown"));
         assert!(report.contains("raw=[Opened, Closed] canonical=Unknown"));
-        assert!(report.contains("only sufficient evidence became CarState"));
+        assert!(report.contains("floor-level location resolved without continuous precision"));
     }
 
     #[test]

@@ -7,8 +7,8 @@ mod rmf_recorded;
 use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_model::{
-    Capabilities, CarId, CarState, Direction, DoorState, Floor, Intent, MotionState, OperatingMode,
-    Position, ReportedDestination,
+    Capabilities, CarId, CarLocation, CarState, Direction, DoorState, Floor, Intent, MotionState,
+    OperatingMode, Position, ReportedDestination,
 };
 use liftassistant_runtime::{
     IntentSink, ObservationSource, RuntimeError, RuntimeEvent, SimulationDriver,
@@ -70,11 +70,11 @@ impl SimRuntime {
         Self::new(
             [
                 (
-                    CarState::new("A", Floor::new(3)),
+                    CarState::with_continuous_position("A", Position::at_floor(Floor::new(3))),
                     Capabilities::reference_defaults(),
                 ),
                 (
-                    CarState::new("B", Floor::new(1)),
+                    CarState::with_continuous_position("B", Position::at_floor(Floor::new(1))),
                     Capabilities::reference_defaults(),
                 ),
             ],
@@ -121,7 +121,15 @@ impl SimRuntime {
             )));
         }
 
-        let delta = f64::from(floor.index()) - sim_car.state.position.floor_position;
+        let current = match sim_car.state.location {
+            CarLocation::Floor(floor) => f64::from(floor.index()),
+            CarLocation::Continuous(position) => position.floor_position,
+        };
+        let delta = f64::from(floor.index()) - current;
+        sim_car.state.location = CarLocation::Continuous(Position {
+            floor_position: current,
+            nearest_floor: sim_car.state.location.floor_reference(),
+        });
         sim_car.desired_target = Some(floor);
         sim_car.state.reported_destination = ReportedDestination::Known(floor);
         sim_car.state.door = DoorState::Closed;
@@ -177,11 +185,16 @@ impl SimulationDriver for SimRuntime {
             };
 
             let target_position = f64::from(target.index());
-            let current = sim_car.state.position.floor_position;
+            let current = sim_car
+                .state
+                .location
+                .continuous_position()
+                .expect("simulator intents establish a continuous starting position")
+                .floor_position;
             let delta = target_position - current;
 
             if delta.abs() <= step {
-                sim_car.state.position = Position::at_floor(target);
+                sim_car.state.location = CarLocation::Continuous(Position::at_floor(target));
                 sim_car.state.motion = MotionState::Stopped;
                 sim_car.desired_target = None;
                 sim_car.state.reported_destination = ReportedDestination::None;
@@ -205,10 +218,10 @@ impl SimulationDriver for SimRuntime {
                 Direction::Down
             };
             let next = current + step.copysign(delta);
-            sim_car.state.position = Position {
+            sim_car.state.location = CarLocation::Continuous(Position {
                 floor_position: next,
                 nearest_floor: Floor::new(next.round() as i16),
-            };
+            });
             sim_car.state.motion = MotionState::Moving(direction);
             sim_car.state.door = DoorState::Closed;
 

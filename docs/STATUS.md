@@ -476,9 +476,9 @@ Current `CarObservation` is a whole-car evidence snapshot. A live protocol may u
 
 This distinction matters for BACnet COV, CiA 417 PDOs, and other incremental streams. A later live source must not erase valid evidence merely because one message did not contain every field.
 
-### Finding C — floor reference is not continuous position
+### Finding C — floor reference is not continuous position (resolved by M4.9b)
 
-Current resolver promotes `FloorReference(floor) + Stopped + DoorOpen` into `Position::at_floor(floor)`, which encodes an exact continuous coordinate.
+The pre-M4.9b resolver promoted `FloorReference(floor) + Stopped + DoorOpen` into `Position::at_floor(floor)`, which encoded an exact continuous coordinate.
 
 The reviewed standards do not justify that precision in general: Open-RMF reports a floor label; BACnet `Car_Position` reports a universal floor number; CiA 417 defines a distinct car-position unit for measured physical position. Stopped/open may establish landing/floor presence, but not an exact continuous encoder coordinate.
 
@@ -490,7 +490,7 @@ The current trait name is therefore misleading: it is a resolved operational-sta
 
 ## M4.9 — Observation semantics hardening
 
-**IN PROGRESS — M4.9a implemented; M4.9b is next.**
+**IN PROGRESS — M4.9a–M4.9b implemented; M4.9c is next.**
 
 Work through these sub-slices in order. Keep all changes internal/reversible and run the prior-art gate before changing the model.
 
@@ -510,15 +510,18 @@ Do not design the future authority/lease model here.
 
 ### M4.9b — Correct location precision semantics
 
-**READY — next implementation work.**
+**IMPLEMENTED.**
 
-- stop promoting a floor reference into a fabricated exact continuous position;
-- introduce the smallest internal location/position distinction that lets a complete operational state truthfully say "at/associated with floor N" without claiming an encoder coordinate;
-- keep simulator continuous position available where it is genuinely measured/simulated;
-- update dispatch distance logic only as required by the new truthful location semantics;
-- do not introduce a universal spatial graph.
+- operational `CarState` now carries `CarLocation::Floor` or `CarLocation::Continuous` explicitly;
+- any canonical floor reference can resolve as floor-level location when the other operational fields are sufficient, without fabricating a `floor_position`;
+- simulator/native continuous observations retain `Position`, while arrival-only recorded evidence remains floor-level;
+- dispatch uses discrete floor coordinates for floor-level location and the genuine coordinate for continuous location, preserving deterministic nearest-car behavior without a spatial graph.
+
+Validation: formatting, all 63 workspace tests, focused Open-RMF/BACnet/recorded scenario inspection, and the M4.9a regressions pass. No new blocker was found; the live read-only external-input blocker remains unchanged.
 
 ### M4.9c — Add incremental observation assembly
+
+**READY — next implementation work.**
 
 - distinguish field omitted/not-updated from field explicitly unknown/unavailable;
 - add the smallest deterministic in-memory assembler/store needed to merge partial updates into current evidence;

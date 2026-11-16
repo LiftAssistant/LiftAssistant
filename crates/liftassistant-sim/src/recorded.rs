@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, collections::VecDeque, time::Duration};
 
 use liftassistant_model::{
-    Capabilities, CarId, CarState, Intent, MotionState, Position, ReportedDestination,
+    Capabilities, CarId, CarLocation, CarState, Intent, MotionState, ReportedDestination,
 };
 use liftassistant_runtime::{ObservationSource, RuntimeError, RuntimeEvent, SimulationDriver};
 
@@ -94,7 +94,7 @@ impl RecordedRuntime {
                     .states
                     .get_mut(car)
                     .expect("recorded event cars are validated at construction");
-                state.position = Position::at_floor(*floor);
+                state.location = CarLocation::Floor(*floor);
                 state.motion = MotionState::Stopped;
                 state.reported_destination = ReportedDestination::None;
             }
@@ -159,15 +159,15 @@ fn event_car(event: &RuntimeEvent) -> &CarId {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{Direction, DoorState, Floor, OperatingMode};
+    use liftassistant_model::{Direction, DoorState, Floor, OperatingMode, Position};
 
     fn moving_state(position: f64) -> CarState {
         CarState {
             id: CarId::new("A"),
-            position: Position {
+            location: CarLocation::Continuous(Position {
                 floor_position: position,
                 nearest_floor: Floor::new(position.round() as i16),
-            },
+            }),
             motion: MotionState::Moving(Direction::Up),
             door: DoorState::Closed,
             mode: OperatingMode::Normal,
@@ -206,15 +206,24 @@ mod tests {
         let mut runtime = recording();
 
         assert!(runtime.advance(Duration::from_millis(250)).is_empty());
-        assert_eq!(runtime.car_states()[0].position.floor_position, 3.0);
+        assert_eq!(
+            runtime.car_states()[0].location,
+            CarLocation::Floor(Floor::new(3))
+        );
         assert_eq!(runtime.advance(Duration::from_millis(250)).len(), 1);
-        assert_eq!(runtime.car_states()[0].position.floor_position, 3.5);
+        assert_eq!(
+            runtime.car_states()[0].location,
+            CarLocation::Continuous(Position {
+                floor_position: 3.5,
+                nearest_floor: Floor::new(4),
+            })
+        );
         assert_eq!(runtime.advance(Duration::from_millis(499)).len(), 0);
         assert_eq!(runtime.remaining_frames(), 1);
         assert_eq!(runtime.advance(Duration::from_millis(1)).len(), 2);
 
         let final_state = &runtime.car_states()[0];
-        assert_eq!(final_state.position, Position::at_floor(Floor::new(4)));
+        assert_eq!(final_state.location, CarLocation::Floor(Floor::new(4)));
         assert_eq!(final_state.motion, MotionState::Stopped);
         assert_eq!(final_state.door, DoorState::Open);
         assert_eq!(final_state.reported_destination, ReportedDestination::None);
@@ -247,8 +256,8 @@ mod tests {
         assert!(matches!(events[2], RuntimeEvent::DoorStateChanged { .. }));
         assert_eq!(runtime.remaining_frames(), 0);
         assert_eq!(
-            runtime.car_states()[0].position,
-            Position::at_floor(Floor::new(4))
+            runtime.car_states()[0].location,
+            CarLocation::Floor(Floor::new(4))
         );
     }
 

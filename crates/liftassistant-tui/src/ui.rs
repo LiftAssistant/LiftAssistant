@@ -45,12 +45,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         .iter()
         .rev()
         .map(|floor| {
-            let a = if states[0].position.nearest_floor == *floor {
+            let a = if states[0].location.floor_reference() == *floor {
                 "A"
             } else {
                 " "
             };
-            let b = if states[1].position.nearest_floor == *floor {
+            let b = if states[1].location.floor_reference() == *floor {
                 "B"
             } else {
                 " "
@@ -88,8 +88,8 @@ pub fn render(frame: &mut Frame, app: &App) {
             .capabilities(&car.id)
             .is_some_and(|caps| caps.serve_floor);
         details.push(Line::from(format!(
-            "{}  {:.2}F (near {}) {motion} reported -> {reported_destination}",
-            car.id, car.position.floor_position, car.position.nearest_floor
+            "{}  {} {motion} reported -> {reported_destination}",
+            car.id, car.location
         )));
         details.push(Line::from(format!(
             "   door={:?} mode={:?}",

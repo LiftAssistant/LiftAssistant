@@ -3,8 +3,8 @@
 use std::{error::Error, fmt, time::Duration};
 
 use liftassistant_model::{
-    Capabilities, CarId, CarObservation, CarState, DoorEvidence, DoorState, Floor, Intent,
-    MotionEvidence, MotionState, OperatingModeEvidence, Position, PositionEvidence,
+    Capabilities, CarId, CarLocation, CarObservation, CarState, DoorEvidence, DoorState, Floor,
+    Intent, MotionEvidence, OperatingModeEvidence, PositionEvidence,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,7 +39,6 @@ impl Error for RuntimeError {}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnresolvedCarStateReason {
     PositionUnknown,
-    ExactPositionUnavailable,
     MotionUnknown,
     DoorUnknown,
     DoorDirectionUnknown,
@@ -60,18 +59,9 @@ pub enum CarStateResolution {
 pub fn resolve_car_observation(observation: &CarObservation) -> CarStateResolution {
     let mut reasons = Vec::new();
 
-    let position = match observation.position {
-        PositionEvidence::Exact(position) => Some(position),
-        PositionEvidence::FloorReference(floor)
-            if observation.motion == MotionEvidence::Known(MotionState::Stopped)
-                && observation.door == DoorEvidence::Known(DoorState::Open) =>
-        {
-            Some(Position::at_floor(floor))
-        }
-        PositionEvidence::FloorReference(_) => {
-            reasons.push(UnresolvedCarStateReason::ExactPositionUnavailable);
-            None
-        }
+    let location = match observation.position {
+        PositionEvidence::Exact(position) => Some(CarLocation::Continuous(position)),
+        PositionEvidence::FloorReference(floor) => Some(CarLocation::Floor(floor)),
         PositionEvidence::Unknown => {
             reasons.push(UnresolvedCarStateReason::PositionUnknown);
             None
@@ -110,11 +100,11 @@ pub fn resolve_car_observation(observation: &CarObservation) -> CarStateResoluti
         }
     };
 
-    match (position, motion, door, mode) {
-        (Some(position), Some(motion), Some(door), Some(mode)) => {
+    match (location, motion, door, mode) {
+        (Some(location), Some(motion), Some(door), Some(mode)) => {
             CarStateResolution::Resolved(CarState {
                 id: observation.car.clone(),
-                position,
+                location,
                 motion,
                 door,
                 mode,
@@ -151,8 +141,8 @@ pub trait SimulationDriver {
 mod tests {
     use super::*;
     use liftassistant_model::{
-        Direction, ObservationProvenance, ObservationSequence, ObservationSourceId, OperatingMode,
-        ReportedDestination,
+        Direction, MotionState, ObservationProvenance, ObservationSequence, ObservationSourceId,
+        OperatingMode, Position, ReportedDestination,
     };
 
     fn observation() -> CarObservation {
@@ -176,10 +166,7 @@ mod tests {
             resolve_car_observation(&observation()),
             CarStateResolution::Unresolved {
                 car: CarId::new("lift-A"),
-                reasons: vec![
-                    UnresolvedCarStateReason::ExactPositionUnavailable,
-                    UnresolvedCarStateReason::DoorDirectionUnknown,
-                ],
+                reasons: vec![UnresolvedCarStateReason::DoorDirectionUnknown],
             }
         );
     }
@@ -197,7 +184,7 @@ mod tests {
             resolve_car_observation(&observation),
             CarStateResolution::Resolved(CarState {
                 id: CarId::new("lift-A"),
-                position: Position::at_floor(Floor::new(4)),
+                location: CarLocation::Floor(Floor::new(4)),
                 motion: MotionState::Stopped,
                 door: DoorState::Open,
                 mode: liftassistant_model::OperatingMode::FireService,
@@ -239,6 +226,10 @@ mod tests {
             let CarStateResolution::Resolved(state) = resolve_car_observation(&observation) else {
                 panic!("complete exact evidence should resolve")
             };
+            assert_eq!(
+                state.location,
+                CarLocation::Continuous(Position::at_floor(Floor::new(3)))
+            );
             assert_eq!(state.reported_destination, reported_destination);
         }
     }

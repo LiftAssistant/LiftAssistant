@@ -113,6 +113,44 @@ impl Position {
     }
 }
 
+/// Operational car location with explicit precision.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum CarLocation {
+    /// The source associates the car with a floor but supplies no continuous coordinate.
+    Floor(Floor),
+    /// The source supplies a continuous position in LiftAssistant's floor coordinate space.
+    Continuous(Position),
+}
+
+impl CarLocation {
+    pub const fn floor_reference(self) -> Floor {
+        match self {
+            Self::Floor(floor) => floor,
+            Self::Continuous(position) => position.nearest_floor,
+        }
+    }
+
+    pub const fn continuous_position(self) -> Option<Position> {
+        match self {
+            Self::Floor(_) => None,
+            Self::Continuous(position) => Some(position),
+        }
+    }
+}
+
+impl fmt::Display for CarLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Floor(floor) => write!(f, "floor {floor}"),
+            Self::Continuous(position) => write!(
+                f,
+                "{:.2}F (near {})",
+                position.floor_position, position.nearest_floor
+            ),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MotionState {
     Stopped,
@@ -181,7 +219,7 @@ impl Capabilities {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CarState {
     pub id: CarId,
-    pub position: Position,
+    pub location: CarLocation,
     pub motion: MotionState,
     pub door: DoorState,
     pub mode: OperatingMode,
@@ -192,7 +230,18 @@ impl CarState {
     pub fn new(id: impl Into<String>, floor: Floor) -> Self {
         Self {
             id: CarId::new(id),
-            position: Position::at_floor(floor),
+            location: CarLocation::Floor(floor),
+            motion: MotionState::Stopped,
+            door: DoorState::Closed,
+            mode: OperatingMode::Normal,
+            reported_destination: ReportedDestination::None,
+        }
+    }
+
+    pub fn with_continuous_position(id: impl Into<String>, position: Position) -> Self {
+        Self {
+            id: CarId::new(id),
+            location: CarLocation::Continuous(position),
             motion: MotionState::Stopped,
             door: DoorState::Closed,
             mode: OperatingMode::Normal,
