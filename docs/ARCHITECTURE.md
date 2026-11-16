@@ -64,11 +64,15 @@ Low-level motion and safety primitives remain outside Core.
 - `liftassistant-model`: canonical domain types.
 - `liftassistant-core`: deterministic vendor-neutral semantic decisions/state transitions.
 - `liftassistant-engine`: shared deterministic semantic orchestration and observation resolution.
+- `liftassistant-headless`: internal non-interactive read-only host/lifecycle proof.
 - `liftassistant-runtime`: semantic execution contract and runtime events.
 - `liftassistant-sim`: deterministic active simulator, native-semantic recorded/read-only backend, and recorded external-state mapping experiments.
 - `liftassistant-tui`: developer simulator composition, scenario runner, and UI.
 
-These six packages reflect demonstrated ownership boundaries. Further packages still require real lifecycle/reuse pressure rather than speculative layering.
+These seven packages reflect demonstrated ownership boundaries. The headless package
+exists because Engine now has a real second composition independent of the TUI; it
+does not establish a general service framework. Further packages still require real
+lifecycle/reuse pressure rather than speculative layering.
 
 ## Determinism boundary
 
@@ -88,6 +92,13 @@ can freeze bounded incident evidence before and after a sequence invariant viola
 then replay that evidence through the same detector. Diagnostic anomalies remain
 distinct from equipment faults, alarms, root causes, and maintenance actions. No
 durable store, telemetry service, or stable public diagnostic schema is implied.
+
+The headless proof keeps lifecycle and readiness separate: a live process begins
+`Starting/NotReady`, incomplete evidence remains `Synchronizing/NotReady`, sufficient
+evidence permits `ReadyReadOnly/ReadOnly`, and a source-sequence invariant violation
+produces `Degraded/NotReady`. The last resolved state may remain inspectable after
+degradation, but it is not current-readiness evidence. These internal states do not
+grant write authority and are not a frozen public lifecycle model.
 
 ## Semantic design method
 

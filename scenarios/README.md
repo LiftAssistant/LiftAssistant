@@ -95,6 +95,24 @@ This is deterministic internal diagnostic evidence. It is not an equipment
 fault, alarm, root-cause conclusion, maintenance recommendation, protocol
 capture, or public diagnostic-code registry.
 
+## Headless read-only lifecycle
+
+~~~bash
+cargo run -p liftassistant-headless -- --scenario headless-read-only-lifecycle
+~~~
+
+The independent headless binary consumes three in-memory canonical observations:
+an incomplete synchronization observation, a sufficient complete observation,
+and a duplicate-sequence observation. It must deterministically transition
+`Starting/NotReady -> Synchronizing/NotReady -> ReadyReadOnly/ReadOnly ->
+Degraded/NotReady`. The duplicate is rejected through the Engine diagnostic
+boundary, including after bounded incident retention is full.
+
+This proves only an internal, non-interactive, read-only composition. The crate
+has no TUI or simulator dependency, its recorded source exposes no intent sink,
+and the scenario makes no transport, live-site, deployment, certification, or
+stable-public-API claim.
+
 ## Availability fallback
 
 From a reset, pause, toggle A OutOfService, and submit 7F UP. Dispatch selects B

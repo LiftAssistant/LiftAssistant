@@ -367,7 +367,7 @@ Implemented behavior:
 - simulator-specific mode/rejection controls remain in the developer composition and do not leak into Engine events;
 - one direct Engine test protects intent generation, Assigned/Serving/Completed lifecycle, and runtime-feedback processing, while all existing replay/scenario tests protect migration parity.
 
-The sixth crate was justified by actual reuse across interactive, non-interactive, resolver, and upcoming headless callers; no service framework or generic application platform was introduced.
+The sixth crate was justified by actual reuse across interactive, non-interactive, resolver, and subsequently demonstrated headless callers; no service framework or generic application platform was introduced.
 
 Validation: formatting, final all-target linting, 44 workspace tests with the updated lockfile, and all four executable developer scenarios passed.
 
@@ -391,18 +391,34 @@ Validation: formatting, all-target linting, 46 workspace tests, and all five exe
 
 ### M4.7 — Headless/read-only production host proof
 
-**READY — next implementation slice.**
+**Implemented.**
 
-Promotion evidence: the Engine crate now has no TUI or simulator dependency, the recorded runtime exposes observation/replay driving but no `IntentSink`, and canonical resolution plus structured diagnostics are callable without a terminal. This is enough demonstrated pressure for a minimal non-TUI process host and lifecycle/readiness proof; it is not evidence for write authority or production deployment.
+Implemented behavior:
 
-Implement incrementally:
+- a focused `liftassistant-headless` binary is the first non-TUI Engine composition and depends only on Engine/model/runtime, not the TUI, simulator, transport, or an `IntentSink` implementation;
+- its internal recorded source exposes only canonical observations and has no submission/write method;
+- lifecycle and readiness are distinct: the process starts `Starting/NotReady`, partial evidence remains `Synchronizing/NotReady`, sufficient complete evidence reaches `ReadyReadOnly/ReadOnly`, and a duplicate source sequence produces `Degraded/NotReady`;
+- the host preserves the last resolved state for inspection after degradation but does not treat it as current readiness evidence;
+- Engine observation resolution and structured diagnostics run in the headless process, and the sequence anomaly is the machine-readable degradation trigger rather than an equipment-fault or root-cause assertion;
+- new incidents are detected by their monotonic diagnostic-entry sequence rather than retained incident count, so readiness remains revoked even after the bounded eight-incident retention queue starts replacing old incidents;
+- the executable proof runs twice and checks identical lifecycle/readiness, state, diagnostic, and degradation results.
 
-- prove the Engine can run without the TUI;
-- introduce lifecycle/readiness concepts sufficient for startup, synchronization, read-only readiness and degraded state;
-- connect only recorded/virtual/read-only sources;
-- no passenger-elevator writes;
-- no public stable API yet;
-- no production deployment claim.
+This is an internal/reversible host proof. It adds no async/service framework, IPC/network API, durable state, supervision, freshness/reconnect semantics, passenger-elevator write, deployment claim, certification claim, or stable public API.
+
+Validation: formatting, all-target linting, 52 workspace tests with the updated lockfile, all five TUI scenarios, and the real headless lifecycle scenario passed.
+
+### M4.8 — Second independent observation-source validation
+
+**READY — official-evidence selection gate.**
+
+Promotion evidence: the canonical partial-observation/resolution path, structured diagnostics, and headless read-only lifecycle are now working, but the only external-source mapping remains Open-RMF. M4 exit evidence explicitly requires another independent source family before any public semantic maturity claim. The next bounded internal slice is therefore a focused official prior-art/fixture check followed by one recorded read-only mapping experiment only if the source fields are supported by that evidence.
+
+Selection order:
+
+1. BACnet elevator/building observations if official object/property definitions provide sufficient concrete fields;
+2. otherwise recorded/virtual CiA 417 if authoritative material and a defensible fixture are available.
+
+Do not invent object identifiers, packet layouts, controller behavior, precision, quality, or mode semantics. If official material/fixtures are insufficient, record a precise external-input blocker instead of fabricating an adapter. No live transport, hardware write, public schema freeze, or conformance claim is authorized by this READY state.
 
 ## Preserved production ideas
 

@@ -180,6 +180,12 @@ with Degraded / Failed as separate conditions
 
 Do not freeze these exact state names yet.
 
+M4 now exercises this distinction in the internal headless proof: incomplete
+initial evidence is not ready, sufficient evidence becomes read-only ready, and a
+source-sequence anomaly revokes readiness. This does not yet provide supervision,
+transport health, freshness, reconnect/restart reconciliation, or a production
+readiness API, and the lifecycle names remain reversible.
+
 Adapters and Engine should expose enough health/freshness information for a supervisor to distinguish alive, ready, degraded and stale.
 
 ## Adapter quality and isolation

@@ -80,6 +80,14 @@ cargo run -p liftassistant-tui -- --scenario diagnostic-incident-replay
 
 This scenario records canonical observations and Engine events in a bounded in-memory flight recorder, detects a deliberately repeated source sequence, freezes a small before/after evidence window, and replays the incident through the same deterministic detector. An anomaly is evidence of an invariant violation, not an equipment-fault or root-cause claim. No database, file format, cloud telemetry, or public diagnostic schema is involved.
 
+Run the non-interactive headless/read-only lifecycle proof:
+
+~~~bash
+cargo run -p liftassistant-headless -- --scenario headless-read-only-lifecycle
+~~~
+
+This separate binary has no TUI or simulator dependency and connects only an internal recorded canonical-observation source. It proves that process existence is distinct from readiness: partial evidence remains `Synchronizing`, complete evidence reaches `ReadyReadOnly`, and a repeated source sequence moves the host to `Degraded`/not-ready while retaining the last known state for inspection. It has no `IntentSink`, transport, passenger-elevator write path, deployment claim, or stable public API.
+
 Controls:
 
 - Up/Down select a floor; U/D create an UP/DOWN hall call.
@@ -106,6 +114,7 @@ crates/
   liftassistant-model/     canonical domain types
   liftassistant-core/      deterministic semantic decisions
   liftassistant-engine/    shared semantic orchestration
+  liftassistant-headless/  internal read-only host/lifecycle proof
   liftassistant-runtime/   semantic runtime contract
   liftassistant-sim/       deterministic reference backend
   liftassistant-tui/       developer simulator composition / UI

@@ -4,6 +4,7 @@ members = [
     "crates/liftassistant-model",
     "crates/liftassistant-core",
     "crates/liftassistant-engine",
+    "crates/liftassistant-headless",
     "crates/liftassistant-runtime",
     "crates/liftassistant-sim",
     "crates/liftassistant-tui",

@@ -226,6 +226,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "liftassistant-headless"
+version = "0.1.0"
+dependencies = [
+ "liftassistant-engine",
+ "liftassistant-model",
+ "liftassistant-runtime",
+]
+
+[[package]]
 name = "liftassistant-model"
 version = "0.1.0"
 

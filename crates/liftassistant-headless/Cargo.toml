@@ -1,0 +1,12 @@
+[package]
+name = "liftassistant-headless"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+liftassistant-engine = { path = "../liftassistant-engine" }
+liftassistant-model = { path = "../liftassistant-model" }
+liftassistant-runtime = { path = "../liftassistant-runtime" }

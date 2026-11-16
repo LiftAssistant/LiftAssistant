@@ -97,6 +97,8 @@ The shared internal `liftassistant-engine` owns topology, call lifecycle, dispat
 
 Engine also owns a bounded in-memory diagnostic flight recorder over canonical observations and machine-readable Engine events. Its first deterministic detectors cover non-increasing per-source observation sequence and runtime intent acceptance without a matching generated intent. A trigger freezes a bounded before/after incident window that can be replayed through the same detector. These anomalies are invariant evidence, not equipment faults, alarms, root causes, or maintenance advice. The implementation deliberately defines no durable storage, external telemetry, public code registry, or broad diagnostic taxonomy.
 
+The internal `liftassistant-headless` binary is the first non-TUI composition. It depends on Engine/model/runtime but not the TUI, simulator, transport, or an `IntentSink` implementation. A recorded canonical-observation source drives reversible internal `Starting`, `Synchronizing`, `ReadyReadOnly`, and `Degraded` states with separate `NotReady`/`ReadOnly` readiness. Insufficient initial evidence cannot become ready, and a machine-readable observation-sequence anomaly revokes readiness without turning the anomaly into a root-cause or equipment-fault claim. These names and interfaces are not a stable public API or production-host claim.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.
