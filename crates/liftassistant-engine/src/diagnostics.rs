@@ -1,0 +1,234 @@
+use std::collections::{BTreeMap, VecDeque};
+
+use liftassistant_model::{CarObservation, Intent, ObservationSequence, ObservationSourceId};
+use liftassistant_runtime::RuntimeEvent;
+
+use crate::EngineEvent;
+
+const INCIDENT_BEFORE_ENTRIES: usize = 8;
+const INCIDENT_AFTER_ENTRIES: usize = 2;
+const INCIDENT_LIMIT: usize = 8;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DiagnosticSequence(u64);
+
+impl DiagnosticSequence {
+    pub const fn value(self) -> u64 {
+        self.0
+    }
+}
+
+/// A detected sequence invariant violation, not a root cause or equipment fault.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DiagnosticAnomaly {
+    ObservationSequenceNotIncreasing {
+        source: ObservationSourceId,
+        previous: ObservationSequence,
+        received: ObservationSequence,
+    },
+    IntentAcceptedWithoutGeneration {
+        intent: Intent,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DiagnosticEvent {
+    Observation(CarObservation),
+    Engine(EngineEvent),
+    Anomaly(DiagnosticAnomaly),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DiagnosticEntry {
+    pub sequence: DiagnosticSequence,
+    pub event: DiagnosticEvent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct IncidentSnapshot {
+    pub trigger: DiagnosticAnomaly,
+    pub evidence: Vec<DiagnosticEntry>,
+    pub after_window_complete: bool,
+}
+
+impl IncidentSnapshot {
+    pub fn replay_anomalies(&self) -> Vec<DiagnosticAnomaly> {
+        let mut detector = SequenceDetector::default();
+        let mut anomalies = Vec::new();
+        for entry in &self.evidence {
+            if !matches!(entry.event, DiagnosticEvent::Anomaly(_)) {
+                anomalies.extend(detector.observe(&entry.event));
+            }
+        }
+        anomalies
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlightRecorder {
+    capacity: usize,
+    next_sequence: u64,
+    entries: VecDeque<DiagnosticEntry>,
+    incidents: VecDeque<IncidentSnapshot>,
+    active_after_remaining: Option<usize>,
+    detector: SequenceDetector,
+}
+
+impl FlightRecorder {
+    pub fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            next_sequence: 1,
+            entries: VecDeque::new(),
+            incidents: VecDeque::new(),
+            active_after_remaining: None,
+            detector: SequenceDetector::default(),
+        }
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = &DiagnosticEntry> {
+        self.entries.iter()
+    }
+
+    pub fn incidents(&self) -> impl Iterator<Item = &IncidentSnapshot> {
+        self.incidents.iter()
+    }
+
+    pub(crate) fn record_observation(&mut self, observation: CarObservation) {
+        self.record(DiagnosticEvent::Observation(observation));
+    }
+
+    pub(crate) fn record_engine_events(&mut self, events: &[EngineEvent]) {
+        for event in events {
+            self.record(DiagnosticEvent::Engine(event.clone()));
+        }
+    }
+
+    fn record(&mut self, event: DiagnosticEvent) {
+        let anomalies = self.detector.observe(&event);
+        self.push(event, true);
+        for anomaly in anomalies {
+            self.trigger(anomaly);
+        }
+    }
+
+    fn trigger(&mut self, anomaly: DiagnosticAnomaly) {
+        self.active_after_remaining.take();
+
+        let mut evidence = self
+            .entries
+            .iter()
+            .rev()
+            .take(INCIDENT_BEFORE_ENTRIES)
+            .cloned()
+            .collect::<Vec<_>>();
+        evidence.reverse();
+        self.push(DiagnosticEvent::Anomaly(anomaly.clone()), false);
+        evidence.push(
+            self.entries
+                .back()
+                .cloned()
+                .expect("anomaly was added to the flight recorder"),
+        );
+        if self.incidents.len() == INCIDENT_LIMIT {
+            self.incidents.pop_front();
+        }
+        self.incidents.push_back(IncidentSnapshot {
+            trigger: anomaly,
+            evidence,
+            after_window_complete: false,
+        });
+        self.active_after_remaining = Some(INCIDENT_AFTER_ENTRIES);
+    }
+
+    fn push(&mut self, event: DiagnosticEvent, append_to_active: bool) {
+        let entry = DiagnosticEntry {
+            sequence: DiagnosticSequence(self.next_sequence),
+            event,
+        };
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .expect("diagnostic sequence space exhausted");
+
+        if self.entries.len() == self.capacity {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(entry.clone());
+
+        if append_to_active {
+            if let Some(remaining) = self.active_after_remaining.as_mut() {
+                let incident = self
+                    .incidents
+                    .back_mut()
+                    .expect("active incident has a snapshot");
+                incident.evidence.push(entry);
+                *remaining -= 1;
+                if *remaining == 0 {
+                    incident.after_window_complete = true;
+                    self.active_after_remaining = None;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct SequenceDetector {
+    last_observation_sequence: BTreeMap<ObservationSourceId, ObservationSequence>,
+    generated_intents: Vec<Intent>,
+}
+
+impl SequenceDetector {
+    fn observe(&mut self, event: &DiagnosticEvent) -> Vec<DiagnosticAnomaly> {
+        match event {
+            DiagnosticEvent::Observation(observation) => {
+                let source = &observation.provenance.source;
+                let received = observation.provenance.sequence;
+                match self.last_observation_sequence.get(source).copied() {
+                    Some(previous) if received <= previous => {
+                        vec![DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+                            source: source.clone(),
+                            previous,
+                            received,
+                        }]
+                    }
+                    _ => {
+                        self.last_observation_sequence
+                            .insert(source.clone(), received);
+                        Vec::new()
+                    }
+                }
+            }
+            DiagnosticEvent::Engine(EngineEvent::IntentGenerated { intent, .. }) => {
+                self.generated_intents.push(intent.clone());
+                Vec::new()
+            }
+            DiagnosticEvent::Engine(EngineEvent::IntentRejected { intent, .. }) => {
+                if let Some(index) = self
+                    .generated_intents
+                    .iter()
+                    .position(|generated| generated == intent)
+                {
+                    self.generated_intents.remove(index);
+                }
+                Vec::new()
+            }
+            DiagnosticEvent::Engine(EngineEvent::Runtime(RuntimeEvent::IntentAccepted(intent))) => {
+                if let Some(index) = self
+                    .generated_intents
+                    .iter()
+                    .position(|generated| generated == intent)
+                {
+                    self.generated_intents.remove(index);
+                    Vec::new()
+                } else {
+                    vec![DiagnosticAnomaly::IntentAcceptedWithoutGeneration {
+                        intent: intent.clone(),
+                    }]
+                }
+            }
+            DiagnosticEvent::Engine(_) | DiagnosticEvent::Anomaly(_) => Vec::new(),
+        }
+    }
+}

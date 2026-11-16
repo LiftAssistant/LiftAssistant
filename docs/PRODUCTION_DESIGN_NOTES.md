@@ -144,6 +144,12 @@ Preserve these ideas:
 - subsystem aggregation so operators see which area is degraded rather than a flat warning flood;
 - production release builds remain diagnosable through build IDs, symbols/coredumps, traces and replay.
 
+M4 implements only the smallest validated subset: a count-bounded in-memory Engine
+recorder, two deterministic invariant detectors, and bounded replayable incident
+evidence. Stable codes, incident grouping, persistence/export, alerts/issues,
+subsystem aggregation, trend detection, and operational packaging remain design
+candidates rather than implemented claims.
+
 ## Developer and shadow debugging
 
 Do not rely on a debug build as the only way to diagnose production failures.

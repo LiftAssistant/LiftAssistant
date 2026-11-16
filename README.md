@@ -72,6 +72,14 @@ cargo run -p liftassistant-tui -- --scenario rmf-recorded-read-only
 
 The experiment maps recorded `LiftState` fields into canonical partial evidence with source identity and deterministic sequence. It preserves moving-with-floor-reference-only position, undirected door movement, and source-specific modes without guessing, then produces a complete `CarState` only for sufficient stopped/open evidence. It does not connect to ROS or send lift requests.
 
+Inspect bounded diagnostic capture and deterministic incident replay:
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario diagnostic-incident-replay
+~~~
+
+This scenario records canonical observations and Engine events in a bounded in-memory flight recorder, detects a deliberately repeated source sequence, freezes a small before/after evidence window, and replays the incident through the same deterministic detector. An anomaly is evidence of an invariant violation, not an equipment-fault or root-cause claim. No database, file format, cloud telemetry, or public diagnostic schema is involved.
+
 Controls:
 
 - Up/Down select a floor; U/D create an UP/DOWN hall call.

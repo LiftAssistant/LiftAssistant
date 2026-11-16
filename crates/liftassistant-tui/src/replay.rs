@@ -72,7 +72,7 @@ impl From<EngineEvent> for SemanticEvent {
                 Self::DispatchSelected { id, selection }
             }
             EngineEvent::IntentGenerated { id, intent } => Self::IntentGenerated { id, intent },
-            EngineEvent::RuntimeError(error) => Self::RuntimeError(error),
+            EngineEvent::IntentRejected { message, .. } => Self::RuntimeError(message),
             EngineEvent::Runtime(event) => Self::Runtime(event),
         }
     }

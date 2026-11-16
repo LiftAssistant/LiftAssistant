@@ -95,6 +95,8 @@ Operational `CarState` remains complete. A deterministic resolver promotes an ob
 
 The shared internal `liftassistant-engine` owns topology, call lifecycle, dispatch and pending scheduling, high-level intent submission/result handling, runtime-feedback transitions, semantic events, and canonical observation resolution. Core remains deterministic and I/O-free. The developer TUI retains presentation, simulator-only controls, explicit driving, display trace, and replay input recording; both interactive and non-interactive scenario paths use the same Engine orchestration.
 
+Engine also owns a bounded in-memory diagnostic flight recorder over canonical observations and machine-readable Engine events. Its first deterministic detectors cover non-increasing per-source observation sequence and runtime intent acceptance without a matching generated intent. A trigger freezes a bounded before/after incident window that can be replayed through the same detector. These anomalies are invariant evidence, not equipment faults, alarms, root causes, or maintenance advice. The implementation deliberately defines no durable storage, external telemetry, public code registry, or broad diagnostic taxonomy.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

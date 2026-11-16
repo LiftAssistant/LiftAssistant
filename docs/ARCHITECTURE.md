@@ -82,6 +82,13 @@ A UI/event loop may use wall-clock time to decide when to request the next step,
 
 M2 call lifecycle and assignment, M3 executable scenarios, and any recorded runtime must preserve the same determinism property.
 
+The Engine keeps a bounded in-memory flight recorder of canonical observations and
+machine-readable semantic events. Its deliberately small deterministic detector set
+can freeze bounded incident evidence before and after a sequence invariant violation,
+then replay that evidence through the same detector. Diagnostic anomalies remain
+distinct from equipment faults, alarms, root causes, and maintenance actions. No
+durable store, telemetry service, or stable public diagnostic schema is implied.
+
 ## Semantic design method
 
 Before introducing durable domain semantics or reusable external boundaries:

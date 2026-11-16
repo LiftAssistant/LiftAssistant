@@ -77,6 +77,24 @@ and source modes are retained; AGV/Human control modes are not guessed as
 LiftAssistant operating modes. Two runs must match and the expected outcomes are
 checked. No ROS node, network subscription, lift request, or file format is involved.
 
+## Diagnostic incident replay
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario diagnostic-incident-replay
+~~~
+
+The scenario feeds source sequence `1, 1, 2, 3` through the canonical
+Open-RMF observation boundary. It checks that the second `1` produces the
+machine-readable `ObservationSequenceNotIncreasing` anomaly, that the live
+flight recorder stays within its configured four-entry bound, and that the
+incident retains its trigger plus two following evidence entries. Replaying
+the frozen incident must reproduce the same anomaly, and two complete runs
+must match.
+
+This is deterministic internal diagnostic evidence. It is not an equipment
+fault, alarm, root-cause conclusion, maintenance recommendation, protocol
+capture, or public diagnostic-code registry.
+
 ## Availability fallback
 
 From a reset, pause, toggle A OutOfService, and submit 7F UP. Dispatch selects B

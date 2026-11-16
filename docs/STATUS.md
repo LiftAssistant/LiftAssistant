@@ -373,23 +373,29 @@ Validation: formatting, final all-target linting, 44 workspace tests with the up
 
 ### M4.6 — Diagnostics substrate
 
-**READY — next implementation slice.**
+**Implemented.**
 
-Promotion evidence: Engine now has stable machine-readable observation-resolution and semantic-event boundaries used by both interactive and scenario callers, while diagnostics still collapse into a TUI-only bounded `String` trace and the Open-RMF evidence path has no shared recorder. This is concrete caller pressure for a bounded structured flight recorder and a very small deterministic detector set.
+Implemented behavior:
 
-Implement incrementally:
+- Engine owns a count-bounded in-memory `FlightRecorder` over canonical observations and all machine-readable `EngineEvent` values, including calls, dispatch candidates/selections, generated intents, structured intent rejection, state transitions, and runtime feedback;
+- diagnostic entries receive deterministic local sequence numbers and the recorder retains at most its configured live capacity;
+- two deliberately narrow invariant detectors flag non-increasing observation sequence per source and runtime intent acceptance without a matching generated Engine intent;
+- a rejected generated intent is removed from detector state, so a later retry/acceptance does not create a false unsolicited-acceptance anomaly;
+- an anomaly freezes up to eight preceding/trigger entries plus two following entries in one of at most eight in-memory incident snapshots; trigger evidence is retained even when the live recorder capacity is smaller than the incident window;
+- a frozen incident reruns the same deterministic detector, and the executable `diagnostic-incident-replay` scenario proves bounded live retention, complete after-window capture, matching replay anomaly, and two-run determinism;
+- anomalies remain invariant evidence rather than equipment-fault, alarm, root-cause, or maintenance claims.
 
-- add a bounded in-memory flight recorder over canonical observations, semantic transitions, decisions and intents;
-- define a small internal machine-readable diagnostic-event shape;
-- add deterministic invariant/sequence anomaly detection for one or two demonstrated cases;
-- make an incident snapshot replayable through the existing deterministic tooling;
-- do not add ML, a database, cloud telemetry, or a large diagnostic taxonomy.
+This slice adds no database, file format, cloud telemetry, ML, public diagnostic-code registry, or broad taxonomy.
 
-The purpose is to validate that production failures can leave useful, replayable evidence.
+Validation: formatting, all-target linting, 46 workspace tests, and all five executable developer scenarios passed.
 
 ### M4.7 — Headless/read-only production host proof
 
-Only after the previous slices:
+**READY — next implementation slice.**
+
+Promotion evidence: the Engine crate now has no TUI or simulator dependency, the recorded runtime exposes observation/replay driving but no `IntentSink`, and canonical resolution plus structured diagnostics are callable without a terminal. This is enough demonstrated pressure for a minimal non-TUI process host and lifecycle/readiness proof; it is not evidence for write authority or production deployment.
+
+Implement incrementally:
 
 - prove the Engine can run without the TUI;
 - introduce lifecycle/readiness concepts sufficient for startup, synchronization, read-only readiness and degraded state;

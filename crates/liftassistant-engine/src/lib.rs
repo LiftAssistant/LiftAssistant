@@ -1,5 +1,12 @@
 #![forbid(unsafe_code)]
 
+mod diagnostics;
+
+pub use diagnostics::{
+    DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, DiagnosticSequence, FlightRecorder,
+    IncidentSnapshot,
+};
+
 use liftassistant_core::{
     CallRegistration, CallRegistry, DispatchCandidate, DispatchSelection, HallCallRejection,
     dispatch, validate_hall_call,
@@ -8,6 +15,8 @@ use liftassistant_model::{BuildingTopology, CallId, CallState, CarObservation, H
 use liftassistant_runtime::{
     CarStateResolution, IntentSink, ObservationSource, RuntimeEvent, resolve_car_observation,
 };
+
+const DEFAULT_DIAGNOSTIC_CAPACITY: usize = 128;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EngineEvent {
@@ -32,7 +41,11 @@ pub enum EngineEvent {
         id: CallId,
         intent: Intent,
     },
-    RuntimeError(String),
+    IntentRejected {
+        id: CallId,
+        intent: Intent,
+        message: String,
+    },
     Runtime(RuntimeEvent),
 }
 
@@ -45,15 +58,21 @@ pub struct Engine {
     last_call: Option<HallCall>,
     decision: Option<Intent>,
     calls: CallRegistry,
+    diagnostics: FlightRecorder,
 }
 
 impl Engine {
     pub fn new(topology: BuildingTopology) -> Self {
+        Self::with_diagnostic_capacity(topology, DEFAULT_DIAGNOSTIC_CAPACITY)
+    }
+
+    pub fn with_diagnostic_capacity(topology: BuildingTopology, capacity: usize) -> Self {
         Self {
             topology,
             last_call: None,
             decision: None,
             calls: CallRegistry::new(),
+            diagnostics: FlightRecorder::new(capacity),
         }
     }
 
@@ -73,7 +92,12 @@ impl Engine {
         &self.calls
     }
 
-    pub fn resolve_observation(&self, observation: &CarObservation) -> CarStateResolution {
+    pub fn diagnostics(&self) -> &FlightRecorder {
+        &self.diagnostics
+    }
+
+    pub fn resolve_observation(&mut self, observation: &CarObservation) -> CarStateResolution {
+        self.diagnostics.record_observation(observation.clone());
         resolve_car_observation(observation)
     }
 
@@ -86,6 +110,7 @@ impl Engine {
         if let Err(reason) = validate_hall_call(&call, &self.topology) {
             self.decision = None;
             events.push(EngineEvent::InvalidCall(reason));
+            self.diagnostics.record_engine_events(&events);
             return events;
         }
         match self.calls.register(call) {
@@ -100,12 +125,14 @@ impl Engine {
                     .get(id)
                     .is_some_and(|record| record.state != CallState::Pending)
                 {
+                    self.diagnostics.record_engine_events(&events);
                     return events;
                 }
                 self.decision = None;
             }
         }
         events.extend(self.dispatch_pending(backend));
+        self.diagnostics.record_engine_events(&events);
         events
     }
 
@@ -113,7 +140,9 @@ impl Engine {
     where
         B: ObservationSource + IntentSink,
     {
-        self.dispatch_pending(backend)
+        let events = self.dispatch_pending(backend);
+        self.diagnostics.record_engine_events(&events);
+        events
     }
 
     pub fn consume_runtime_events<B>(
@@ -158,6 +187,7 @@ impl Engine {
                 RuntimeEvent::PositionChanged(_) | RuntimeEvent::DoorStateChanged { .. } => {}
             }
         }
+        self.diagnostics.record_engine_events(&events);
         events
     }
 
@@ -201,7 +231,7 @@ impl Engine {
                 intent: intent.clone(),
             });
             self.decision = Some(intent.clone());
-            match backend.submit_intent(intent) {
+            match backend.submit_intent(intent.clone()) {
                 Ok(()) => {
                     let assigned = CallState::Assigned(car.clone());
                     assert!(self.calls.assign(id, car));
@@ -210,7 +240,11 @@ impl Engine {
                         state: assigned,
                     });
                 }
-                Err(error) => events.push(EngineEvent::RuntimeError(error.to_string())),
+                Err(error) => events.push(EngineEvent::IntentRejected {
+                    id,
+                    intent,
+                    message: error.to_string(),
+                }),
             }
         }
         events
@@ -299,5 +333,51 @@ mod tests {
             engine.calls().get(CallId::new(1)).map(|call| &call.state),
             Some(&CallState::Completed)
         );
+        assert!(engine.diagnostics().entries().any(|entry| matches!(
+            entry.event,
+            DiagnosticEvent::Engine(EngineEvent::IntentGenerated { .. })
+        )));
+        assert!(
+            !engine
+                .diagnostics()
+                .entries()
+                .any(|entry| matches!(entry.event, DiagnosticEvent::Anomaly(_)))
+        );
+    }
+
+    #[test]
+    fn unsolicited_intent_acceptance_creates_bounded_replayable_incident() {
+        let mut engine =
+            Engine::with_diagnostic_capacity(BuildingTopology::reference_eight_floor(), 3);
+        let mut backend = TestBackend {
+            state: CarState::new("A", Floor::new(3)),
+            intents: Vec::new(),
+        };
+        let intent = Intent::ServeFloor {
+            car: CarId::new("A"),
+            floor: Floor::new(7),
+        };
+
+        engine.consume_runtime_events(
+            vec![RuntimeEvent::IntentAccepted(intent.clone())],
+            &mut backend,
+        );
+        for _ in 0..2 {
+            engine.consume_runtime_events(
+                vec![RuntimeEvent::PositionChanged(backend.state.clone())],
+                &mut backend,
+            );
+        }
+
+        assert_eq!(engine.diagnostics().entries().count(), 3);
+        let incident = engine
+            .diagnostics()
+            .incidents()
+            .next()
+            .expect("anomaly creates an incident snapshot");
+        let anomaly = DiagnosticAnomaly::IntentAcceptedWithoutGeneration { intent };
+        assert_eq!(incident.trigger, anomaly);
+        assert!(incident.after_window_complete);
+        assert!(incident.replay_anomalies().contains(&anomaly));
     }
 }

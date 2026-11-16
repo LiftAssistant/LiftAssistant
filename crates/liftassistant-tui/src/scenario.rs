@@ -2,7 +2,9 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
-use liftassistant_engine::Engine;
+use liftassistant_engine::{
+    DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, Engine, IncidentSnapshot,
+};
 use liftassistant_model::{
     BuildingTopology, CallId, CallState, Capabilities, CarId, CarState, Direction, DoorEvidence,
     DoorState, Floor, HallCall, MotionEvidence, MotionState, ObservationProvenance,
@@ -25,11 +27,13 @@ pub const REFERENCE_SCENARIO: &str = "m2-call-lifecycle";
 pub const REJECTION_SCENARIO: &str = "intent-rejection-recovery";
 pub const RECORDED_SCENARIO: &str = "recorded-read-only-observation";
 pub const RMF_RECORDED_SCENARIO: &str = "rmf-recorded-read-only";
-pub const SCENARIOS: [&str; 4] = [
+pub const DIAGNOSTIC_SCENARIO: &str = "diagnostic-incident-replay";
+pub const SCENARIOS: [&str; 5] = [
     REFERENCE_SCENARIO,
     REJECTION_SCENARIO,
     RECORDED_SCENARIO,
     RMF_RECORDED_SCENARIO,
+    DIAGNOSTIC_SCENARIO,
 ];
 
 pub fn run(name: &str) -> Result<String, String> {
@@ -38,6 +42,7 @@ pub fn run(name: &str) -> Result<String, String> {
         REJECTION_SCENARIO => run_rejection_scenario(),
         RECORDED_SCENARIO => run_recorded_scenario(),
         RMF_RECORDED_SCENARIO => run_rmf_recorded_scenario(),
+        DIAGNOSTIC_SCENARIO => run_diagnostic_scenario(),
         _ => Err(format!(
             "unknown scenario {name:?}; available scenarios: {}",
             SCENARIOS.join(", ")
@@ -69,6 +74,13 @@ struct RmfRecordedExperiment {
     source_specific_mode: MappedRmfObservation,
     source_specific_mode_resolution: CarStateResolution,
     final_states: Vec<CarState>,
+}
+
+#[derive(Debug, PartialEq)]
+struct DiagnosticExperiment {
+    recorder_entries: Vec<DiagnosticEntry>,
+    incident: IncidentSnapshot,
+    replayed_anomalies: Vec<DiagnosticAnomaly>,
 }
 
 fn run_reference_scenario() -> Result<String, String> {
@@ -117,6 +129,16 @@ fn run_rmf_recorded_scenario() -> Result<String, String> {
     }
     verify_rmf_experiment(&first)?;
     Ok(render_rmf_report(&first))
+}
+
+fn run_diagnostic_scenario() -> Result<String, String> {
+    let first = run_diagnostic_experiment()?;
+    let second = run_diagnostic_experiment()?;
+    if first != second {
+        return Err("diagnostic incident replay produced different results on replay".into());
+    }
+    verify_diagnostic_experiment(&first)?;
+    Ok(render_diagnostic_report(&first))
 }
 
 fn reference_commands() -> Vec<Command> {
@@ -220,7 +242,7 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     let incomplete_source = rmf_source_state();
     let incomplete = map_rmf_lift_state(&incomplete_source, &labels, rmf_provenance(1))
         .map_err(|error| error.to_string())?;
-    let engine = Engine::new(incomplete.topology.clone());
+    let mut engine = Engine::new(incomplete.topology.clone());
     let incomplete_resolution = engine.resolve_observation(&incomplete.observation);
 
     let mut final_source = incomplete_source.clone();
@@ -260,6 +282,39 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
         source_specific_mode,
         source_specific_mode_resolution,
         final_states,
+    })
+}
+
+fn run_diagnostic_experiment() -> Result<DiagnosticExperiment, String> {
+    let labels = rmf_floor_labels();
+    let source = rmf_source_state();
+    let first = map_rmf_lift_state(&source, &labels, rmf_provenance(1))
+        .map_err(|error| error.to_string())?;
+    let duplicate = map_rmf_lift_state(&source, &labels, rmf_provenance(1))
+        .map_err(|error| error.to_string())?;
+    let next = map_rmf_lift_state(&source, &labels, rmf_provenance(2))
+        .map_err(|error| error.to_string())?;
+    let after = map_rmf_lift_state(&source, &labels, rmf_provenance(3))
+        .map_err(|error| error.to_string())?;
+
+    let mut engine = Engine::with_diagnostic_capacity(first.topology.clone(), 4);
+    engine.resolve_observation(&first.observation);
+    engine.resolve_observation(&duplicate.observation);
+    engine.resolve_observation(&next.observation);
+    engine.resolve_observation(&after.observation);
+
+    let recorder_entries = engine.diagnostics().entries().cloned().collect();
+    let incident = engine
+        .diagnostics()
+        .incidents()
+        .next()
+        .cloned()
+        .ok_or_else(|| "non-increasing observation sequence produced no incident".to_owned())?;
+    let replayed_anomalies = incident.replay_anomalies();
+    Ok(DiagnosticExperiment {
+        recorder_entries,
+        incident,
+        replayed_anomalies,
     })
 }
 
@@ -443,6 +498,15 @@ fn verify_rejection_outcome(replay: &Replay) -> Result<(), String> {
     if !recovered {
         return Err("rejection scenario ended before recovered service completed".into());
     }
+    if replay
+        .app
+        .engine
+        .diagnostics()
+        .entries()
+        .any(|entry| matches!(entry.event, DiagnosticEvent::Anomaly(_)))
+    {
+        return Err("intent rejection/retry produced a false diagnostic anomaly".into());
+    }
     Ok(())
 }
 
@@ -543,6 +607,24 @@ fn verify_rmf_experiment(experiment: &RmfRecordedExperiment) -> Result<(), Strin
         return Err(
             "resolved Open-RMF state did not preserve the no-write runtime boundary".into(),
         );
+    }
+    Ok(())
+}
+
+fn verify_diagnostic_experiment(experiment: &DiagnosticExperiment) -> Result<(), String> {
+    let anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+        source: ObservationSourceId::new("fixture/open-rmf"),
+        previous: ObservationSequence::new(1),
+        received: ObservationSequence::new(1),
+    };
+    if experiment.recorder_entries.len() != 4 {
+        return Err("diagnostic flight recorder exceeded or missed its configured bound".into());
+    }
+    if experiment.incident.trigger != anomaly
+        || !experiment.incident.after_window_complete
+        || experiment.replayed_anomalies != [anomaly]
+    {
+        return Err("diagnostic incident did not preserve and replay the expected anomaly".into());
     }
     Ok(())
 }
@@ -683,6 +765,27 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
     .join("\n")
 }
 
+fn render_diagnostic_report(experiment: &DiagnosticExperiment) -> String {
+    [
+        format!("scenario: {DIAGNOSTIC_SCENARIO}"),
+        "scope: bounded in-memory diagnostics; no equipment fault or root-cause claim".into(),
+        "determinism: PASS (2 identical recordings and incident replays)".into(),
+        format!(
+            "flight recorder: PASS ({} entries within configured capacity 4)",
+            experiment.recorder_entries.len()
+        ),
+        format!("anomaly: {:?}", experiment.incident.trigger),
+        format!(
+            "incident: PASS ({} evidence entries; after-window complete={})",
+            experiment.incident.evidence.len(),
+            experiment.incident.after_window_complete
+        ),
+        "outcome: PASS (incident replay reproduced the expected sequence anomaly)".into(),
+        String::new(),
+    ]
+    .join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -742,6 +845,17 @@ mod tests {
         assert!(report.contains("resolved final: sequence=2 lift-A position=4F motion=Stopped"));
         assert!(report.contains("source-specific mode: raw=2 canonical=SourceSpecific"));
         assert!(report.contains("only sufficient evidence became CarState"));
+    }
+
+    #[test]
+    fn diagnostic_scenario_bounds_and_replays_incident_evidence() {
+        let report = run(DIAGNOSTIC_SCENARIO).expect("diagnostic scenario should pass");
+
+        assert!(report.contains("determinism: PASS (2 identical recordings and incident replays)"));
+        assert!(report.contains("4 entries within configured capacity 4"));
+        assert!(report.contains("ObservationSequenceNotIncreasing"));
+        assert!(report.contains("after-window complete=true"));
+        assert!(report.contains("incident replay reproduced the expected sequence anomaly"));
     }
 
     #[test]
