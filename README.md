@@ -106,7 +106,7 @@ Controls:
 - R resets the simulator/UI.
 - Q, Esc, or Ctrl-C quits.
 
-The building shows nearest-floor positions; car details show exact positions, mode, target, door state, and serve-floor capability. The latest 100 trace entries show calls, dispatch, intents, runtime events, and errors.
+The building shows nearest-floor positions; car details show exact positions, mode, controller-reported destination, door state, and serve-floor capability. LiftAssistant's desired destination remains visible through call/intent state rather than being conflated with that report. The latest 100 trace entries show calls, dispatch, intents, runtime events, and errors.
 
 Recording is capped at 2,048 commands. Pauses and floor selection do not affect physics and are not scenario commands.
 

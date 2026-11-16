@@ -82,15 +82,13 @@ pub fn render(frame: &mut Frame, app: &App) {
             MotionState::Stopped => "stopped",
             MotionState::Moving(direction) => direction_name(direction),
         };
-        let target = car
-            .target
-            .map_or_else(|| "-".into(), |floor| floor.to_string());
+        let reported_destination = car.reported_destination.to_string();
         let serve = app
             .runtime
             .capabilities(&car.id)
             .is_some_and(|caps| caps.serve_floor);
         details.push(Line::from(format!(
-            "{}  {:.2}F (near {}) {motion} -> {target}",
+            "{}  {:.2}F (near {}) {motion} reported -> {reported_destination}",
             car.id, car.position.floor_position, car.position.nearest_floor
         )));
         details.push(Line::from(format!(

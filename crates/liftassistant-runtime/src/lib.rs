@@ -118,7 +118,7 @@ pub fn resolve_car_observation(observation: &CarObservation) -> CarStateResoluti
                 motion,
                 door,
                 mode,
-                target: observation.target,
+                reported_destination: observation.reported_destination,
             })
         }
         _ => CarStateResolution::Unresolved {
@@ -152,6 +152,7 @@ mod tests {
     use super::*;
     use liftassistant_model::{
         Direction, ObservationProvenance, ObservationSequence, ObservationSourceId, OperatingMode,
+        ReportedDestination,
     };
 
     fn observation() -> CarObservation {
@@ -165,7 +166,7 @@ mod tests {
             motion: MotionEvidence::Known(MotionState::Moving(Direction::Up)),
             door: DoorEvidence::MovingUnknownDirection,
             mode: OperatingModeEvidence::Known(OperatingMode::FireService),
-            target: Some(Floor::new(4)),
+            reported_destination: ReportedDestination::Known(Floor::new(4)),
         }
     }
 
@@ -190,7 +191,7 @@ mod tests {
         observation.position = PositionEvidence::FloorReference(Floor::new(4));
         observation.motion = MotionEvidence::Known(MotionState::Stopped);
         observation.door = DoorEvidence::Known(DoorState::Open);
-        observation.target = None;
+        observation.reported_destination = ReportedDestination::None;
 
         assert_eq!(
             resolve_car_observation(&observation),
@@ -200,7 +201,7 @@ mod tests {
                 motion: MotionState::Stopped,
                 door: DoorState::Open,
                 mode: liftassistant_model::OperatingMode::FireService,
-                target: None,
+                reported_destination: ReportedDestination::None,
             })
         );
     }
@@ -220,5 +221,25 @@ mod tests {
                 reasons: vec![UnresolvedCarStateReason::OperatingModeSourceSpecific],
             }
         );
+    }
+
+    #[test]
+    fn reported_destination_variants_remain_distinct_after_resolution() {
+        let mut observation = observation();
+        observation.position = PositionEvidence::Exact(Position::at_floor(Floor::new(3)));
+        observation.motion = MotionEvidence::Known(MotionState::Stopped);
+        observation.door = DoorEvidence::Known(DoorState::Closed);
+
+        for reported_destination in [
+            ReportedDestination::Known(Floor::new(4)),
+            ReportedDestination::None,
+            ReportedDestination::Unknown,
+        ] {
+            observation.reported_destination = reported_destination;
+            let CarStateResolution::Resolved(state) = resolve_car_observation(&observation) else {
+                panic!("complete exact evidence should resolve")
+            };
+            assert_eq!(state.reported_destination, reported_destination);
+        }
     }
 }

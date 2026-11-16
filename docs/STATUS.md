@@ -454,16 +454,16 @@ The highest-priority future themes include observation quality/freshness, reconc
 
 A cross-project/code audit after M4.8 found that the current read-only prototype is healthy enough to continue, but live adapters would expose four semantic ambiguities that should be corrected before M5 or any write-capable work.
 
-### Finding A — reported destination is not the same as desired intent
+### Finding A — reported destination is not the same as desired intent (resolved by M4.9a)
 
-Current internal `CarObservation.target: Option<Floor>` and `CarState.target: Option<Floor>` cannot distinguish:
+The pre-M4.9a `CarObservation.target: Option<Floor>` and `CarState.target: Option<Floor>` could not distinguish:
 
 - source explicitly reports no destination;
 - the source does not provide/know a destination;
 - simulator/Engine has a desired target;
 - an external controller reports a next stop/destination.
 
-Core currently also treats `car.target.is_some()` as one busy signal. That is safe for the simulator but is not a reliable production interpretation of optional external state.
+Core also treated `car.target.is_some()` as one busy signal. That was safe for the simulator but was not a reliable production interpretation of optional external state.
 
 Open-RMF itself separates reported `LiftState.destination_floor` from requested `LiftRequest.destination_floor`; BACnet `Next_Stopping_Floor` is optional. Desired/reported state must therefore remain distinct.
 
@@ -490,21 +490,27 @@ The current trait name is therefore misleading: it is a resolved operational-sta
 
 ## M4.9 — Observation semantics hardening
 
-**READY — next implementation work.**
+**IN PROGRESS — M4.9a implemented; M4.9b is next.**
 
 Work through these sub-slices in order. Keep all changes internal/reversible and run the prior-art gate before changing the model.
 
 ### M4.9a — Separate reported destination from desired/control state
 
-- remove the ambiguity between "known no destination" and "destination unknown/not provided";
-- keep external reported next-stop/destination evidence separate from Engine desired intents;
-- do not use missing external destination as evidence that a car is idle;
-- reassess whether simulator target belongs in canonical operational `CarState` at all;
-- preserve existing deterministic simulator behavior during migration.
+**IMPLEMENTED.**
+
+- canonical observation/state now carry tri-state `ReportedDestination::{Known, None, Unknown}`;
+- Engine desired destinations remain in call/intent state, while the simulator keeps its execution target privately and reports destination separately;
+- Core considers only explicit reported `None` eligible as idle evidence; reported `Unknown` remains conservatively busy, and Engine call occupancy remains independent;
+- undocumented empty Open-RMF destination, absent BACnet `Next_Stopping_Floor`, and decoupled BACnet state map conservatively to `Unknown`; explicit `None` is used only where the source/runtime actually establishes no reported destination;
+- regression coverage preserves all three reported states and proves that an Engine desire for 7F survives unknown reported next-stop state.
+
+Validation: formatting, warning-free workspace clippy, all 62 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass. No new blocker was found; the live read-only external-input blocker remains unchanged.
 
 Do not design the future authority/lease model here.
 
 ### M4.9b — Correct location precision semantics
+
+**READY — next implementation work.**
 
 - stop promoting a floor reference into a fabricated exact continuous position;
 - introduce the smallest internal location/position distinction that lets a complete operational state truthfully say "at/associated with floor N" without claiming an encoder coordinate;

@@ -100,7 +100,7 @@ pub fn run_with_topology(commands: &[Command], topology: BuildingTopology) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{Direction, DoorState, Floor};
+    use liftassistant_model::{Direction, DoorState, Floor, ReportedDestination};
     use liftassistant_runtime::ObservationSource;
 
     #[test]
@@ -216,8 +216,14 @@ mod tests {
         let states = first.app.runtime.car_states();
 
         assert_eq!(first.events, second.events);
-        assert_eq!(states[0].target, Some(Floor::new(7)));
-        assert_eq!(states[1].target, Some(Floor::new(5)));
+        assert_eq!(
+            states[0].reported_destination,
+            ReportedDestination::Known(Floor::new(7))
+        );
+        assert_eq!(
+            states[1].reported_destination,
+            ReportedDestination::Known(Floor::new(5))
+        );
         assert_eq!(
             first
                 .app
@@ -298,7 +304,10 @@ mod tests {
                 .map(|record| &record.state),
             Some(&CallState::Assigned(CarId::new("A")))
         );
-        assert_eq!(app.runtime.car_states()[0].target, Some(Floor::new(2)));
+        assert_eq!(
+            app.runtime.car_states()[0].reported_destination,
+            ReportedDestination::Known(Floor::new(2))
+        );
         assert!(lifecycle_events.contains(&SemanticEvent::CallStateChanged {
             id: CallId::new(1),
             state: CallState::Completed,
@@ -347,7 +356,7 @@ mod tests {
 #[cfg(test)]
 mod availability_tests {
     use super::*;
-    use liftassistant_model::{Direction, DoorState, Floor, OperatingMode};
+    use liftassistant_model::{Direction, DoorState, Floor, OperatingMode, ReportedDestination};
     use liftassistant_runtime::ObservationSource;
 
     #[test]
@@ -407,12 +416,10 @@ mod availability_tests {
         assert_eq!(app.runtime.car_states(), states);
         assert!(app.trace.back().unwrap().contains("REPLAY verified"));
         app.reset();
-        assert!(
-            app.runtime
-                .car_states()
-                .iter()
-                .all(|car| car.mode == OperatingMode::Normal && car.target.is_none())
-        );
+        assert!(app.runtime.car_states().iter().all(|car| {
+            car.mode == OperatingMode::Normal
+                && car.reported_destination == ReportedDestination::None
+        }));
     }
 
     #[test]
@@ -435,7 +442,7 @@ mod availability_tests {
             app.runtime
                 .car_states()
                 .iter()
-                .all(|car| car.target.is_none())
+                .all(|car| car.reported_destination == ReportedDestination::None)
         );
         app.toggle_availability("A");
         app.call(Direction::Up);

@@ -254,7 +254,9 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{Capabilities, CarId, CarState, Direction, DoorState, Floor};
+    use liftassistant_model::{
+        Capabilities, CarId, CarState, Direction, DoorState, Floor, ReportedDestination,
+    };
     use liftassistant_runtime::RuntimeError;
 
     struct TestBackend {
@@ -379,5 +381,44 @@ mod tests {
         assert_eq!(incident.trigger, anomaly);
         assert!(incident.after_window_complete);
         assert!(incident.replay_anomalies().contains(&anomaly));
+    }
+
+    #[test]
+    fn desired_destination_survives_unknown_reported_destination() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let mut backend = TestBackend {
+            state: CarState::new("A", Floor::new(3)),
+            intents: Vec::new(),
+        };
+        let desired = Intent::ServeFloor {
+            car: CarId::new("A"),
+            floor: Floor::new(7),
+        };
+
+        engine.submit_call(
+            HallCall {
+                floor: Floor::new(7),
+                direction: Direction::Up,
+            },
+            &mut backend,
+        );
+        backend.state.reported_destination = ReportedDestination::Unknown;
+
+        assert_eq!(engine.decision(), Some(&desired));
+        assert_eq!(backend.intents, vec![desired]);
+        assert_eq!(
+            engine.calls().get(CallId::new(1)).map(|call| &call.state),
+            Some(&CallState::Assigned(CarId::new("A")))
+        );
+
+        let second = engine.submit_call(
+            HallCall {
+                floor: Floor::new(5),
+                direction: Direction::Up,
+            },
+            &mut backend,
+        );
+        assert!(second.contains(&EngineEvent::NoEligibleCar(CallId::new(2))));
+        assert_eq!(backend.intents.len(), 1);
     }
 }

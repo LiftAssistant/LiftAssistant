@@ -9,7 +9,7 @@ use liftassistant_model::{
     BuildingTopology, CallId, CallState, Capabilities, CarId, CarState, Direction, DoorEvidence,
     DoorState, Floor, HallCall, MotionEvidence, MotionState, ObservationProvenance,
     ObservationSequence, ObservationSourceId, OperatingMode, OperatingModeEvidence, Position,
-    PositionEvidence,
+    PositionEvidence, ReportedDestination,
 };
 use liftassistant_runtime::{
     CarStateResolution, ObservationSource, RuntimeEvent, SimulationDriver, UnresolvedCarStateReason,
@@ -238,7 +238,7 @@ fn recorded_runtime() -> Result<RecordedRuntime, String> {
         motion: MotionState::Moving(Direction::Up),
         door: DoorState::Closed,
         mode: OperatingMode::Normal,
-        target: Some(Floor::new(4)),
+        reported_destination: ReportedDestination::Known(Floor::new(4)),
     };
     RecordedRuntime::new(
         [CarState::new("A", Floor::new(3))],
@@ -549,7 +549,7 @@ fn verify_reference_outcome(replay: &Replay) -> Result<(), String> {
                         || state.position.nearest_floor != *floor
                         || state.motion != MotionState::Stopped
                         || state.door != DoorState::Open
-                        || state.target.is_some()
+                        || state.reported_destination != ReportedDestination::None
                 })
         })
     {
@@ -622,7 +622,7 @@ fn verify_rejection_outcome(replay: &Replay) -> Result<(), String> {
             && state.position.floor_position == 7.0
             && state.motion == MotionState::Stopped
             && state.door == DoorState::Open
-            && state.target.is_none()
+            && state.reported_destination == ReportedDestination::None
     });
     if !recovered {
         return Err("rejection scenario ended before recovered service completed".into());
@@ -669,7 +669,7 @@ fn verify_recorded_outcome(playback: &RecordedPlayback) -> Result<(), String> {
         || final_states[0].position != Position::at_floor(Floor::new(4))
         || final_states[0].motion != MotionState::Stopped
         || final_states[0].door != DoorState::Open
-        || final_states[0].target.is_some()
+        || final_states[0].reported_destination != ReportedDestination::None
     {
         return Err("recorded observation did not reach the expected final state".into());
     }
@@ -686,7 +686,8 @@ fn verify_rmf_experiment(experiment: &RmfRecordedExperiment) -> Result<(), Strin
         || experiment.incomplete.observation.door != DoorEvidence::MovingUnknownDirection
         || experiment.incomplete.observation.mode
             != OperatingModeEvidence::Known(OperatingMode::FireService)
-        || experiment.incomplete.observation.target != Some(Floor::new(4))
+        || experiment.incomplete.observation.reported_destination
+            != ReportedDestination::Known(Floor::new(4))
         || experiment.incomplete.source_context.current_floor_label != "L3"
         || experiment.incomplete.source_context.source_session_id != "recorded-session"
         || experiment.incomplete.topology.served_floors()
@@ -712,7 +713,7 @@ fn verify_rmf_experiment(experiment: &RmfRecordedExperiment) -> Result<(), Strin
         motion: MotionState::Stopped,
         door: DoorState::Open,
         mode: OperatingMode::FireService,
-        target: None,
+        reported_destination: ReportedDestination::Unknown,
     };
     if experiment.final_observation.observation.provenance != rmf_provenance(2)
         || experiment.final_observation.observation.position
@@ -749,7 +750,8 @@ fn verify_bacnet_experiment(experiment: &BacnetRecordedExperiment) -> Result<(),
         || experiment.partial.observation.door != DoorEvidence::Known(DoorState::Closing)
         || experiment.partial.observation.mode
             != OperatingModeEvidence::Known(OperatingMode::FireService)
-        || experiment.partial.observation.target != Some(Floor::new(4))
+        || experiment.partial.observation.reported_destination
+            != ReportedDestination::Known(Floor::new(4))
         || experiment.partial.source_context.object_name != "Lift 1"
         || experiment.partial.source_context.universal_car_position != 3
     {
@@ -770,7 +772,7 @@ fn verify_bacnet_experiment(experiment: &BacnetRecordedExperiment) -> Result<(),
         motion: MotionState::Stopped,
         door: DoorState::Open,
         mode: OperatingMode::Normal,
-        target: None,
+        reported_destination: ReportedDestination::Unknown,
     };
     if experiment.final_observation.observation.provenance != bacnet_provenance(2)
         || experiment.final_resolution != CarStateResolution::Resolved(expected_final.clone())
@@ -859,17 +861,15 @@ fn render_report(name: &str, outcome: &str, commands: &[Command], replay: &Repla
     lines.push(String::new());
     lines.push("final cars:".into());
     lines.extend(replay.app.runtime.car_states().into_iter().map(|state| {
-        let target = state
-            .target
-            .map_or_else(|| "-".into(), |floor| floor.to_string());
         format!(
-            "  {} position={:.2}F nearest={} motion={:?} door={:?} mode={:?} target={target}",
+            "  {} position={:.2}F nearest={} motion={:?} door={:?} mode={:?} reported_destination={}",
             state.id,
             state.position.floor_position,
             state.position.nearest_floor,
             state.motion,
             state.door,
-            state.mode
+            state.mode,
+            state.reported_destination
         )
     }));
     lines.push(String::new());
@@ -900,14 +900,12 @@ fn render_recorded_report(playback: &RecordedPlayback) -> String {
         }
         lines.extend(batch.states.iter().map(|state| {
             format!(
-                "             state {} position={:.2}F motion={:?} door={:?} target={}",
+                "             state {} position={:.2}F motion={:?} door={:?} reported_destination={}",
                 state.id,
                 state.position.floor_position,
                 state.motion,
                 state.door,
-                state
-                    .target
-                    .map_or_else(|| "-".into(), |floor| floor.to_string())
+                state.reported_destination
             )
         }));
     }
@@ -926,7 +924,7 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
         "determinism: PASS (2 identical mappings and resolutions)".into(),
         "write boundary: PASS (recorded source has no IntentSink implementation)".into(),
         format!(
-            "incomplete observation: source={} sequence={} car={} position={:?} motion={:?} door={:?} mode={:?} target={} session={}",
+            "incomplete observation: source={} sequence={} car={} position={:?} motion={:?} door={:?} mode={:?} reported_destination={} session={}",
             incomplete.provenance.source,
             incomplete.provenance.sequence.value(),
             incomplete.car,
@@ -934,9 +932,7 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
             incomplete.motion,
             incomplete.door,
             incomplete.mode,
-            incomplete
-                .target
-                .map_or_else(|| "-".into(), |floor| floor.to_string()),
+            incomplete.reported_destination,
             experiment.incomplete.source_context.source_session_id
         ),
         format!(
@@ -944,7 +940,7 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
             experiment.incomplete_resolution
         ),
         format!(
-            "resolved final: sequence={} {} position={} motion={:?} door={:?} mode={:?} target=-",
+            "resolved final: sequence={} {} position={} motion={:?} door={:?} mode={:?} reported_destination={}",
             experiment
                 .final_observation
                 .observation
@@ -955,7 +951,8 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
             final_state.position.nearest_floor,
             final_state.motion,
             final_state.door,
-            final_state.mode
+            final_state.mode,
+            final_state.reported_destination
         ),
         format!(
             "source-specific mode: raw={} canonical={:?} resolution={:?}",
@@ -980,7 +977,7 @@ fn render_bacnet_report(experiment: &BacnetRecordedExperiment) -> String {
         "determinism: PASS (2 identical mappings and resolutions)".into(),
         "write boundary: PASS (property projection and recorded runtime expose no IntentSink)".into(),
         format!(
-            "partial observation: source={} sequence={} car={} position={:?} motion={:?} door={:?} mode={:?} target={}",
+            "partial observation: source={} sequence={} car={} position={:?} motion={:?} door={:?} mode={:?} reported_destination={}",
             partial.provenance.source,
             partial.provenance.sequence.value(),
             partial.car,
@@ -988,19 +985,18 @@ fn render_bacnet_report(experiment: &BacnetRecordedExperiment) -> String {
             partial.motion,
             partial.door,
             partial.mode,
-            partial
-                .target
-                .map_or_else(|| "-".into(), |floor| floor.to_string())
+            partial.reported_destination
         ),
         format!("partial resolution: {:?}", experiment.partial_resolution),
         format!(
-            "resolved final: sequence={} {} position={} motion={:?} door={:?} mode={:?} target=-",
+            "resolved final: sequence={} {} position={} motion={:?} door={:?} mode={:?} reported_destination={}",
             experiment.final_observation.observation.provenance.sequence.value(),
             final_state.id,
             final_state.position.nearest_floor,
             final_state.motion,
             final_state.door,
-            final_state.mode
+            final_state.mode,
+            final_state.reported_destination
         ),
         format!(
             "decoupled object: raw_out_of_service={} canonical_position={:?} canonical_mode={:?} resolution={:?}",
@@ -1086,7 +1082,11 @@ mod tests {
         assert!(report.contains("[0500 ms] PositionChanged A 3.50F"));
         assert!(report.contains("[0999 ms] no events"));
         assert!(report.contains("[1000 ms] Arrived A at 4F"));
-        assert!(report.contains("state A position=4.00F motion=Stopped door=Open target=-"));
+        assert!(
+            report.contains(
+                "state A position=4.00F motion=Stopped door=Open reported_destination=none"
+            )
+        );
     }
 
     #[test]

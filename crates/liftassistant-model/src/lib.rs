@@ -138,6 +138,27 @@ pub enum OperatingMode {
     OutOfService,
 }
 
+/// Destination or next-stop state reported by an external controller.
+///
+/// This is observation-side state. LiftAssistant's desired destination remains in its
+/// call/intent lifecycle and must not be inferred from this value.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReportedDestination {
+    Known(Floor),
+    None,
+    Unknown,
+}
+
+impl fmt::Display for ReportedDestination {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Known(floor) => floor.fmt(f),
+            Self::None => f.write_str("none"),
+            Self::Unknown => f.write_str("unknown"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Capabilities {
     pub observe_position: bool,
@@ -164,7 +185,7 @@ pub struct CarState {
     pub motion: MotionState,
     pub door: DoorState,
     pub mode: OperatingMode,
-    pub target: Option<Floor>,
+    pub reported_destination: ReportedDestination,
 }
 
 impl CarState {
@@ -175,7 +196,7 @@ impl CarState {
             motion: MotionState::Stopped,
             door: DoorState::Closed,
             mode: OperatingMode::Normal,
-            target: None,
+            reported_destination: ReportedDestination::None,
         }
     }
 }
@@ -264,7 +285,7 @@ pub struct CarObservation {
     pub motion: MotionEvidence,
     pub door: DoorEvidence,
     pub mode: OperatingModeEvidence,
-    pub target: Option<Floor>,
+    pub reported_destination: ReportedDestination,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

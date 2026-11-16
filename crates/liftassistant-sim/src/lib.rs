@@ -8,7 +8,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_model::{
     Capabilities, CarId, CarState, Direction, DoorState, Floor, Intent, MotionState, OperatingMode,
-    Position,
+    Position, ReportedDestination,
 };
 use liftassistant_runtime::{
     IntentSink, ObservationSource, RuntimeError, RuntimeEvent, SimulationDriver,
@@ -28,6 +28,7 @@ pub use rmf_recorded::{
 struct SimCar {
     state: CarState,
     capabilities: Capabilities,
+    desired_target: Option<Floor>,
 }
 
 #[derive(Debug)]
@@ -51,6 +52,7 @@ impl SimRuntime {
                     SimCar {
                         state,
                         capabilities,
+                        desired_target: None,
                     },
                 )
             })
@@ -120,7 +122,8 @@ impl SimRuntime {
         }
 
         let delta = f64::from(floor.index()) - sim_car.state.position.floor_position;
-        sim_car.state.target = Some(floor);
+        sim_car.desired_target = Some(floor);
+        sim_car.state.reported_destination = ReportedDestination::Known(floor);
         sim_car.state.door = DoorState::Closed;
         sim_car.state.motion = if delta > 0.0 {
             MotionState::Moving(Direction::Up)
@@ -169,7 +172,7 @@ impl SimulationDriver for SimRuntime {
         let step = self.speed_floors_per_second * elapsed.as_secs_f64();
 
         for sim_car in self.cars.values_mut() {
-            let Some(target) = sim_car.state.target else {
+            let Some(target) = sim_car.desired_target else {
                 continue;
             };
 
@@ -180,7 +183,8 @@ impl SimulationDriver for SimRuntime {
             if delta.abs() <= step {
                 sim_car.state.position = Position::at_floor(target);
                 sim_car.state.motion = MotionState::Stopped;
-                sim_car.state.target = None;
+                sim_car.desired_target = None;
+                sim_car.state.reported_destination = ReportedDestination::None;
                 sim_car.state.door = DoorState::Open;
 
                 events.push(RuntimeEvent::PositionChanged(sim_car.state.clone()));
@@ -269,7 +273,10 @@ mod tests {
         runtime
             .submit_intent(intent.clone())
             .expect("one-shot rejection should be consumed");
-        assert_eq!(runtime.car_states()[0].target, Some(Floor::new(7)));
+        assert_eq!(
+            runtime.car_states()[0].reported_destination,
+            ReportedDestination::Known(Floor::new(7))
+        );
         assert!(
             runtime
                 .advance(Duration::from_millis(500))

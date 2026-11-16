@@ -6,7 +6,7 @@ use liftassistant_engine::{DiagnosticAnomaly, DiagnosticEvent, Engine};
 use liftassistant_model::{
     BuildingTopology, CarId, CarObservation, DoorEvidence, DoorState, Floor, MotionEvidence,
     MotionState, ObservationProvenance, ObservationSequence, ObservationSourceId, OperatingMode,
-    OperatingModeEvidence, Position, PositionEvidence,
+    OperatingModeEvidence, Position, PositionEvidence, ReportedDestination,
 };
 use liftassistant_runtime::{CarStateResolution, UnresolvedCarStateReason};
 
@@ -249,7 +249,7 @@ fn reference_source() -> RecordedObservationSource {
     complete.position = PositionEvidence::Exact(Position::at_floor(Floor::new(4)));
     complete.motion = MotionEvidence::Known(MotionState::Stopped);
     complete.door = DoorEvidence::Known(DoorState::Open);
-    complete.target = None;
+    complete.reported_destination = ReportedDestination::None;
 
     let duplicate = complete.clone();
     RecordedObservationSource::new([observation(1), complete, duplicate])
@@ -266,7 +266,7 @@ fn observation(sequence: u64) -> CarObservation {
         motion: MotionEvidence::Known(MotionState::Moving(liftassistant_model::Direction::Up)),
         door: DoorEvidence::MovingUnknownDirection,
         mode: OperatingModeEvidence::Known(OperatingMode::FireService),
-        target: Some(Floor::new(4)),
+        reported_destination: ReportedDestination::Known(Floor::new(4)),
     }
 }
 
@@ -414,7 +414,7 @@ mod tests {
         complete.position = PositionEvidence::Exact(Position::at_floor(Floor::new(4)));
         complete.motion = MotionEvidence::Known(MotionState::Stopped);
         complete.door = DoorEvidence::Known(DoorState::Open);
-        complete.target = None;
+        complete.reported_destination = ReportedDestination::None;
         let mut frames = vec![observation(1), complete.clone()];
         frames.extend(std::iter::repeat_n(complete, 10));
         let mut source = RecordedObservationSource::new(frames);

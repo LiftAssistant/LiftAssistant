@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use liftassistant_model::{
     BuildingTopology, CallId, CallRecord, CallState, Capabilities, CarId, CarState, Direction,
-    Floor, HallCall, Intent, OperatingMode,
+    Floor, HallCall, Intent, OperatingMode, ReportedDestination,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -230,7 +230,11 @@ pub fn dispatch(
             if car.mode != OperatingMode::Normal {
                 rejections.push(DispatchRejection::Mode(car.mode));
             }
-            let busy = car.target.is_some() || occupied_cars.contains(&car.id);
+            // Only an explicit controller report of no destination can contribute idle
+            // evidence. Unknown reported state stays conservative, while Engine-owned
+            // call assignments independently preserve desired/control occupancy.
+            let busy = car.reported_destination != ReportedDestination::None
+                || occupied_cars.contains(&car.id);
             if busy {
                 rejections.push(DispatchRejection::Busy);
             }
@@ -487,7 +491,32 @@ mod tests {
     #[test]
     fn busy_car_is_not_selected_even_when_it_is_nearest() {
         let mut a = CarState::new("A", Floor::new(7));
-        a.target = Some(Floor::new(8));
+        a.reported_destination = ReportedDestination::Known(Floor::new(8));
+        let cars = vec![a, CarState::new("B", Floor::new(1))];
+        let call = HallCall {
+            floor: Floor::new(7),
+            direction: Direction::Up,
+        };
+
+        let decision = dispatch(&call, &cars, &capabilities(&cars), &BTreeSet::new());
+
+        assert_eq!(
+            decision.intent,
+            Some(Intent::ServeFloor {
+                car: CarId::new("B"),
+                floor: Floor::new(7),
+            })
+        );
+        assert_eq!(
+            decision.candidates[0].rejections,
+            vec![DispatchRejection::Busy]
+        );
+    }
+
+    #[test]
+    fn unknown_reported_destination_is_not_idle_evidence() {
+        let mut a = CarState::new("A", Floor::new(7));
+        a.reported_destination = ReportedDestination::Unknown;
         let cars = vec![a, CarState::new("B", Floor::new(1))];
         let call = HallCall {
             floor: Floor::new(7),

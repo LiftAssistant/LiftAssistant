@@ -226,6 +226,8 @@ Additional production patterns such as diagnostic registries, integration qualit
 
 Open-RMF exposes reported lift state and lift requests as separate message types. `LiftState` reports `destination_floor`, current floor, motion, door state, modes, and the granted session; `LiftRequest` separately carries a requester/session, request type, requested `destination_floor`, and requested door state.
 
+The official `LiftState` message declares `destination_floor` as a string but does not define an empty-string sentinel. LiftAssistant therefore cannot treat an empty recorded value as proof of "no destination"; it remains unknown unless a source contract supplies stronger semantics.
+
 AWS IoT Device Shadow similarly separates `desired` and `reported` state and versions updates so stale writers can be forced to resynchronize. Eclipse Ditto explicitly distinguishes reported, desired, and current twin state.
 
 LiftAssistant should therefore not use one optional `target` field to simultaneously mean Engine desired target, controller-reported next stop, and "no target". External destination evidence belongs on the reported/observation side; Engine intent/call state belongs on the desired/orchestration side.

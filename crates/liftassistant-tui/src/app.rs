@@ -287,7 +287,7 @@ pub(crate) fn event_label(event: &RuntimeEvent) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{CallId, CallState, CarId, DoorState};
+    use liftassistant_model::{CallId, CallState, CarId, DoorState, ReportedDestination};
 
     #[test]
     fn floor_selection_and_call_validation_use_the_configured_topology() {
@@ -406,7 +406,7 @@ mod tests {
             app.runtime
                 .car_states()
                 .iter()
-                .all(|car| car.target.is_none())
+                .all(|car| car.reported_destination == ReportedDestination::None)
         );
         assert_eq!(app.trace.len(), TRACE_LIMIT);
     }

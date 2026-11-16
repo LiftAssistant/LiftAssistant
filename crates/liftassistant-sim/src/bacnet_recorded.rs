@@ -3,6 +3,7 @@ use std::{collections::BTreeMap, error::Error, fmt};
 use liftassistant_model::{
     BuildingTopology, CarId, CarObservation, DoorEvidence, DoorState, Floor, MotionEvidence,
     MotionState, ObservationProvenance, OperatingMode, OperatingModeEvidence, PositionEvidence,
+    ReportedDestination,
 };
 
 /// Decoded BACnet Lift object properties used by the recorded mapping experiment.
@@ -129,7 +130,7 @@ pub fn map_bacnet_lift_properties(
         object_out_of_service: source.out_of_service,
     };
 
-    let (position, motion, door, mode, target) = if source.out_of_service {
+    let (position, motion, door, mode, reported_destination) = if source.out_of_service {
         // BACnet defines this as the object being decoupled from the represented lift.
         // Its property values therefore cannot establish current operational state.
         (
@@ -137,7 +138,7 @@ pub fn map_bacnet_lift_properties(
             MotionEvidence::Unknown,
             DoorEvidence::Unknown,
             OperatingModeEvidence::Unknown,
-            None,
+            ReportedDestination::Unknown,
         )
     } else {
         (
@@ -145,10 +146,10 @@ pub fn map_bacnet_lift_properties(
             map_motion(source.car_moving_direction),
             aggregate_doors(&source.car_door_status),
             map_mode(source.car_mode),
-            source
-                .next_stopping_floor
-                .map(|floor| mapped_floor(floor, universal_floors))
-                .transpose()?,
+            match source.next_stopping_floor {
+                Some(floor) => ReportedDestination::Known(mapped_floor(floor, universal_floors)?),
+                None => ReportedDestination::Unknown,
+            },
         )
     };
 
@@ -160,7 +161,7 @@ pub fn map_bacnet_lift_properties(
             motion,
             door,
             mode,
-            target,
+            reported_destination,
         },
         topology,
         source_context,
@@ -302,7 +303,10 @@ mod tests {
             mapped.observation.mode,
             OperatingModeEvidence::Known(OperatingMode::FireService)
         );
-        assert_eq!(mapped.observation.target, Some(Floor::new(4)));
+        assert_eq!(
+            mapped.observation.reported_destination,
+            ReportedDestination::Known(Floor::new(4))
+        );
         assert_eq!(
             resolve_car_observation(&mapped.observation),
             CarStateResolution::Unresolved {
@@ -334,6 +338,7 @@ mod tests {
         };
         assert_eq!(state.position, Position::at_floor(Floor::new(4)));
         assert_eq!(state.mode, OperatingMode::Normal);
+        assert_eq!(state.reported_destination, ReportedDestination::Unknown);
         assert_eq!(mapped.source_context.universal_car_position, 4);
     }
 
@@ -354,6 +359,10 @@ mod tests {
 
         assert_eq!(mapped.observation.position, PositionEvidence::Unknown);
         assert_eq!(mapped.observation.door, DoorEvidence::Unknown);
+        assert_eq!(
+            mapped.observation.reported_destination,
+            ReportedDestination::Unknown
+        );
         assert!(mapped.source_context.object_out_of_service);
         assert_eq!(
             resolve_car_observation(&mapped.observation),

@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, error::Error, fmt};
 use liftassistant_model::{
     BuildingTopology, CarId, CarObservation, Direction, DoorEvidence, DoorState, Floor,
     MotionEvidence, MotionState, ObservationProvenance, OperatingMode, OperatingModeEvidence,
-    PositionEvidence,
+    PositionEvidence, ReportedDestination,
 };
 
 /// Recorded fields from Open-RMF `rmf_lift_msgs/LiftState` used by this experiment.
@@ -126,8 +126,10 @@ pub fn map_rmf_lift_state(
         ));
     }
     let current_floor = mapped_floor(&source.current_floor, floor_labels)?;
-    let target = if source.destination_floor.is_empty() {
-        None
+    let reported_destination = if source.destination_floor.is_empty() {
+        // The official message defines a string field but assigns no semantics to an empty
+        // value. Preserve that absence as unknown instead of claiming explicit no destination.
+        ReportedDestination::Unknown
     } else {
         if !source
             .available_floors
@@ -138,7 +140,7 @@ pub fn map_rmf_lift_state(
                 source.destination_floor.clone(),
             ));
         }
-        Some(mapped_floor(&source.destination_floor, floor_labels)?)
+        ReportedDestination::Known(mapped_floor(&source.destination_floor, floor_labels)?)
     };
     let door = match source.door_state {
         RmfLiftState::DOOR_CLOSED => DoorEvidence::Known(DoorState::Closed),
@@ -171,7 +173,7 @@ pub fn map_rmf_lift_state(
             motion,
             door,
             mode,
-            target,
+            reported_destination,
         },
         topology,
         source_context: RmfSourceContext {
@@ -281,7 +283,7 @@ mod tests {
         assert_eq!(state.motion, MotionState::Stopped);
         assert_eq!(state.door, DoorState::Open);
         assert_eq!(state.mode, OperatingMode::FireService);
-        assert_eq!(state.target, None);
+        assert_eq!(state.reported_destination, ReportedDestination::Unknown);
         assert_eq!(mapped.observation.provenance, provenance(2));
         assert_eq!(mapped.source_context.current_floor_label, "L4");
         assert_eq!(mapped.source_context.destination_floor_label, "");

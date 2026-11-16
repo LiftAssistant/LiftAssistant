@@ -1,6 +1,8 @@
 use std::{collections::BTreeMap, collections::VecDeque, time::Duration};
 
-use liftassistant_model::{Capabilities, CarId, CarState, Intent, MotionState, Position};
+use liftassistant_model::{
+    Capabilities, CarId, CarState, Intent, MotionState, Position, ReportedDestination,
+};
 use liftassistant_runtime::{ObservationSource, RuntimeError, RuntimeEvent, SimulationDriver};
 
 /// A timed batch of native LiftAssistant observations.
@@ -94,7 +96,7 @@ impl RecordedRuntime {
                     .expect("recorded event cars are validated at construction");
                 state.position = Position::at_floor(*floor);
                 state.motion = MotionState::Stopped;
-                state.target = None;
+                state.reported_destination = ReportedDestination::None;
             }
             RuntimeEvent::DoorStateChanged { car, state: door } => {
                 self.states
@@ -169,7 +171,7 @@ mod tests {
             motion: MotionState::Moving(Direction::Up),
             door: DoorState::Closed,
             mode: OperatingMode::Normal,
-            target: Some(Floor::new(4)),
+            reported_destination: ReportedDestination::Known(Floor::new(4)),
         }
     }
 
@@ -215,7 +217,7 @@ mod tests {
         assert_eq!(final_state.position, Position::at_floor(Floor::new(4)));
         assert_eq!(final_state.motion, MotionState::Stopped);
         assert_eq!(final_state.door, DoorState::Open);
-        assert_eq!(final_state.target, None);
+        assert_eq!(final_state.reported_destination, ReportedDestination::None);
         assert_eq!(runtime.remaining_frames(), 0);
     }
 
