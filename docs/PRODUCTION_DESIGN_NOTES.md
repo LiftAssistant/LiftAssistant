@@ -262,3 +262,33 @@ These notes intentionally do **not** decide:
 - any safety-certification claim.
 
 Promote a candidate from this file into architecture/memory only after implementation or explicit human review justifies it.
+
+
+## Long-range phase boundaries
+
+The long-range roadmap intentionally separates four kinds of evidence:
+
+1. **M4 — semantic/production boundary evidence**: can real incomplete observations be represented, resolved, replayed and hosted without the TUI?
+2. **M5 — operational read-only evidence**: can real sites obtain useful monitoring, diagnostics, anomaly evidence and field-debug workflows without control authority?
+3. **M6/M7 — controlled-intent evidence**: can high-level requests be reconciled safely through virtual/HIL/bench/non-passenger environments and then approved production gateways?
+4. **M8/M9 — sustained production evidence**: can deployment, recovery, update, compatibility, fallback and operational procedures withstand real field use?
+
+This phase separation is deliberate. A feature from a later phase should be pulled earlier only when a current working slice produces concrete pressure for it.
+
+A useful decision rule:
+
+~~~text
+Can this be proven with read-only evidence?
+  -> do that first.
+
+Does this require changing a public semantic contract?
+  -> gather evidence from more than one independent adapter first.
+
+Does this introduce write authority?
+  -> HUMAN-REVIEW before generalizing it.
+
+Does this affect the validated/certified safety execution domain?
+  -> outside normal SELF-ITERATION.
+~~~
+
+The roadmap may advance quickly when evidence is strong, but later milestones are not a backlog to implement mechanically.
