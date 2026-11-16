@@ -15,7 +15,9 @@ use liftassistant_runtime::{
     CarStateResolution, ObservationSource, RuntimeEvent, SimulationDriver, UnresolvedCarStateReason,
 };
 use liftassistant_sim::{
-    MappedRmfObservation, RecordedFrame, RecordedRuntime, RmfLiftState, map_rmf_lift_state,
+    BacnetDoorStatus, BacnetLiftCarDirection, BacnetLiftCarMode, MappedBacnetObservation,
+    MappedRmfObservation, RecordedBacnetLiftProperties, RecordedFrame, RecordedRuntime,
+    RmfLiftState, map_bacnet_lift_properties, map_rmf_lift_state,
 };
 
 use crate::{
@@ -27,12 +29,14 @@ pub const REFERENCE_SCENARIO: &str = "m2-call-lifecycle";
 pub const REJECTION_SCENARIO: &str = "intent-rejection-recovery";
 pub const RECORDED_SCENARIO: &str = "recorded-read-only-observation";
 pub const RMF_RECORDED_SCENARIO: &str = "rmf-recorded-read-only";
+pub const BACNET_RECORDED_SCENARIO: &str = "bacnet-recorded-read-only";
 pub const DIAGNOSTIC_SCENARIO: &str = "diagnostic-incident-replay";
-pub const SCENARIOS: [&str; 5] = [
+pub const SCENARIOS: [&str; 6] = [
     REFERENCE_SCENARIO,
     REJECTION_SCENARIO,
     RECORDED_SCENARIO,
     RMF_RECORDED_SCENARIO,
+    BACNET_RECORDED_SCENARIO,
     DIAGNOSTIC_SCENARIO,
 ];
 
@@ -42,6 +46,7 @@ pub fn run(name: &str) -> Result<String, String> {
         REJECTION_SCENARIO => run_rejection_scenario(),
         RECORDED_SCENARIO => run_recorded_scenario(),
         RMF_RECORDED_SCENARIO => run_rmf_recorded_scenario(),
+        BACNET_RECORDED_SCENARIO => run_bacnet_recorded_scenario(),
         DIAGNOSTIC_SCENARIO => run_diagnostic_scenario(),
         _ => Err(format!(
             "unknown scenario {name:?}; available scenarios: {}",
@@ -73,6 +78,19 @@ struct RmfRecordedExperiment {
     final_resolution: CarStateResolution,
     source_specific_mode: MappedRmfObservation,
     source_specific_mode_resolution: CarStateResolution,
+    final_states: Vec<CarState>,
+}
+
+#[derive(Debug, PartialEq)]
+struct BacnetRecordedExperiment {
+    partial: MappedBacnetObservation,
+    partial_resolution: CarStateResolution,
+    final_observation: MappedBacnetObservation,
+    final_resolution: CarStateResolution,
+    decoupled: MappedBacnetObservation,
+    decoupled_resolution: CarStateResolution,
+    mixed_doors: MappedBacnetObservation,
+    mixed_doors_resolution: CarStateResolution,
     final_states: Vec<CarState>,
 }
 
@@ -129,6 +147,16 @@ fn run_rmf_recorded_scenario() -> Result<String, String> {
     }
     verify_rmf_experiment(&first)?;
     Ok(render_rmf_report(&first))
+}
+
+fn run_bacnet_recorded_scenario() -> Result<String, String> {
+    let first = run_bacnet_experiment()?;
+    let second = run_bacnet_experiment()?;
+    if first != second {
+        return Err("BACnet recorded mapping produced different results on replay".into());
+    }
+    verify_bacnet_experiment(&first)?;
+    Ok(render_bacnet_report(&first))
 }
 
 fn run_diagnostic_scenario() -> Result<String, String> {
@@ -285,6 +313,81 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     })
 }
 
+fn run_bacnet_experiment() -> Result<BacnetRecordedExperiment, String> {
+    let floors = bacnet_floor_numbers();
+    let partial_source = bacnet_source_properties();
+    let partial = map_bacnet_lift_properties(
+        &partial_source,
+        CarId::new("bacnet-lift-1"),
+        &floors,
+        bacnet_provenance(1),
+    )
+    .map_err(|error| error.to_string())?;
+    let mut engine = Engine::new(partial.topology.clone());
+    let partial_resolution = engine.resolve_observation(&partial.observation);
+
+    let mut final_source = partial_source.clone();
+    final_source.car_position = 4;
+    final_source.car_moving_direction = BacnetLiftCarDirection::Stopped;
+    final_source.car_door_status = vec![BacnetDoorStatus::Opened];
+    final_source.car_mode = Some(BacnetLiftCarMode::Normal);
+    final_source.next_stopping_floor = None;
+    let final_observation = map_bacnet_lift_properties(
+        &final_source,
+        CarId::new("bacnet-lift-1"),
+        &floors,
+        bacnet_provenance(2),
+    )
+    .map_err(|error| error.to_string())?;
+    let final_resolution = engine.resolve_observation(&final_observation.observation);
+    let final_state = match &final_resolution {
+        CarStateResolution::Resolved(state) => state.clone(),
+        CarStateResolution::Unresolved { reasons, .. } => {
+            return Err(format!(
+                "sufficient BACnet observation stayed unresolved: {reasons:?}"
+            ));
+        }
+    };
+
+    let mut decoupled_source = final_source.clone();
+    decoupled_source.out_of_service = true;
+    decoupled_source.car_mode = Some(BacnetLiftCarMode::OutOfService);
+    let decoupled = map_bacnet_lift_properties(
+        &decoupled_source,
+        CarId::new("bacnet-lift-1"),
+        &floors,
+        bacnet_provenance(3),
+    )
+    .map_err(|error| error.to_string())?;
+    let decoupled_resolution = engine.resolve_observation(&decoupled.observation);
+
+    let mut mixed_doors_source = final_source;
+    mixed_doors_source.car_door_status = vec![BacnetDoorStatus::Opened, BacnetDoorStatus::Closed];
+    let mixed_doors = map_bacnet_lift_properties(
+        &mixed_doors_source,
+        CarId::new("bacnet-lift-1"),
+        &floors,
+        bacnet_provenance(4),
+    )
+    .map_err(|error| error.to_string())?;
+    let mixed_doors_resolution = engine.resolve_observation(&mixed_doors.observation);
+
+    let runtime = RecordedRuntime::new([final_state], []).map_err(|error| error.to_string())?;
+    let final_states = runtime.car_states();
+
+    Ok(BacnetRecordedExperiment {
+        partial,
+        partial_resolution,
+        final_observation,
+        final_resolution,
+        decoupled,
+        decoupled_resolution,
+        mixed_doors,
+        mixed_doors_resolution,
+        final_states,
+    })
+}
+
 fn run_diagnostic_experiment() -> Result<DiagnosticExperiment, String> {
     let labels = rmf_floor_labels();
     let source = rmf_source_state();
@@ -322,6 +425,32 @@ fn rmf_provenance(sequence: u64) -> ObservationProvenance {
     ObservationProvenance {
         source: ObservationSourceId::new("fixture/open-rmf"),
         sequence: ObservationSequence::new(sequence),
+    }
+}
+
+fn bacnet_provenance(sequence: u64) -> ObservationProvenance {
+    ObservationProvenance {
+        source: ObservationSourceId::new("fixture/bacnet-lift"),
+        sequence: ObservationSequence::new(sequence),
+    }
+}
+
+fn bacnet_floor_numbers() -> BTreeMap<u8, Floor> {
+    [(1, 1), (2, 2), (3, 3), (4, 4)]
+        .into_iter()
+        .map(|(universal, floor)| (universal, Floor::new(floor)))
+        .collect()
+}
+
+fn bacnet_source_properties() -> RecordedBacnetLiftProperties {
+    RecordedBacnetLiftProperties {
+        object_name: "Lift 1".into(),
+        car_position: 3,
+        car_moving_direction: BacnetLiftCarDirection::Up,
+        car_door_status: vec![BacnetDoorStatus::Closing],
+        car_mode: Some(BacnetLiftCarMode::FirefighterControl),
+        next_stopping_floor: Some(4),
+        out_of_service: false,
     }
 }
 
@@ -611,6 +740,81 @@ fn verify_rmf_experiment(experiment: &RmfRecordedExperiment) -> Result<(), Strin
     Ok(())
 }
 
+fn verify_bacnet_experiment(experiment: &BacnetRecordedExperiment) -> Result<(), String> {
+    if experiment.partial.observation.provenance != bacnet_provenance(1)
+        || experiment.partial.observation.position
+            != PositionEvidence::FloorReference(Floor::new(3))
+        || experiment.partial.observation.motion
+            != MotionEvidence::Known(MotionState::Moving(Direction::Up))
+        || experiment.partial.observation.door != DoorEvidence::Known(DoorState::Closing)
+        || experiment.partial.observation.mode
+            != OperatingModeEvidence::Known(OperatingMode::FireService)
+        || experiment.partial.observation.target != Some(Floor::new(4))
+        || experiment.partial.source_context.object_name != "Lift 1"
+        || experiment.partial.source_context.universal_car_position != 3
+    {
+        return Err("BACnet required properties did not preserve their exact evidence".into());
+    }
+    if experiment.partial_resolution
+        != (CarStateResolution::Unresolved {
+            car: CarId::new("bacnet-lift-1"),
+            reasons: vec![UnresolvedCarStateReason::ExactPositionUnavailable],
+        })
+    {
+        return Err("moving BACnet floor reference was forced into exact position".into());
+    }
+
+    let expected_final = CarState {
+        id: CarId::new("bacnet-lift-1"),
+        position: Position::at_floor(Floor::new(4)),
+        motion: MotionState::Stopped,
+        door: DoorState::Open,
+        mode: OperatingMode::Normal,
+        target: None,
+    };
+    if experiment.final_observation.observation.provenance != bacnet_provenance(2)
+        || experiment.final_resolution != CarStateResolution::Resolved(expected_final.clone())
+        || experiment.final_states != [expected_final]
+    {
+        return Err("sufficient BACnet evidence did not resolve at the no-write boundary".into());
+    }
+
+    if !experiment.decoupled.source_context.object_out_of_service
+        || experiment.decoupled.observation.position != PositionEvidence::Unknown
+        || experiment.decoupled.observation.motion != MotionEvidence::Unknown
+        || experiment.decoupled.observation.door != DoorEvidence::Unknown
+        || experiment.decoupled.observation.mode != OperatingModeEvidence::Unknown
+        || experiment.decoupled_resolution
+            != (CarStateResolution::Unresolved {
+                car: CarId::new("bacnet-lift-1"),
+                reasons: vec![
+                    UnresolvedCarStateReason::PositionUnknown,
+                    UnresolvedCarStateReason::MotionUnknown,
+                    UnresolvedCarStateReason::DoorUnknown,
+                    UnresolvedCarStateReason::OperatingModeUnknown,
+                ],
+            })
+    {
+        return Err("decoupled BACnet object values leaked into operational state".into());
+    }
+
+    if experiment.mixed_doors.source_context.door_statuses
+        != [BacnetDoorStatus::Opened, BacnetDoorStatus::Closed]
+        || experiment.mixed_doors.observation.door != DoorEvidence::Unknown
+        || experiment.mixed_doors_resolution
+            != (CarStateResolution::Unresolved {
+                car: CarId::new("bacnet-lift-1"),
+                reasons: vec![
+                    UnresolvedCarStateReason::ExactPositionUnavailable,
+                    UnresolvedCarStateReason::DoorUnknown,
+                ],
+            })
+    {
+        return Err("multiple BACnet car doors were collapsed into one false state".into());
+    }
+    Ok(())
+}
+
 fn verify_diagnostic_experiment(experiment: &DiagnosticExperiment) -> Result<(), String> {
     let anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
         source: ObservationSourceId::new("fixture/open-rmf"),
@@ -765,6 +969,58 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
     .join("\n")
 }
 
+fn render_bacnet_report(experiment: &BacnetRecordedExperiment) -> String {
+    let partial = &experiment.partial.observation;
+    let CarStateResolution::Resolved(final_state) = &experiment.final_resolution else {
+        unreachable!("verified experiment has a resolved final observation")
+    };
+    [
+        format!("scenario: {BACNET_RECORDED_SCENARIO}"),
+        "source: recorded decoded BACnet Lift object properties; no BACnet transport or network connection".into(),
+        "determinism: PASS (2 identical mappings and resolutions)".into(),
+        "write boundary: PASS (property projection and recorded runtime expose no IntentSink)".into(),
+        format!(
+            "partial observation: source={} sequence={} car={} position={:?} motion={:?} door={:?} mode={:?} target={}",
+            partial.provenance.source,
+            partial.provenance.sequence.value(),
+            partial.car,
+            partial.position,
+            partial.motion,
+            partial.door,
+            partial.mode,
+            partial
+                .target
+                .map_or_else(|| "-".into(), |floor| floor.to_string())
+        ),
+        format!("partial resolution: {:?}", experiment.partial_resolution),
+        format!(
+            "resolved final: sequence={} {} position={} motion={:?} door={:?} mode={:?} target=-",
+            experiment.final_observation.observation.provenance.sequence.value(),
+            final_state.id,
+            final_state.position.nearest_floor,
+            final_state.motion,
+            final_state.door,
+            final_state.mode
+        ),
+        format!(
+            "decoupled object: raw_out_of_service={} canonical_position={:?} canonical_mode={:?} resolution={:?}",
+            experiment.decoupled.source_context.object_out_of_service,
+            experiment.decoupled.observation.position,
+            experiment.decoupled.observation.mode,
+            experiment.decoupled_resolution
+        ),
+        format!(
+            "mixed car doors: raw={:?} canonical={:?} resolution={:?}",
+            experiment.mixed_doors.source_context.door_statuses,
+            experiment.mixed_doors.observation.door,
+            experiment.mixed_doors_resolution
+        ),
+        "outcome: PASS (BACnet partial/decoupled/multi-door evidence stayed honest; only sufficient evidence became CarState)".into(),
+        String::new(),
+    ]
+    .join("\n")
+}
+
 fn render_diagnostic_report(experiment: &DiagnosticExperiment) -> String {
     [
         format!("scenario: {DIAGNOSTIC_SCENARIO}"),
@@ -844,6 +1100,21 @@ mod tests {
         assert!(report.contains("reasons: [ExactPositionUnavailable, DoorDirectionUnknown]"));
         assert!(report.contains("resolved final: sequence=2 lift-A position=4F motion=Stopped"));
         assert!(report.contains("source-specific mode: raw=2 canonical=SourceSpecific"));
+        assert!(report.contains("only sufficient evidence became CarState"));
+    }
+
+    #[test]
+    fn bacnet_recorded_scenario_preserves_decoupled_and_multi_door_evidence() {
+        let report = run(BACNET_RECORDED_SCENARIO).expect("recorded BACnet scenario should pass");
+
+        assert!(report.contains("determinism: PASS (2 identical mappings and resolutions)"));
+        assert!(report.contains("source=fixture/bacnet-lift sequence=1 car=bacnet-lift-1"));
+        assert!(report.contains("position=FloorReference(Floor(3))"));
+        assert!(report.contains("door=Known(Closing) mode=Known(FireService)"));
+        assert!(report.contains("reasons: [ExactPositionUnavailable]"));
+        assert!(report.contains("resolved final: sequence=2 bacnet-lift-1 position=4F"));
+        assert!(report.contains("raw_out_of_service=true canonical_position=Unknown"));
+        assert!(report.contains("raw=[Opened, Closed] canonical=Unknown"));
         assert!(report.contains("only sufficient evidence became CarState"));
     }
 

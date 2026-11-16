@@ -38,8 +38,10 @@ impl Error for RuntimeError {}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnresolvedCarStateReason {
+    PositionUnknown,
     ExactPositionUnavailable,
     MotionUnknown,
+    DoorUnknown,
     DoorDirectionUnknown,
     OperatingModeUnknown,
     OperatingModeSourceSpecific,
@@ -70,6 +72,10 @@ pub fn resolve_car_observation(observation: &CarObservation) -> CarStateResoluti
             reasons.push(UnresolvedCarStateReason::ExactPositionUnavailable);
             None
         }
+        PositionEvidence::Unknown => {
+            reasons.push(UnresolvedCarStateReason::PositionUnknown);
+            None
+        }
     };
 
     let motion = match observation.motion {
@@ -84,6 +90,10 @@ pub fn resolve_car_observation(observation: &CarObservation) -> CarStateResoluti
         DoorEvidence::Known(door) => Some(door),
         DoorEvidence::MovingUnknownDirection => {
             reasons.push(UnresolvedCarStateReason::DoorDirectionUnknown);
+            None
+        }
+        DoorEvidence::Unknown => {
+            reasons.push(UnresolvedCarStateReason::DoorUnknown);
             None
         }
     };

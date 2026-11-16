@@ -2,7 +2,7 @@
 
 This file is a compact research index for semantic and interface design. It is not a specification and must not become a substitute for implementation.
 
-Verified/reviewed: 2026-11-14
+Verified/reviewed: 2026-11-16
 
 ## When prior-art research is required
 
@@ -162,6 +162,28 @@ LiftAssistant therefore requires an explicit string-label-to-`Floor` configurati
 
 Official message source: https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg
 
+## M4 recorded BACnet Lift-object mapping finding
+
+The official ASHRAE Addendum 135-2012aq defines a Lift object whose externally
+visible properties include required `Car_Position`, `Car_Moving_Direction`,
+`Car_Door_Status`, and `Out_Of_Service`, plus optional `Car_Mode` and
+`Next_Stopping_Floor`. `Car_Position` is a universal floor number rather than a
+continuous position. `Car_Door_Status` is an array because a car may have multiple
+doors. Most importantly, object `Out_Of_Service=true` means the BACnet object is
+decoupled from the represented lift and no longer tracks or controls it; this is not
+the same assertion as a lift car operating in LiftAssistant `OutOfService` mode.
+
+LiftAssistant therefore uses an explicit universal-floor-number configuration,
+keeps position as a floor reference, aggregates door status only when all mapped
+doors agree, and retains the exact per-door/status/mode/object values as source
+context. A decoupled object produces unknown position, motion, door, and mode
+evidence regardless of the values still present in its other properties. Only
+clearly equivalent car modes map into current internal operating modes; other
+standard BACnet modes remain source-specific. The implementation is an internal
+typed projection of decoded property values, not a BACnet object/packet model,
+transport, write client, or conformance profile.
+
+Official source: https://www.ashrae.org/File%20Library/Technical%20Resources/Standards%20and%20Guidelines/Standards%20Addenda/135_2012_aq_20160302.pdf
 
 ## Cross-domain production architecture references
 

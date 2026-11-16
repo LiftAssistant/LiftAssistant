@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod bacnet_recorded;
 mod recorded;
 mod rmf_recorded;
 
@@ -13,6 +14,11 @@ use liftassistant_runtime::{
     IntentSink, ObservationSource, RuntimeError, RuntimeEvent, SimulationDriver,
 };
 
+pub use bacnet_recorded::{
+    BacnetDoorStatus, BacnetLiftCarDirection, BacnetLiftCarMode, BacnetLiftSourceContext,
+    BacnetMappingError, MappedBacnetObservation, RecordedBacnetLiftProperties,
+    map_bacnet_lift_properties,
+};
 pub use recorded::{RecordedFrame, RecordedRuntime};
 pub use rmf_recorded::{
     MappedRmfObservation, RmfLiftState, RmfMappingError, RmfSourceContext, map_rmf_lift_state,

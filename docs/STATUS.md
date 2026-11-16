@@ -409,16 +409,24 @@ Validation: formatting, all-target linting, 52 workspace tests with the updated 
 
 ### M4.8 — Second independent observation-source validation
 
-**READY — official-evidence selection gate.**
+**Implemented with recorded BACnet Lift-object properties.**
 
-Promotion evidence: the canonical partial-observation/resolution path, structured diagnostics, and headless read-only lifecycle are now working, but the only external-source mapping remains Open-RMF. M4 exit evidence explicitly requires another independent source family before any public semantic maturity claim. The next bounded internal slice is therefore a focused official prior-art/fixture check followed by one recorded read-only mapping experiment only if the source fields are supported by that evidence.
+Official evidence: ASHRAE Addendum 135-2012aq defines the BACnet Lift object and the selected property semantics used by this experiment. It establishes required `Car_Position`, `Car_Moving_Direction`, `Car_Door_Status`, and `Out_Of_Service`; optional `Car_Mode` and `Next_Stopping_Floor`; universal-floor-number position; per-door arrays; and object decoupling when `Out_Of_Service=true`.
 
-Selection order:
+Implemented behavior:
 
-1. BACnet elevator/building observations if official object/property definitions provide sufficient concrete fields;
-2. otherwise recorded/virtual CiA 417 if authoritative material and a defensible fixture are available.
+- a focused internal typed projection represents only the decoded Lift properties used by the mapping experiment; it is not a BACnet object, packet, codec, transport, or public schema;
+- explicit configuration maps BACnet universal floor numbers to LiftAssistant floors and derives the experiment topology; unconfigured positions/targets and missing door entries are structured errors;
+- `Car_Position` remains `FloorReference` rather than fabricated continuous/exact position, and standard moving direction maps to known/unknown motion evidence;
+- per-door `Car_Door_Status` is retained in source context; identical safely mapped statuses may aggregate, while disagreeing doors, `UNKNOWN`, and `LIMITED_OPENED` produce unknown aggregate door evidence;
+- optional clearly equivalent modes map to existing internal modes, while absent/unknown and standard but non-equivalent modes remain unknown/source-specific instead of being guessed;
+- BACnet object `Out_Of_Service=true` makes position, motion, door, mode, and target operational evidence unknown because the standard says the object is decoupled from the represented lift; it is deliberately not mapped to LiftAssistant `OperatingMode::OutOfService`;
+- canonical `PositionEvidence::Unknown` and `DoorEvidence::Unknown` plus machine-readable resolver reasons were added to express these demonstrated gaps while keeping operational `CarState` complete;
+- the executable `bacnet-recorded-read-only` scenario runs twice and proves partial movement, sufficient stopped/open resolution, object decoupling, mixed multi-door handling, provenance, source context, and the existing no-write runtime boundary.
 
-Do not invent object identifiers, packet layouts, controller behavior, precision, quality, or mode semantics. If official material/fixtures are insufficient, record a precise external-input blocker instead of fabricating an adapter. No live transport, hardware write, public schema freeze, or conformance claim is authorized by this READY state.
+This second independent source exercises different ambiguity than Open-RMF without freezing public semantics. No live BACnet device, discovery, network, packet fixture, property read/write, conformance claim, hardware path, or passenger-elevator authority was added.
+
+Validation: formatting, all-target linting, 59 workspace tests, all six TUI scenarios, and the headless lifecycle scenario passed.
 
 ## Preserved production ideas
 

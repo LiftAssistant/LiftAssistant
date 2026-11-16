@@ -72,6 +72,14 @@ cargo run -p liftassistant-tui -- --scenario rmf-recorded-read-only
 
 The experiment maps recorded `LiftState` fields into canonical partial evidence with source identity and deterministic sequence. It preserves moving-with-floor-reference-only position, undirected door movement, and source-specific modes without guessing, then produces a complete `CarState` only for sufficient stopped/open evidence. It does not connect to ROS or send lift requests.
 
+Inspect the independent recorded BACnet Lift-object mapping boundary:
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario bacnet-recorded-read-only
+~~~
+
+This experiment maps a typed in-memory projection of decoded BACnet Lift properties into the same canonical observation/resolver path. Universal floor numbers remain configured floor references; multi-door status is not collapsed when doors disagree; and BACnet object `Out_Of_Service` decoupling makes operational evidence unknown rather than pretending the car is in LiftAssistant's `OutOfService` mode. It implements no BACnet packet codec, transport, discovery, property write, live connection, or conformance claim.
+
 Inspect bounded diagnostic capture and deterministic incident replay:
 
 ~~~bash

@@ -226,6 +226,7 @@ pub enum PositionEvidence {
     Exact(Position),
     /// The source named a floor but did not establish an exact at-floor position.
     FloorReference(Floor),
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -239,6 +240,8 @@ pub enum DoorEvidence {
     Known(DoorState),
     /// The source reports movement without saying whether the door opens or closes.
     MovingUnknownDirection,
+    /// The source did not establish one operational door state for the car.
+    Unknown,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

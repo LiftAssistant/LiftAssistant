@@ -77,6 +77,23 @@ and source modes are retained; AGV/Human control modes are not guessed as
 LiftAssistant operating modes. Two runs must match and the expected outcomes are
 checked. No ROS node, network subscription, lift request, or file format is involved.
 
+## Recorded BACnet Lift-object mapping
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario bacnet-recorded-read-only
+~~~
+
+This independent-source experiment uses an in-memory typed projection of decoded
+properties defined by the BACnet Lift object. An explicit universal-floor-number
+map supplies LiftAssistant floors. Moving position remains a floor reference;
+stopped/opened evidence resolves at-floor state; a BACnet object marked
+`Out_Of_Service` is treated as decoupled and therefore cannot establish current
+operational state; and disagreeing statuses from two car doors remain unresolved
+while their exact source values stay in adapter context. Two runs must match.
+
+The projection is not a BACnet object implementation, packet fixture, codec,
+transport, device connection, write client, or conformance/certification claim.
+
 ## Diagnostic incident replay
 
 ~~~bash
