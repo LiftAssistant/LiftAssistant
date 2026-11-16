@@ -272,7 +272,7 @@ Review result:
 - adding a partial/uncertain observation type would change the foundational model/runtime contract and must not be smuggled in as an adapter-local convenience;
 - another recorded mapper would largely duplicate the same limitation without resolving that contract decision.
 
-**HUMAN_PENDING (blocks dependent observation-model work):** review whether LiftAssistant should add a separate partial/uncertain observation model at the runtime boundary while keeping operational `CarState` complete. This review must also cover terminology and the relationship to the still-internal M2 semantics before any public schema is frozen.
+**RESOLVED BY HUMAN REVIEW (2026-11-16):** keep operational `CarState` complete and introduce a separate internal/reversible canonical partial-observation layer before operational-state resolution. Do not freeze this as a public schema yet. The approved implementation direction is specified in M4.3 below.
 
 Environment evidence for later virtual CAN work:
 - Linux has `ip`, but no vcan interface is present;
@@ -282,7 +282,7 @@ Environment evidence for later virtual CAN work:
 
 Remaining M4 work is therefore classified as:
 - **foundation complete:** native recorded/read-only runtime and conservative recorded Open-RMF mapping;
-- **HUMAN_PENDING:** canonical partial-observation/runtime-boundary decision;
+- **resolved:** canonical partial-observation/runtime-boundary direction approved for internal/reversible M4.3 work;
 - **external-input pending:** virtual CAN environment or recorded controller/protocol evidence;
 - **not started:** live read-only transport, CiA 417/T/GSET mapping, HIL/bench integration, and any writes.
 
