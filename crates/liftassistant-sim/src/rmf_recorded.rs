@@ -42,6 +42,7 @@ impl RmfLiftState {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RmfSourceContext {
+    pub lift_name: String,
     pub current_floor_label: String,
     pub destination_floor_label: String,
     pub source_mode: u8,
@@ -99,6 +100,7 @@ impl Error for RmfMappingError {}
 
 pub fn map_rmf_lift_state(
     source: &RmfLiftState,
+    car: CarId,
     floor_labels: &BTreeMap<String, Floor>,
     provenance: ObservationProvenance,
 ) -> Result<MappedRmfObservation, RmfMappingError> {
@@ -168,7 +170,7 @@ pub fn map_rmf_lift_state(
     Ok(MappedRmfObservation {
         observation: CarObservation {
             provenance,
-            car: CarId::new(&source.lift_name),
+            car,
             position: PositionEvidence::FloorReference(current_floor),
             motion,
             door,
@@ -177,6 +179,7 @@ pub fn map_rmf_lift_state(
         },
         topology,
         source_context: RmfSourceContext {
+            lift_name: source.lift_name.clone(),
             current_floor_label: source.current_floor.clone(),
             destination_floor_label: source.destination_floor.clone(),
             source_mode: source.current_mode,
@@ -218,6 +221,10 @@ mod tests {
         }
     }
 
+    fn logical_car() -> CarId {
+        CarId::new("logical-car-A")
+    }
+
     fn fire_service_state() -> RmfLiftState {
         RmfLiftState {
             lift_name: "lift-A".into(),
@@ -238,7 +245,7 @@ mod tests {
         source.door_state = RmfLiftState::DOOR_MOVING;
         source.motion_state = RmfLiftState::MOTION_UP;
 
-        let mapped = map_rmf_lift_state(&source, &floor_labels(), provenance(1))
+        let mapped = map_rmf_lift_state(&source, logical_car(), &floor_labels(), provenance(1))
             .expect("known partial evidence is a valid observation");
 
         assert_eq!(
@@ -256,7 +263,7 @@ mod tests {
         assert_eq!(
             resolve_car_observation(&mapped.observation),
             CarStateResolution::Unresolved {
-                car: CarId::new("lift-A"),
+                car: logical_car(),
                 reasons: vec![UnresolvedCarStateReason::DoorDirectionUnknown],
             }
         );
@@ -268,14 +275,14 @@ mod tests {
         source.current_floor = "L4".into();
         source.destination_floor.clear();
 
-        let mapped = map_rmf_lift_state(&source, &floor_labels(), provenance(2))
+        let mapped = map_rmf_lift_state(&source, logical_car(), &floor_labels(), provenance(2))
             .expect("known source fields map to canonical evidence");
         let CarStateResolution::Resolved(state) = resolve_car_observation(&mapped.observation)
         else {
             panic!("stopped/open floor reference should resolve");
         };
 
-        assert_eq!(state.id, CarId::new("lift-A"));
+        assert_eq!(state.id, logical_car());
         assert_eq!(state.location, CarLocation::Floor(Floor::new(4)));
         assert_eq!(state.motion, MotionState::Stopped);
         assert_eq!(state.door, DoorState::Open);
@@ -286,6 +293,7 @@ mod tests {
         assert_eq!(mapped.source_context.destination_floor_label, "");
         assert_eq!(mapped.source_context.source_mode, RmfLiftState::MODE_FIRE);
         assert_eq!(mapped.source_context.source_session_id, "recorded-session");
+        assert_eq!(mapped.source_context.lift_name, "lift-A");
         assert_eq!(
             mapped.topology.served_floors(),
             &[Floor::new(1), Floor::new(2), Floor::new(3), Floor::new(4)]
@@ -297,7 +305,7 @@ mod tests {
         let mut source = fire_service_state();
         source.current_mode = RmfLiftState::MODE_AGV;
 
-        let mapped = map_rmf_lift_state(&source, &floor_labels(), provenance(1))
+        let mapped = map_rmf_lift_state(&source, logical_car(), &floor_labels(), provenance(1))
             .expect("source-specific mode remains valid observation context");
 
         assert_eq!(
@@ -308,7 +316,7 @@ mod tests {
         assert_eq!(
             resolve_car_observation(&mapped.observation),
             CarStateResolution::Unresolved {
-                car: CarId::new("lift-A"),
+                car: logical_car(),
                 reasons: vec![UnresolvedCarStateReason::OperatingModeSourceSpecific],
             }
         );
@@ -319,20 +327,20 @@ mod tests {
         let mut source = fire_service_state();
         source.motion_state = RmfLiftState::MOTION_UNKNOWN;
         source.current_mode = RmfLiftState::MODE_UNKNOWN;
-        let mapped = map_rmf_lift_state(&source, &floor_labels(), provenance(1))
+        let mapped = map_rmf_lift_state(&source, logical_car(), &floor_labels(), provenance(1))
             .expect("declared unknown values remain valid evidence");
         assert_eq!(mapped.observation.motion, MotionEvidence::Unknown);
         assert_eq!(mapped.observation.mode, OperatingModeEvidence::Unknown);
 
         source.motion_state = 99;
         assert_eq!(
-            map_rmf_lift_state(&source, &floor_labels(), provenance(1)),
+            map_rmf_lift_state(&source, logical_car(), &floor_labels(), provenance(1)),
             Err(RmfMappingError::UnknownMotionState(99))
         );
         source.motion_state = RmfLiftState::MOTION_STOPPED;
         source.current_mode = 99;
         assert_eq!(
-            map_rmf_lift_state(&source, &floor_labels(), provenance(1)),
+            map_rmf_lift_state(&source, logical_car(), &floor_labels(), provenance(1)),
             Err(RmfMappingError::UnknownOperatingMode(99))
         );
     }
@@ -344,7 +352,7 @@ mod tests {
         source.destination_floor = "ROOF".into();
 
         assert_eq!(
-            map_rmf_lift_state(&source, &floor_labels(), provenance(1)),
+            map_rmf_lift_state(&source, logical_car(), &floor_labels(), provenance(1)),
             Err(RmfMappingError::UnknownFloorLabel("ROOF".into()))
         );
 
@@ -353,7 +361,7 @@ mod tests {
         let mut labels = floor_labels();
         labels.insert("ROOF".into(), Floor::new(8));
         assert_eq!(
-            map_rmf_lift_state(&source, &labels, provenance(1)),
+            map_rmf_lift_state(&source, logical_car(), &labels, provenance(1)),
             Err(RmfMappingError::FloorNotAdvertised("ROOF".into()))
         );
     }

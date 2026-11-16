@@ -1,10 +1,10 @@
 use std::{collections::VecDeque, time::Duration};
 
 use liftassistant_core::{DispatchRejection, HallCallRejection};
-use liftassistant_engine::Engine;
+use liftassistant_engine::{Engine, ObservationBindingRole};
 use liftassistant_model::{
-    BuildingTopology, CallState, CarId, Direction, Floor, HallCall, Intent, OperatingMode,
-    PositionEvidence,
+    BuildingTopology, CallState, CarId, Direction, Floor, HallCall, Intent, ObservationSourceId,
+    OperatingMode, PositionEvidence,
 };
 use liftassistant_runtime::{RuntimeEvent, SimulationDriver};
 use liftassistant_sim::SimRuntime;
@@ -36,7 +36,15 @@ impl App {
         let selected_floor = floors[floors.len().saturating_sub(2)];
         let mut runtime = SimRuntime::reference_two_car();
         let mut engine = Engine::new(topology);
+        let source = ObservationSourceId::new(runtime.source_name());
         for (car, capabilities) in runtime.all_capabilities() {
+            engine
+                .bind_observation(
+                    source.clone(),
+                    car.clone(),
+                    ObservationBindingRole::Operational,
+                )
+                .expect("simulator cars have unique operational observation bindings");
             engine.set_capabilities(car, capabilities);
         }
         for update in runtime.take_observation_updates() {

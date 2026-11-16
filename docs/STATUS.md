@@ -8,7 +8,9 @@ Updated: 2026-11-16
 
 M1 Interactive Simulator is closed and human-accepted.
 
-M4.9 Observation Semantics Hardening is implemented through M4.9d and awaits HUMAN-CHECK. The live read-only external-input blocker remains unchanged, so M5 is not READY.
+M4.9 Observation Semantics Hardening is implemented through M4.9d. Its HUMAN-CHECK was accepted by the explicit M4.10 authorization on 2026-11-16.
+
+M4.10 Source / Entity Binding & Observation Authority is in progress. M4.10a explicit logical-car/source binding is implemented; M4.10b explicit source sessions is READY. The live read-only external-input blocker remains unchanged, so M5 is not READY.
 
 ## Validated baseline
 
@@ -491,7 +493,7 @@ M4.9d replaces that split path with canonical update ingestion, Engine-owned ass
 
 ## M4.9 — Observation semantics hardening
 
-**IMPLEMENTED — M4.9a–M4.9d complete; awaiting HUMAN-CHECK. M5 is not READY.**
+**IMPLEMENTED — M4.9a–M4.9d complete; HUMAN-CHECK accepted by the explicit M4.10 authorization on 2026-11-16. M5 is not READY.**
 
 Work through these sub-slices in order. Keep all changes internal/reversible and run the prior-art gate before changing the model.
 
@@ -547,6 +549,32 @@ Validation: formatting, warning-free workspace clippy, all 66 workspace tests, a
 - diagnostics record canonical incremental updates, and deterministic replay plus the no-write read-only host remain intact.
 
 Validation: formatting, warning-free workspace clippy, all 71 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass. Open-RMF and BACnet both pass through the corrected Engine ingestion path. Focused regressions cover omitted-vs-explicit-unknown merge, stale-state invalidation, reported-vs-desired destination, floor-level-vs-continuous position, per-field provenance, source isolation, recorded-feed cross-source rejection, construction-time recorded-sequence rejection, lifecycle-event non-mutation, non-increasing sequence rejection, and event-order-visible dispatch. No new blocker was found; the live read-only external-input blocker remains unchanged.
+
+## M4.10 — Source / Entity Binding & Observation Authority
+
+**IN PROGRESS — M4.10a implemented; M4.10b READY. M5 is not READY.**
+
+Observation authority in this milestone selects the configured observation stream that may become Engine operational truth. It does not grant command/write authority, change `IntentSink`, or establish failover.
+
+### M4.10a — Explicit logical-car/source binding
+
+**IMPLEMENTED.**
+
+- Engine requires an explicit `(ObservationSourceId, CarId)` binding with `Operational` or `Auxiliary` role before accepting an observation;
+- one source may bind multiple logical cars and one car may bind multiple sources, while at most one source may have the Operational role for a logical `CarId`;
+- duplicate bindings and a second Operational source fail explicitly rather than selecting by registration or update order;
+- `CarId` remains LiftAssistant logical car identity and `ObservationSourceId` remains configured feed identity; equal text does not imply a relationship;
+- the Open-RMF mapper receives logical `CarId` explicitly and preserves native `lift_name` in source context. The executable fixture deliberately maps `rmf-lift-east` to logical car `lift-A`, proving name equality is not identity resolution;
+- Simulator, recorded runtime, Open-RMF, BACnet, diagnostics, and headless composition roots install their observation bindings explicitly;
+- this slice establishes the binding boundary only. Operational/Auxiliary state isolation, source-session lifecycle, and capability ownership remain the following M4.10 slices.
+
+Validation: three focused binding regressions, focused Open-RMF mapper tests, all 74 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass. M4.10a adds no public binding schema, configuration service, database, broker, transport, write authority, or failover policy.
+
+### M4.10b — Explicit source sessions
+
+**READY.**
+
+Next: add an explicit opaque source-session lifecycle, make sequence ordering source-global within a session, invalidate source evidence/state on an explicit session switch, and reject delayed updates from retired sessions. Do not infer a restart from a reset sequence and do not add freshness or heartbeat semantics.
 
 ## M4 exit / M5 promotion rule after audit
 

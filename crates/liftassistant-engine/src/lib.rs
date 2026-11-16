@@ -59,7 +59,36 @@ pub enum EngineEvent {
 pub enum ObservationIngestResult {
     Incomplete(Box<AssembledCarObservation>),
     Resolution(CarStateResolution),
-    Rejected(ObservationAssemblyError),
+    Rejected(ObservationIngestError),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservationBindingRole {
+    Operational,
+    Auxiliary,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObservationBindingError {
+    AlreadyBound {
+        source: ObservationSourceId,
+        car: CarId,
+        role: ObservationBindingRole,
+    },
+    OperationalAuthorityConflict {
+        car: CarId,
+        existing_source: ObservationSourceId,
+        requested_source: ObservationSourceId,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObservationIngestError {
+    UnboundObservation {
+        source: ObservationSourceId,
+        car: CarId,
+    },
+    Assembly(ObservationAssemblyError),
 }
 
 /// Deterministic semantic orchestration shared by interactive and headless callers.
@@ -71,6 +100,8 @@ pub struct Engine {
     last_call: Option<HallCall>,
     decision: Option<Intent>,
     calls: CallRegistry,
+    observation_bindings: BTreeMap<(ObservationSourceId, CarId), ObservationBindingRole>,
+    operational_authorities: BTreeMap<CarId, ObservationSourceId>,
     observations: ObservationAssembler,
     states: BTreeMap<(ObservationSourceId, CarId), CarState>,
     capabilities: BTreeMap<CarId, Capabilities>,
@@ -88,6 +119,8 @@ impl Engine {
             last_call: None,
             decision: None,
             calls: CallRegistry::new(),
+            observation_bindings: BTreeMap::new(),
+            operational_authorities: BTreeMap::new(),
             observations: ObservationAssembler::new(),
             states: BTreeMap::new(),
             capabilities: BTreeMap::new(),
@@ -119,6 +152,51 @@ impl Engine {
         self.capabilities.insert(car, capabilities);
     }
 
+    pub fn bind_observation(
+        &mut self,
+        source: ObservationSourceId,
+        car: CarId,
+        role: ObservationBindingRole,
+    ) -> Result<(), ObservationBindingError> {
+        let key = (source.clone(), car.clone());
+        if let Some(existing) = self.observation_bindings.get(&key) {
+            return Err(ObservationBindingError::AlreadyBound {
+                source,
+                car,
+                role: *existing,
+            });
+        }
+        if role == ObservationBindingRole::Operational
+            && let Some(existing_source) = self.operational_authorities.get(&car)
+        {
+            return Err(ObservationBindingError::OperationalAuthorityConflict {
+                car,
+                existing_source: existing_source.clone(),
+                requested_source: source,
+            });
+        }
+
+        self.observation_bindings.insert(key, role);
+        if role == ObservationBindingRole::Operational {
+            self.operational_authorities.insert(car, source);
+        }
+        Ok(())
+    }
+
+    pub fn observation_binding_role(
+        &self,
+        source: &ObservationSourceId,
+        car: &CarId,
+    ) -> Option<ObservationBindingRole> {
+        self.observation_bindings
+            .get(&(source.clone(), car.clone()))
+            .copied()
+    }
+
+    pub fn operational_observation_source(&self, car: &CarId) -> Option<&ObservationSourceId> {
+        self.operational_authorities.get(car)
+    }
+
     pub fn car_states(&self) -> Vec<CarState> {
         self.states.values().cloned().collect()
     }
@@ -140,10 +218,18 @@ impl Engine {
         update: CarObservationUpdate,
     ) -> ObservationIngestResult {
         let key = (update.provenance.source.clone(), update.car.clone());
+        if !self.observation_bindings.contains_key(&key) {
+            return ObservationIngestResult::Rejected(ObservationIngestError::UnboundObservation {
+                source: update.provenance.source,
+                car: update.car,
+            });
+        }
         self.diagnostics.record_observation(update.clone());
         let assembled = match self.observations.apply(update) {
             Ok(assembled) => assembled,
-            Err(error) => return ObservationIngestResult::Rejected(error),
+            Err(error) => {
+                return ObservationIngestResult::Rejected(ObservationIngestError::Assembly(error));
+            }
         };
         let Some(snapshot) = assembled.snapshot() else {
             self.states.remove(&key);
@@ -335,6 +421,19 @@ mod tests {
     }
 
     fn seed_state(engine: &mut Engine, state: &CarState, sequence: u64) {
+        let source = ObservationSourceId::new("engine-test");
+        if engine
+            .observation_binding_role(&source, &state.id)
+            .is_none()
+        {
+            engine
+                .bind_observation(
+                    source,
+                    state.id.clone(),
+                    ObservationBindingRole::Operational,
+                )
+                .expect("test observation binding is unique");
+        }
         engine.set_capabilities(state.id.clone(), Capabilities::reference_defaults());
         assert_eq!(
             engine.ingest_observation_update(CarObservationUpdate::from_state(
@@ -412,6 +511,13 @@ mod tests {
     fn unsolicited_intent_acceptance_creates_bounded_replayable_incident() {
         let mut engine =
             Engine::with_diagnostic_capacity(BuildingTopology::reference_eight_floor(), 3);
+        engine
+            .bind_observation(
+                ObservationSourceId::new("engine-test"),
+                CarId::new("A"),
+                ObservationBindingRole::Auxiliary,
+            )
+            .expect("diagnostic observation binding is unique");
         let mut backend = TestBackend {
             intents: Vec::new(),
         };
@@ -506,6 +612,117 @@ mod tests {
         assert!(
             engine
                 .car_state(&ObservationSourceId::new("engine-test"), &CarId::new("A"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn explicit_bindings_allow_multi_car_sources_and_multi_source_cars() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let controller = ObservationSourceId::new("controller-main");
+        let bacnet = ObservationSourceId::new("bacnet-main");
+
+        assert_eq!(
+            engine.bind_observation(
+                controller.clone(),
+                CarId::new("A"),
+                ObservationBindingRole::Operational,
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            engine.bind_observation(
+                controller.clone(),
+                CarId::new("B"),
+                ObservationBindingRole::Operational,
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            engine.bind_observation(
+                bacnet.clone(),
+                CarId::new("A"),
+                ObservationBindingRole::Auxiliary,
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            engine.observation_binding_role(&controller, &CarId::new("B")),
+            Some(ObservationBindingRole::Operational)
+        );
+        assert_eq!(
+            engine.observation_binding_role(&bacnet, &CarId::new("A")),
+            Some(ObservationBindingRole::Auxiliary)
+        );
+        assert_eq!(
+            engine.operational_observation_source(&CarId::new("A")),
+            Some(&controller)
+        );
+    }
+
+    #[test]
+    fn duplicate_and_second_operational_bindings_are_rejected_explicitly() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let controller = ObservationSourceId::new("controller-main");
+        let rmf = ObservationSourceId::new("open-rmf-main");
+        let car = CarId::new("A");
+        engine
+            .bind_observation(
+                controller.clone(),
+                car.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .expect("first operational binding is valid");
+
+        assert_eq!(
+            engine.bind_observation(
+                controller.clone(),
+                car.clone(),
+                ObservationBindingRole::Auxiliary,
+            ),
+            Err(ObservationBindingError::AlreadyBound {
+                source: controller.clone(),
+                car: car.clone(),
+                role: ObservationBindingRole::Operational,
+            })
+        );
+        assert_eq!(
+            engine.bind_observation(
+                rmf.clone(),
+                car.clone(),
+                ObservationBindingRole::Operational
+            ),
+            Err(ObservationBindingError::OperationalAuthorityConflict {
+                car,
+                existing_source: controller,
+                requested_source: rmf,
+            })
+        );
+    }
+
+    #[test]
+    fn unbound_observation_is_rejected_without_name_based_inference() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let state = CarState::new("A", Floor::new(3));
+        let update = CarObservationUpdate::from_state(
+            ObservationProvenance {
+                source: ObservationSourceId::new("A"),
+                sequence: ObservationSequence::new(1),
+            },
+            &state,
+        );
+
+        assert_eq!(
+            engine.ingest_observation_update(update),
+            ObservationIngestResult::Rejected(ObservationIngestError::UnboundObservation {
+                source: ObservationSourceId::new("A"),
+                car: CarId::new("A"),
+            })
+        );
+        assert!(engine.car_states().is_empty());
+        assert!(
+            engine
+                .evidence(&ObservationSourceId::new("A"), &CarId::new("A"))
                 .is_none()
         );
     }

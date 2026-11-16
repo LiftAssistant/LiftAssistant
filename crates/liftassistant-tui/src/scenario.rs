@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_engine::{
     DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, Engine, IncidentSnapshot,
-    ObservationIngestResult,
+    ObservationBindingRole, ObservationIngestResult,
 };
 use liftassistant_model::{
     BuildingTopology, CallId, CallState, Capabilities, CarId, CarLocation, CarObservation,
@@ -206,6 +206,13 @@ fn play_recording() -> Result<RecordedPlayback, String> {
     let capabilities = runtime
         .capabilities(&CarId::new("A"))
         .ok_or_else(|| "recorded car A has no capabilities".to_owned())?;
+    engine
+        .bind_observation(
+            ObservationSourceId::new(&source_name),
+            CarId::new("A"),
+            ObservationBindingRole::Operational,
+        )
+        .map_err(|error| format!("recorded observation binding failed: {error:?}"))?;
     engine.set_capabilities(CarId::new("A"), capabilities.clone());
     for update in runtime.take_observation_updates() {
         engine.ingest_observation_update(update);
@@ -288,10 +295,19 @@ fn recorded_runtime() -> Result<RecordedRuntime, String> {
 
 fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     let labels = rmf_floor_labels();
+    let car = CarId::new("lift-A");
     let incomplete_source = rmf_source_state();
-    let incomplete = map_rmf_lift_state(&incomplete_source, &labels, rmf_provenance(1))
-        .map_err(|error| error.to_string())?;
+    let incomplete =
+        map_rmf_lift_state(&incomplete_source, car.clone(), &labels, rmf_provenance(1))
+            .map_err(|error| error.to_string())?;
     let mut engine = Engine::new(incomplete.topology.clone());
+    engine
+        .bind_observation(
+            rmf_provenance(1).source,
+            car.clone(),
+            ObservationBindingRole::Operational,
+        )
+        .map_err(|error| format!("Open-RMF observation binding failed: {error:?}"))?;
     let incomplete_resolution = ingest_resolution(&mut engine, &incomplete.observation)?;
 
     let mut final_source = incomplete_source.clone();
@@ -299,8 +315,9 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     final_source.destination_floor.clear();
     final_source.door_state = RmfLiftState::DOOR_OPEN;
     final_source.motion_state = RmfLiftState::MOTION_STOPPED;
-    let final_observation = map_rmf_lift_state(&final_source, &labels, rmf_provenance(2))
-        .map_err(|error| error.to_string())?;
+    let final_observation =
+        map_rmf_lift_state(&final_source, car.clone(), &labels, rmf_provenance(2))
+            .map_err(|error| error.to_string())?;
     let final_resolution = ingest_resolution(&mut engine, &final_observation.observation)?;
     match &final_resolution {
         CarStateResolution::Resolved(_) => {}
@@ -314,9 +331,13 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     let final_states = engine.car_states();
     let mut source_specific_mode_source = final_source;
     source_specific_mode_source.current_mode = RmfLiftState::MODE_AGV;
-    let source_specific_mode =
-        map_rmf_lift_state(&source_specific_mode_source, &labels, rmf_provenance(3))
-            .map_err(|error| error.to_string())?;
+    let source_specific_mode = map_rmf_lift_state(
+        &source_specific_mode_source,
+        car,
+        &labels,
+        rmf_provenance(3),
+    )
+    .map_err(|error| error.to_string())?;
     let source_specific_mode_resolution =
         ingest_resolution(&mut engine, &source_specific_mode.observation)?;
 
@@ -342,6 +363,13 @@ fn run_bacnet_experiment() -> Result<BacnetRecordedExperiment, String> {
     )
     .map_err(|error| error.to_string())?;
     let mut engine = Engine::new(partial.topology.clone());
+    engine
+        .bind_observation(
+            bacnet_provenance(1).source,
+            CarId::new("bacnet-lift-1"),
+            ObservationBindingRole::Operational,
+        )
+        .map_err(|error| format!("BACnet observation binding failed: {error:?}"))?;
     let partial_resolution = ingest_resolution(&mut engine, &partial.observation)?;
 
     let mut final_source = partial_source.clone();
@@ -406,17 +434,25 @@ fn run_bacnet_experiment() -> Result<BacnetRecordedExperiment, String> {
 
 fn run_diagnostic_experiment() -> Result<DiagnosticExperiment, String> {
     let labels = rmf_floor_labels();
+    let car = CarId::new("lift-A");
     let source = rmf_source_state();
-    let first = map_rmf_lift_state(&source, &labels, rmf_provenance(1))
+    let first = map_rmf_lift_state(&source, car.clone(), &labels, rmf_provenance(1))
         .map_err(|error| error.to_string())?;
-    let duplicate = map_rmf_lift_state(&source, &labels, rmf_provenance(1))
+    let duplicate = map_rmf_lift_state(&source, car.clone(), &labels, rmf_provenance(1))
         .map_err(|error| error.to_string())?;
-    let next = map_rmf_lift_state(&source, &labels, rmf_provenance(2))
+    let next = map_rmf_lift_state(&source, car.clone(), &labels, rmf_provenance(2))
         .map_err(|error| error.to_string())?;
-    let after = map_rmf_lift_state(&source, &labels, rmf_provenance(3))
+    let after = map_rmf_lift_state(&source, car.clone(), &labels, rmf_provenance(3))
         .map_err(|error| error.to_string())?;
 
     let mut engine = Engine::with_diagnostic_capacity(first.topology.clone(), 4);
+    engine
+        .bind_observation(
+            rmf_provenance(1).source,
+            car,
+            ObservationBindingRole::Auxiliary,
+        )
+        .map_err(|error| format!("diagnostic observation binding failed: {error:?}"))?;
     engine.ingest_observation_update((&first.observation).into());
     engine.ingest_observation_update((&duplicate.observation).into());
     engine.ingest_observation_update((&next.observation).into());
@@ -501,7 +537,7 @@ fn rmf_floor_labels() -> BTreeMap<String, Floor> {
 
 fn rmf_source_state() -> RmfLiftState {
     RmfLiftState {
-        lift_name: "lift-A".into(),
+        lift_name: "rmf-lift-east".into(),
         available_floors: vec!["L1".into(), "L2".into(), "L3".into(), "L4".into()],
         current_floor: "L3".into(),
         destination_floor: "L4".into(),
@@ -728,6 +764,7 @@ fn verify_rmf_experiment(experiment: &RmfRecordedExperiment) -> Result<(), Strin
             != OperatingModeEvidence::Known(OperatingMode::FireService)
         || experiment.incomplete.observation.reported_destination
             != ReportedDestination::Known(Floor::new(4))
+        || experiment.incomplete.source_context.lift_name != "rmf-lift-east"
         || experiment.incomplete.source_context.current_floor_label != "L3"
         || experiment.incomplete.source_context.source_session_id != "recorded-session"
         || experiment.incomplete.topology.served_floors()

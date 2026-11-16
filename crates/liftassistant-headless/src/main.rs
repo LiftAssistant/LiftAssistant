@@ -2,7 +2,9 @@
 
 use std::{collections::VecDeque, env, process::ExitCode};
 
-use liftassistant_engine::{DiagnosticAnomaly, DiagnosticEvent, Engine, ObservationIngestResult};
+use liftassistant_engine::{
+    DiagnosticAnomaly, DiagnosticEvent, Engine, ObservationBindingRole, ObservationIngestResult,
+};
 use liftassistant_model::{
     BuildingTopology, CarId, CarLocation, CarObservation, CarObservationUpdate, DoorEvidence,
     DoorState, Floor, MotionEvidence, MotionState, ObservationProvenance, ObservationSequence,
@@ -232,10 +234,7 @@ fn run_scenario(name: &str) -> Result<String, String> {
 
 fn execute_proof() -> ProofRun {
     let mut source = reference_source();
-    let mut host = ReadOnlyHost::new(
-        BuildingTopology::new([1, 2, 3, 4].map(Floor::new))
-            .expect("reference topology is non-empty"),
-    );
+    let mut host = reference_host();
     let mut snapshots = vec![snapshot(&host)];
     while host.poll(&mut source) {
         snapshots.push(snapshot(&host));
@@ -248,6 +247,29 @@ fn execute_proof() -> ProofRun {
         diagnostic_entries: host.engine.diagnostics().entries().count(),
         incidents: host.engine.diagnostics().incidents().count(),
     }
+}
+
+fn reference_host() -> ReadOnlyHost {
+    let mut host = ReadOnlyHost::new(
+        BuildingTopology::new([1, 2, 3, 4].map(Floor::new))
+            .expect("reference topology is non-empty"),
+    );
+    host.engine
+        .bind_observation(
+            reference_source_id(),
+            reference_car_id(),
+            ObservationBindingRole::Operational,
+        )
+        .expect("headless fixture has one operational observation binding");
+    host
+}
+
+fn reference_source_id() -> ObservationSourceId {
+    ObservationSourceId::new("fixture/headless-recorded")
+}
+
+fn reference_car_id() -> CarId {
+    CarId::new("lift-A")
 }
 
 fn snapshot(host: &ReadOnlyHost) -> LifecycleSnapshot {
@@ -271,10 +293,10 @@ fn reference_source() -> RecordedObservationFeed {
 fn observation(sequence: u64) -> CarObservation {
     CarObservation {
         provenance: ObservationProvenance {
-            source: ObservationSourceId::new("fixture/headless-recorded"),
+            source: reference_source_id(),
             sequence: ObservationSequence::new(sequence),
         },
-        car: CarId::new("lift-A"),
+        car: reference_car_id(),
         position: PositionEvidence::FloorReference(Floor::new(3)),
         motion: MotionEvidence::Known(MotionState::Moving(liftassistant_model::Direction::Up)),
         door: DoorEvidence::MovingUnknownDirection,
@@ -410,7 +432,7 @@ mod tests {
     #[test]
     fn proof_diagnostics_preserve_machine_readable_anomaly() {
         let mut source = reference_source();
-        let mut host = ReadOnlyHost::new(BuildingTopology::reference_eight_floor());
+        let mut host = reference_host();
         while host.poll(&mut source) {}
 
         assert!(host.engine.diagnostics().entries().any(|entry| matches!(
@@ -429,7 +451,7 @@ mod tests {
         let mut frames = vec![observation(1), complete.clone()];
         frames.extend(std::iter::repeat_n(complete, 10));
         let mut source = RecordedObservationFeed::new(frames);
-        let mut host = ReadOnlyHost::new(BuildingTopology::reference_eight_floor());
+        let mut host = reference_host();
 
         while host.poll(&mut source) {}
 
