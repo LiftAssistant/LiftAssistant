@@ -78,7 +78,7 @@ pub fn run_with_topology(commands: &[Command], topology: BuildingTopology) -> Re
 mod tests {
     use super::*;
     use liftassistant_model::{Direction, DoorState, Floor};
-    use liftassistant_runtime::ElevatorRuntime;
+    use liftassistant_runtime::ObservationSource;
 
     #[test]
     fn identical_inputs_replay_the_complete_semantic_flow() {
@@ -310,7 +310,7 @@ mod tests {
 mod availability_tests {
     use super::*;
     use liftassistant_model::{Direction, DoorState, Floor, OperatingMode};
-    use liftassistant_runtime::ElevatorRuntime;
+    use liftassistant_runtime::ObservationSource;
 
     #[test]
     fn unavailable_preferred_car_falls_back_end_to_end_and_replays() {

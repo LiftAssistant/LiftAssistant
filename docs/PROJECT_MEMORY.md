@@ -87,7 +87,7 @@ These call semantics remain an internal, reversible model informed by CiA 417, B
 
 ## Validated M4 read-only boundary
 
-The first non-simulator backend is a deterministic, native-semantic recorded runtime. It advertises observation capabilities only, rejects every submitted intent, and advances timed observation frames solely through explicit elapsed input. It defines no file format or live transport.
+The first non-simulator backend is a deterministic, native-semantic recorded source. Runtime responsibilities are separate internal contracts: `ObservationSource` for resolved read-side state, `IntentSink` for high-level LiftAssistant intents, and `SimulationDriver` for explicit-time simulator/replay progression. The active simulator implements all three. The recorded source implements observation and replay driving only, so it has no write interface to reject or accidentally expose. It defines no file format or live transport.
 
 The first external mapping experiment uses recorded Open-RMF `LiftState` fields. External partial state enters a separate internal `CarObservation` with explicit source identity, deterministic sequence, and semantic evidence. Moving-with-floor-reference-only position, undirected door movement, declared unknowns, and source-specific modes remain honest evidence instead of mapping failures or guessed operational fields. Source floor labels, modes, and session identity remain adapter context.
 

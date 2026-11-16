@@ -4,13 +4,13 @@ use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_model::{
     BuildingTopology, CallId, CallState, Capabilities, CarId, CarState, Direction, DoorEvidence,
-    DoorState, Floor, HallCall, Intent, MotionEvidence, MotionState, ObservationProvenance,
+    DoorState, Floor, HallCall, MotionEvidence, MotionState, ObservationProvenance,
     ObservationSequence, ObservationSourceId, OperatingMode, OperatingModeEvidence, Position,
     PositionEvidence,
 };
 use liftassistant_runtime::{
-    CarStateResolution, ElevatorRuntime, RuntimeEvent, UnresolvedCarStateReason,
-    resolve_car_observation,
+    CarStateResolution, ObservationSource, RuntimeEvent, SimulationDriver,
+    UnresolvedCarStateReason, resolve_car_observation,
 };
 use liftassistant_sim::{
     MappedRmfObservation, RecordedFrame, RecordedRuntime, RmfLiftState, map_rmf_lift_state,
@@ -54,8 +54,7 @@ struct RecordedBatch {
 
 #[derive(Debug, PartialEq)]
 struct RecordedPlayback {
-    runtime_name: String,
-    write_error: String,
+    source_name: String,
     capabilities: Capabilities,
     batches: Vec<RecordedBatch>,
     remaining_frames: usize,
@@ -69,7 +68,6 @@ struct RmfRecordedExperiment {
     final_resolution: CarStateResolution,
     source_specific_mode: MappedRmfObservation,
     source_specific_mode_resolution: CarStateResolution,
-    write_error: String,
     final_states: Vec<CarState>,
 }
 
@@ -152,21 +150,10 @@ fn rejection_commands() -> Vec<Command> {
 
 fn play_recording() -> Result<RecordedPlayback, String> {
     let mut runtime = recorded_runtime()?;
-    let runtime_name = runtime.runtime_name().to_owned();
+    let source_name = runtime.source_name().to_owned();
     let capabilities = runtime
         .capabilities(&CarId::new("A"))
         .ok_or_else(|| "recorded car A has no capabilities".to_owned())?;
-    let initial = runtime.car_states();
-    let write_error = match runtime.submit_intent(Intent::ServeFloor {
-        car: CarId::new("A"),
-        floor: Floor::new(7),
-    }) {
-        Ok(()) => return Err("recorded runtime unexpectedly accepted an intent".into()),
-        Err(error) => error.to_string(),
-    };
-    if runtime.car_states() != initial {
-        return Err("recorded runtime changed state after rejecting an intent".into());
-    }
 
     let mut elapsed_total = Duration::ZERO;
     let mut batches = Vec::new();
@@ -179,13 +166,12 @@ fn play_recording() -> Result<RecordedPlayback, String> {
         elapsed_total += elapsed;
         batches.push(RecordedBatch {
             elapsed_total,
-            events: runtime.tick(elapsed),
+            events: runtime.advance(elapsed),
             states: runtime.car_states(),
         });
     }
     Ok(RecordedPlayback {
-        runtime_name,
-        write_error,
+        source_name,
         capabilities,
         batches,
         remaining_frames: runtime.remaining_frames(),
@@ -261,15 +247,8 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
     let source_specific_mode_resolution =
         resolve_car_observation(&source_specific_mode.observation);
 
-    let mut runtime =
+    let runtime =
         RecordedRuntime::new([final_state.clone()], []).map_err(|error| error.to_string())?;
-    let write_error = match runtime.submit_intent(Intent::ServeFloor {
-        car: final_state.id.clone(),
-        floor: Floor::new(1),
-    }) {
-        Ok(()) => return Err("recorded Open-RMF experiment accepted an intent".into()),
-        Err(error) => error.to_string(),
-    };
     let final_states = runtime.car_states();
 
     Ok(RmfRecordedExperiment {
@@ -279,7 +258,6 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
         final_resolution,
         source_specific_mode,
         source_specific_mode_resolution,
-        write_error,
         final_states,
     })
 }
@@ -465,8 +443,7 @@ fn verify_rejection_outcome(replay: &Replay) -> Result<(), String> {
 }
 
 fn verify_recorded_outcome(playback: &RecordedPlayback) -> Result<(), String> {
-    if playback.runtime_name != "recorded-read-only"
-        || playback.write_error != "recorded runtime is read-only and rejects all intents"
+    if playback.source_name != "recorded-read-only"
         || !playback.capabilities.observe_position
         || !playback.capabilities.observe_door
         || playback.capabilities.serve_floor
@@ -558,9 +535,7 @@ fn verify_rmf_experiment(experiment: &RmfRecordedExperiment) -> Result<(), Strin
     {
         return Err("Open-RMF source mode leaked into operational mode semantics".into());
     }
-    if experiment.write_error != "recorded runtime is read-only and rejects all intents"
-        || experiment.final_states != [expected_final]
-    {
+    if experiment.final_states != [expected_final] {
         return Err(
             "resolved Open-RMF state did not preserve the no-write runtime boundary".into(),
         );
@@ -616,7 +591,7 @@ fn render_recorded_report(playback: &RecordedPlayback) -> String {
         format!("scenario: {RECORDED_SCENARIO}"),
         "scope: native semantic recording; read-only; no protocol or hardware I/O".into(),
         "determinism: PASS (2 identical executions)".into(),
-        format!("write boundary: PASS ({})", playback.write_error),
+        "write boundary: PASS (recorded source has no IntentSink implementation)".into(),
         "outcome: PASS (2 frames observed at explicit elapsed times)".into(),
         String::new(),
         "timeline:".into(),
@@ -659,7 +634,7 @@ fn render_rmf_report(experiment: &RmfRecordedExperiment) -> String {
         format!("scenario: {RMF_RECORDED_SCENARIO}"),
         "source: recorded Open-RMF LiftState fields; no ROS or network connection".into(),
         "determinism: PASS (2 identical mappings and resolutions)".into(),
-        format!("write boundary: PASS ({})", experiment.write_error),
+        "write boundary: PASS (recorded source has no IntentSink implementation)".into(),
         format!(
             "incomplete observation: source={} sequence={} car={} position={:?} motion={:?} door={:?} mode={:?} target={} session={}",
             incomplete.provenance.source,
@@ -739,9 +714,11 @@ mod tests {
         let report = run(RECORDED_SCENARIO).expect("recorded scenario should pass");
 
         assert!(report.contains("determinism: PASS (2 identical executions)"));
-        assert!(report.contains(
-            "write boundary: PASS (recorded runtime is read-only and rejects all intents)"
-        ));
+        assert!(
+            report.contains(
+                "write boundary: PASS (recorded source has no IntentSink implementation)"
+            )
+        );
         assert!(report.contains("[0250 ms] no events"));
         assert!(report.contains("[0500 ms] PositionChanged A 3.50F"));
         assert!(report.contains("[0999 ms] no events"));

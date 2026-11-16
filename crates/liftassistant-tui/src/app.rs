@@ -7,7 +7,7 @@ use liftassistant_core::{
 use liftassistant_model::{
     BuildingTopology, CallState, CarId, Direction, Floor, HallCall, Intent, OperatingMode,
 };
-use liftassistant_runtime::{ElevatorRuntime, RuntimeEvent};
+use liftassistant_runtime::{IntentSink, ObservationSource, RuntimeEvent, SimulationDriver};
 use liftassistant_sim::SimRuntime;
 
 use crate::replay::{Command, SemanticEvent, run_with_topology};
@@ -93,7 +93,7 @@ impl App {
             }
             Command::Step => {
                 self.steps += 1;
-                let runtime_events = self.runtime.tick(FIXED_STEP);
+                let runtime_events = self.runtime.advance(FIXED_STEP);
                 self.consume_runtime_events(runtime_events)
             }
         };

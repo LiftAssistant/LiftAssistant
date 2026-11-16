@@ -336,21 +336,30 @@ Validation: formatting, all-target linting, 43 workspace tests, and the real Ope
 
 ### M4.4 — Separate observation, intent, and simulation-driving contracts
 
-**READY — next implementation slice.**
+**Implemented.**
 
-Promotion evidence: M4.3 now has a real observation/resolution path outside `ElevatorRuntime`, while `RecordedRuntime` is still forced to implement a write method that can only reject and both recorded/live-shaped backends would inherit simulator/replay-only `tick(Duration)` semantics. These are concrete incompatible responsibilities in current callers, not a roadmap-only abstraction.
+Implemented behavior:
 
-Implement incrementally:
+- the all-in-one `ElevatorRuntime` trait is replaced by three internal contracts: `ObservationSource`, `IntentSink`, and `SimulationDriver`;
+- `ObservationSource` exposes resolved operational state and capabilities without granting a write method;
+- `IntentSink` accepts only LiftAssistant high-level `Intent`; no low-level motion, drive, door-force, or safety primitive was introduced;
+- `SimulationDriver::advance(Duration)` owns explicit-time simulator/replay progression and is not required by observation sources or intent sinks in general;
+- `SimRuntime` implements all three contracts because it is an active deterministic simulator;
+- `RecordedRuntime` implements only observation and replay-driving contracts; the previous always-error `submit_intent` method and its `IntentSink` capability are gone;
+- TUI composition imports only the contracts it actually uses, and recorded/Open-RMF scenarios exercise observation/replay without attempting a write;
+- existing simulator replay, runtime feedback, timing, partial-observation resolution, and scenario behavior remain deterministic.
 
-- split the prototype `ElevatorRuntime` responsibilities so read-only observation sources do not need a write API;
-- separate observation ingestion from high-level intent submission;
-- move explicit `tick/advance(Duration)` semantics to simulator/replay drivers rather than treating them as a universal live-runtime contract;
-- preserve deterministic simulator/replay behavior;
-- keep the API internal/reversible.
+No async runtime, database, message bus, network protocol, IPC, plugin ABI, or new package was added.
+
+Validation: formatting, all-target linting, 43 workspace tests, and all four executable developer scenarios passed.
 
 ### M4.5 — Extract the demonstrated Engine boundary
 
-After the runtime split demonstrates shared orchestration:
+**READY — next implementation slice.**
+
+Promotion evidence: after the contract split, `App` still owns call registry/lifecycle, dispatch, pending scheduling, high-level intent submission, runtime-feedback processing, semantic events, and simulator-specific developer controls alongside TUI selection/pause/trace/recording state. Both interactive TUI and non-interactive scenarios already call this orchestration, while the Open-RMF scenario separately composes resolver output. This is concrete mixed/shared ownership. Start with an internal Engine boundary; add a crate only if extraction proves package-level reuse is required.
+
+Implement incrementally:
 
 - move common semantic orchestration/state resolution out of the TUI composition layer;
 - keep Core deterministic and I/O-free;

@@ -62,7 +62,7 @@ Inspect the recorded/read-only runtime boundary:
 cargo run -p liftassistant-tui -- --scenario recorded-read-only-observation
 ~~~
 
-This scenario replays native semantic observations at explicit elapsed times and proves that the backend rejects every submitted intent without disturbing playback. It performs no protocol, network, device, or hardware I/O.
+This scenario replays native semantic observations at explicit elapsed times. The recorded source implements observation and deterministic replay contracts only; it has no intent-submission interface. It performs no protocol, network, device, or hardware I/O.
 
 Inspect the recorded Open-RMF state-mapping boundary:
 

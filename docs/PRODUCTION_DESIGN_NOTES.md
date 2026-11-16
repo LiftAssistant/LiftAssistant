@@ -56,9 +56,7 @@ The exact Rust types and any future public schema are not frozen.
 
 ## Runtime boundary direction
 
-The current `ElevatorRuntime` combines observation, intent submission, and simulation time progression. That is useful for the prototype but should not be assumed to be the final production contract.
-
-Candidate separation:
+M4 implementation evidence separated the prototype responsibilities into:
 
 ~~~text
 ObservationSource
@@ -66,9 +64,7 @@ IntentSink
 Simulation/Replay Driver
 ~~~
 
-Read-only adapters should not need to implement a write method merely to reject it. Simulator/replay time advancement should not define the semantics of a live production adapter.
-
-This split should be proven by concrete M4 implementations before any external protocol is frozen.
+Read-only adapters do not implement a write method merely to reject it. Simulator/replay time advancement does not define the semantics of a live production adapter. The internal Rust contracts remain reversible; no external protocol is frozen.
 
 ## Engine and client separation
 

@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, collections::VecDeque, time::Duration};
 
 use liftassistant_model::{Capabilities, CarId, CarState, Intent, MotionState, Position};
-use liftassistant_runtime::{ElevatorRuntime, RuntimeError, RuntimeEvent};
+use liftassistant_runtime::{ObservationSource, RuntimeError, RuntimeEvent, SimulationDriver};
 
 /// A timed batch of native LiftAssistant observations.
 ///
@@ -106,8 +106,8 @@ impl RecordedRuntime {
     }
 }
 
-impl ElevatorRuntime for RecordedRuntime {
-    fn runtime_name(&self) -> &str {
+impl ObservationSource for RecordedRuntime {
+    fn source_name(&self) -> &str {
         "recorded-read-only"
     }
 
@@ -118,14 +118,10 @@ impl ElevatorRuntime for RecordedRuntime {
     fn capabilities(&self, car: &CarId) -> Option<Capabilities> {
         self.capabilities.get(car).cloned()
     }
+}
 
-    fn submit_intent(&mut self, _intent: Intent) -> Result<(), RuntimeError> {
-        Err(RuntimeError::new(
-            "recorded runtime is read-only and rejects all intents",
-        ))
-    }
-
-    fn tick(&mut self, mut elapsed: Duration) -> Vec<RuntimeEvent> {
+impl SimulationDriver for RecordedRuntime {
+    fn advance(&mut self, mut elapsed: Duration) -> Vec<RuntimeEvent> {
         let mut emitted = Vec::new();
         while let Some(until_next) = self.until_next_frame {
             if elapsed < until_next {
@@ -207,13 +203,13 @@ mod tests {
     fn explicit_elapsed_time_releases_frames_and_updates_observed_state() {
         let mut runtime = recording();
 
-        assert!(runtime.tick(Duration::from_millis(250)).is_empty());
+        assert!(runtime.advance(Duration::from_millis(250)).is_empty());
         assert_eq!(runtime.car_states()[0].position.floor_position, 3.0);
-        assert_eq!(runtime.tick(Duration::from_millis(250)).len(), 1);
+        assert_eq!(runtime.advance(Duration::from_millis(250)).len(), 1);
         assert_eq!(runtime.car_states()[0].position.floor_position, 3.5);
-        assert_eq!(runtime.tick(Duration::from_millis(499)).len(), 0);
+        assert_eq!(runtime.advance(Duration::from_millis(499)).len(), 0);
         assert_eq!(runtime.remaining_frames(), 1);
-        assert_eq!(runtime.tick(Duration::from_millis(1)).len(), 2);
+        assert_eq!(runtime.advance(Duration::from_millis(1)).len(), 2);
 
         let final_state = &runtime.car_states()[0];
         assert_eq!(final_state.position, Position::at_floor(Floor::new(4)));
@@ -224,35 +220,25 @@ mod tests {
     }
 
     #[test]
-    fn read_only_runtime_rejects_intents_without_disrupting_playback() {
+    fn read_only_source_exposes_observation_and_replay_contracts() {
         let mut runtime = recording();
         let initial = runtime.car_states();
-        let intent = Intent::ServeFloor {
-            car: CarId::new("A"),
-            floor: Floor::new(7),
-        };
 
-        assert_eq!(runtime.runtime_name(), "recorded-read-only");
-        assert_eq!(
-            runtime.submit_intent(intent),
-            Err(RuntimeError::new(
-                "recorded runtime is read-only and rejects all intents"
-            ))
-        );
+        assert_eq!(runtime.source_name(), "recorded-read-only");
         assert_eq!(runtime.car_states(), initial);
         let capabilities = runtime
             .capabilities(&CarId::new("A"))
             .expect("recorded car has observation capabilities");
         assert!(capabilities.observe_position && capabilities.observe_door);
         assert!(!capabilities.serve_floor && !capabilities.park);
-        assert_eq!(runtime.tick(Duration::from_millis(500)).len(), 1);
+        assert_eq!(runtime.advance(Duration::from_millis(500)).len(), 1);
     }
 
     #[test]
-    fn one_large_tick_releases_all_due_frames_in_order() {
+    fn one_large_advance_releases_all_due_frames_in_order() {
         let mut runtime = recording();
 
-        let events = runtime.tick(Duration::from_secs(2));
+        let events = runtime.advance(Duration::from_secs(2));
 
         assert!(matches!(events[0], RuntimeEvent::PositionChanged(_)));
         assert!(matches!(events[1], RuntimeEvent::Arrived { .. }));

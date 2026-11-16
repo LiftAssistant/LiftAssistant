@@ -1,5 +1,5 @@
 use liftassistant_model::MotionState;
-use liftassistant_runtime::ElevatorRuntime;
+use liftassistant_runtime::ObservationSource;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout},

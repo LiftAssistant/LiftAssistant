@@ -56,10 +56,10 @@ cargo run -p liftassistant-tui -- --scenario recorded-read-only-observation
 
 The native-semantic recording contains one car and two frames, due after 500 ms
 each. The scenario advances by 250 ms, 250 ms, 499 ms, and 1 ms to prove that
-frames are released only when their explicit delays are covered. It also attempts
-`ServeFloor` and verifies that the recorded backend rejects the intent without
-changing state or interrupting later observations. The input is internal Rust data,
-not a file format or external protocol capture.
+frames are released only when their explicit delays are covered. The recorded source
+implements observation and replay-driving contracts but no intent-submission
+contract. The input is internal Rust data, not a file format or external protocol
+capture.
 
 ## Recorded Open-RMF state mapping
 

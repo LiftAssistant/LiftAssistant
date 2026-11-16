@@ -118,12 +118,23 @@ pub fn resolve_car_observation(observation: &CarObservation) -> CarStateResoluti
     }
 }
 
-pub trait ElevatorRuntime {
-    fn runtime_name(&self) -> &str;
+/// Read-side access to resolved operational state.
+///
+/// Canonical partial observations must pass through the resolver before entering this view.
+pub trait ObservationSource {
+    fn source_name(&self) -> &str;
     fn car_states(&self) -> Vec<CarState>;
     fn capabilities(&self, car: &CarId) -> Option<Capabilities>;
+}
+
+/// Submission boundary for LiftAssistant high-level intents.
+pub trait IntentSink {
     fn submit_intent(&mut self, intent: Intent) -> Result<(), RuntimeError>;
-    fn tick(&mut self, elapsed: Duration) -> Vec<RuntimeEvent>;
+}
+
+/// Explicit-time driver used only by deterministic simulators and recorded replay.
+pub trait SimulationDriver {
+    fn advance(&mut self, elapsed: Duration) -> Vec<RuntimeEvent>;
 }
 
 #[cfg(test)]

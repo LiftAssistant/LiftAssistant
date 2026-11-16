@@ -9,7 +9,9 @@ use liftassistant_model::{
     Capabilities, CarId, CarState, Direction, DoorState, Floor, Intent, MotionState, OperatingMode,
     Position,
 };
-use liftassistant_runtime::{ElevatorRuntime, RuntimeError, RuntimeEvent};
+use liftassistant_runtime::{
+    IntentSink, ObservationSource, RuntimeError, RuntimeEvent, SimulationDriver,
+};
 
 pub use recorded::{RecordedFrame, RecordedRuntime};
 pub use rmf_recorded::{
@@ -128,8 +130,8 @@ impl SimRuntime {
     }
 }
 
-impl ElevatorRuntime for SimRuntime {
-    fn runtime_name(&self) -> &str {
+impl ObservationSource for SimRuntime {
+    fn source_name(&self) -> &str {
         "simulator"
     }
 
@@ -142,7 +144,9 @@ impl ElevatorRuntime for SimRuntime {
             .get(car)
             .map(|sim_car| sim_car.capabilities.clone())
     }
+}
 
+impl IntentSink for SimRuntime {
     fn submit_intent(&mut self, intent: Intent) -> Result<(), RuntimeError> {
         if std::mem::take(&mut self.reject_next_intent) {
             return Err(RuntimeError::new(
@@ -151,8 +155,10 @@ impl ElevatorRuntime for SimRuntime {
         }
         self.set_target(intent)
     }
+}
 
-    fn tick(&mut self, elapsed: Duration) -> Vec<RuntimeEvent> {
+impl SimulationDriver for SimRuntime {
+    fn advance(&mut self, elapsed: Duration) -> Vec<RuntimeEvent> {
         let mut events = std::mem::take(&mut self.pending_events);
         let step = self.speed_floors_per_second * elapsed.as_secs_f64();
 
@@ -219,7 +225,7 @@ mod tests {
 
         let mut arrived = false;
         for _ in 0..20 {
-            let events = runtime.tick(Duration::from_millis(500));
+            let events = runtime.advance(Duration::from_millis(500));
             arrived |= events.iter().any(|event| {
                 matches!(
                     event,
@@ -252,7 +258,7 @@ mod tests {
             ))
         );
         assert_eq!(runtime.car_states(), initial);
-        assert!(runtime.tick(Duration::ZERO).is_empty());
+        assert!(runtime.advance(Duration::ZERO).is_empty());
 
         runtime
             .submit_intent(intent.clone())
@@ -260,7 +266,7 @@ mod tests {
         assert_eq!(runtime.car_states()[0].target, Some(Floor::new(7)));
         assert!(
             runtime
-                .tick(Duration::from_millis(500))
+                .advance(Duration::from_millis(500))
                 .contains(&RuntimeEvent::IntentAccepted(intent))
         );
     }

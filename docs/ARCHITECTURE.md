@@ -9,21 +9,17 @@ Developer TUI (current composition root)
         v
 LiftAssistant Core
         |
-        | high-level intents / semantic decisions
+        | high-level intents
         v
-Runtime API
-        |
-        v
-Simulator
-        |
-        | semantic runtime events + observed state
-        +------------------------------+
-                                       |
-                                       v
-                                  Developer TUI
+     IntentSink -----------------> Simulator
+                                    ^      |
+            explicit duration       |      | runtime events
+     SimulationDriver --------------+      |
+                                           v
+Developer TUI <---------------- ObservationSource
 ~~~
 
-The simulator is the first active runtime backend. M4 adds a second, recorded/read-only backend for deterministic playback of native semantic observations. Future real-world runtimes should implement the same semantic boundary.
+The simulator is the first active runtime backend and implements observation, high-level-intent, and deterministic-driving contracts. M4 adds a second, recorded/read-only source that implements observation and replay driving but has no intent-submission contract. Live sources and intent backends should implement only the responsibilities they actually provide; explicit `advance(Duration)` is not a universal live-adapter requirement.
 
 The TUI currently performs the small amount of application composition needed to connect core and runtime. Do not extract an application/service layer until another frontend or composition target creates real duplication.
 
@@ -61,7 +57,7 @@ The runtime/controller defines HOW.
 
 Low-level motion and safety primitives remain outside Core.
 
-A runtime may expose observed state, capabilities, semantic events, and acceptance/rejection of high-level intents. Vendor protocol objects must not leak into Core semantics.
+`ObservationSource` exposes resolved operational state and capabilities. `IntentSink` accepts only high-level LiftAssistant intents. `SimulationDriver` produces semantic runtime events from explicit simulated/replay duration. A component implements only the contracts it actually supports. Vendor protocol objects must not leak into Core semantics.
 
 ## Current packages
 
@@ -191,6 +187,6 @@ Production design should preserve these separations:
 - Loss/restart of LiftAssistant must not make the elevator unsafe.
 - Production debugging and diagnostics should consume the same canonical event/observation flow rather than rely on ad-hoc logging.
 
-The current `ElevatorRuntime` is a useful prototype abstraction, not a frozen production contract. M4 is allowed to evolve it internally as recorded/read-only evidence demonstrates better boundaries.
+M4 replaced the all-in-one prototype `ElevatorRuntime` with separate internal observation, high-level-intent, and simulation/replay-driving contracts. These boundaries remain reversible and are not frozen as an external protocol.
 
 Detailed non-normative production ideas are preserved in `docs/PRODUCTION_DESIGN_NOTES.md`.
