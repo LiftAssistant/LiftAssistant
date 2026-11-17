@@ -773,7 +773,7 @@ Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clip
 
 Implemented behavior and evidence:
 
-- the existing headless host now records an independent fixed-capacity window of explicit observation bindings and ordered `begin source session`, canonical observation update, and explicit source-invalidation actions; it does not record wall-clock delays or infer lifecycle from sequence values;
+- the existing headless host now records an independent fixed-capacity window of explicit observation bindings and ordered `begin source session`, canonical observation update, and explicit source-invalidation actions; when long-running ingestion evicts actions from that bounded window, pre-window active-session, assembled per-car evidence, and invalidation sequence-watermark state are emitted as explicit preamble actions within the capsule action limit rather than inferring lifecycle from sequence values or recording wall-clock delays;
 - `liftassistant.incident-capsule/1` is a private serde/JSON wire layer owned only by headless. It converts current canonical values without adding serde/wire dependencies to model, Core, Engine, or RMF semantics;
 - each capsule contains a producer/version, served-floor topology, explicit source/car/role bindings, bounded ordered actions, a typed deterministic trigger, and expected lifecycle/readiness. File input is capped at 1 MiB and internal collection counts are bounded;
 - capsule validation rejects unknown versions, duplicate topology/binding data, unbound actions, invalid active-session invalidation, and any observation window that lacks a preceding explicit source-session action. Replay never guesses a restart or activates a session from payload sequence/timestamps;

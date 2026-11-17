@@ -2915,6 +2915,212 @@ mod tests {
     }
 
     #[test]
+    fn bounded_incident_capsule_replays_after_long_running_action_eviction() {
+        let source = ObservationSourceId::new("fixture/long-running-rmf");
+        let session = ObservationSessionId::new("long-running-session-A");
+        let car_a = CarId::new("A");
+        let car_b = CarId::new("B");
+        let mut host = ReadOnlyHost::new(
+            BuildingTopology::new([Floor::new(1), Floor::new(3), Floor::new(7)])
+                .expect("valid topology"),
+        );
+        for car in [car_a.clone(), car_b.clone()] {
+            host.bind_observation(source.clone(), car, ObservationBindingRole::Operational)
+                .expect("explicit operational binding");
+        }
+        host.begin_source_session(source.clone(), session.clone())
+            .expect("session starts once at startup");
+
+        let mut initial_b = complete_observation(source.clone(), session.clone(), 1, Floor::new(7));
+        initial_b.car = car_b.clone();
+        host.ingest_observation(initial_b.into());
+        let mut initial_a = complete_observation(source.clone(), session.clone(), 2, Floor::new(1));
+        initial_a.car = car_a.clone();
+        host.ingest_observation(initial_a.into());
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+
+        // Exceed INCIDENT_ACTION_CAPACITY (128) with incremental updates on car A so
+        // BeginSourceSession, car B's snapshot, and car A's base fields are all evicted.
+        for sequence in 3..=200 {
+            let floor = if sequence % 2 == 0 {
+                Floor::new(1)
+            } else {
+                Floor::new(3)
+            };
+            host.ingest_observation(CarObservationUpdate {
+                provenance: ObservationProvenance {
+                    source: source.clone(),
+                    session: session.clone(),
+                    sequence: ObservationSequence::new(sequence),
+                },
+                car: car_a.clone(),
+                position: Some(PositionEvidence::FloorReference(floor)),
+                motion: None,
+                door: None,
+                mode: None,
+                reported_destination: None,
+            });
+        }
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+
+        // Trigger 1: incremental resolution loss on car A after window rollover.
+        host.ingest_observation(CarObservationUpdate {
+            provenance: ObservationProvenance {
+                source: source.clone(),
+                session: session.clone(),
+                sequence: ObservationSequence::new(201),
+            },
+            car: car_a.clone(),
+            position: None,
+            motion: None,
+            door: Some(DoorEvidence::MovingUnknownDirection),
+            mode: None,
+            reported_destination: None,
+        });
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        let unresolved_capsule = host.capture_incident(CapsuleTrigger::ObservationUnresolved {
+            source: source.as_str().to_owned(),
+            session: session.as_str().to_owned(),
+            car: car_a.as_str().to_owned(),
+        });
+        let unresolved_json = unresolved_capsule
+            .to_json()
+            .expect("post-eviction unresolved capsule encodes");
+        let unresolved_report = IncidentCapsule::from_json(&unresolved_json)
+            .and_then(|decoded| decoded.replay())
+            .expect("post-eviction unresolved capsule replays in a fresh host");
+        assert_eq!(unresolved_report.trigger_id, "observation.unresolved");
+
+        // Recover car A, then trigger 2: payload staleness after >200 actions.
+        host.ingest_observation(CarObservationUpdate {
+            provenance: ObservationProvenance {
+                source: source.clone(),
+                session: session.clone(),
+                sequence: ObservationSequence::new(202),
+            },
+            car: car_a.clone(),
+            position: None,
+            motion: None,
+            door: Some(DoorEvidence::Known(DoorState::Closed)),
+            mode: None,
+            reported_destination: None,
+        });
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+        host.mark_source_payload_stale(source.clone(), session.clone())
+            .expect("long-running source becomes stale");
+        let stale_capsule =
+            host.capture_incident(CapsuleTrigger::source_payload_stale(&source, &session));
+        let stale_report = stale_capsule
+            .replay()
+            .expect("post-eviction stale capsule replays in a fresh host");
+        assert_eq!(stale_report.trigger_id, "source.payload-stale");
+        let (sanitized, sanitization) = stale_capsule
+            .sanitize_candidate()
+            .expect("post-eviction stale capsule sanitizes");
+        assert!(sanitization.manual_review_required);
+        assert_eq!(
+            sanitized
+                .replay()
+                .expect("sanitized post-eviction capsule replays")
+                .trigger_id,
+            "source.payload-stale"
+        );
+    }
+
+    #[test]
+    fn evicted_invalidation_retains_sequence_watermark_and_max_action_bound() {
+        let op_source = ObservationSourceId::new("fixture/op-watermark");
+        let op_session = ObservationSessionId::new("op-session-1");
+        let aux_source = ObservationSourceId::new("fixture/aux-flood");
+        let aux_session = ObservationSessionId::new("aux-session-1");
+        let car = CarId::new("A");
+        let topology = BuildingTopology::new([Floor::new(9), Floor::new(2)])
+            .expect("valid non-contiguous topology");
+        let mut host = ReadOnlyHost::new(topology.clone());
+        host.incident_recorder = IncidentRecorder::new(256);
+        host.bind_observation(
+            op_source.clone(),
+            car.clone(),
+            ObservationBindingRole::Operational,
+        )
+        .expect("operational binding");
+        host.bind_observation(
+            aux_source.clone(),
+            car.clone(),
+            ObservationBindingRole::Auxiliary,
+        )
+        .expect("auxiliary binding");
+        host.begin_source_session(op_source.clone(), op_session.clone())
+            .expect("operational session");
+        host.begin_source_session(aux_source.clone(), aux_session.clone())
+            .expect("auxiliary session");
+
+        let mut op_initial =
+            complete_observation(op_source.clone(), op_session.clone(), 50, Floor::new(2));
+        op_initial.car = car.clone();
+        host.ingest_observation(op_initial.into());
+        host.mark_source_payload_stale(op_source.clone(), op_session.clone())
+            .expect("operational source invalidated at watermark 50");
+
+        // Flood 270 auxiliary updates so operational session, seq=50, and invalidation are evicted
+        // even at the 256-action capsule ceiling.
+        for sequence in 1..=270 {
+            let mut aux_obs = complete_observation(
+                aux_source.clone(),
+                aux_session.clone(),
+                sequence,
+                Floor::new(9),
+            );
+            aux_obs.car = car.clone();
+            host.ingest_observation(aux_obs.into());
+        }
+
+        // Delayed duplicate seq=50 on invalidated operational source must still reproduce anomaly.
+        let mut duplicate_op =
+            complete_observation(op_source.clone(), op_session.clone(), 50, Floor::new(2));
+        duplicate_op.car = car.clone();
+        host.ingest_observation(duplicate_op.into());
+        let anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+            source: op_source,
+            session: op_session,
+            previous: ObservationSequence::new(50),
+            received: ObservationSequence::new(50),
+        };
+        let trigger = CapsuleTrigger::observation_sequence_not_increasing(
+            &car,
+            ObservationBindingRole::Operational,
+            &anomaly,
+        )
+        .expect("sequence anomaly trigger");
+        let capsule = host.capture_incident(trigger);
+        let report = capsule
+            .replay()
+            .expect("max-capacity capsule with evicted watermark replays");
+        assert!(report.action_count <= 256);
+        assert_eq!(report.trigger_id, "observation.sequence-not-increasing");
+
+        // Also verify unsorted JSON topology floors still sanitize monotonically without order flip.
+        let unsorted_json = capsule
+            .to_json()
+            .expect("capsule encodes")
+            .replace("[\n      2,\n      9\n    ]", "[9, 2]");
+        let unsorted =
+            IncidentCapsule::from_json(&unsorted_json).expect("unsorted topology decodes");
+        let (candidate, _) = unsorted
+            .sanitize_candidate()
+            .expect("unsorted topology still sanitizes canonically");
+        let candidate_json = candidate.to_json().expect("candidate encodes");
+        assert!(candidate_json.contains("[\n      1,\n      2\n    ]"));
+        assert_eq!(
+            candidate
+                .replay()
+                .expect("sanitized unsorted-topology capsule replays")
+                .trigger_id,
+            "observation.sequence-not-increasing"
+        );
+    }
+
+    #[test]
     fn sanitization_is_deterministic_replayable_and_requires_manual_review() {
         let private = capture_reference_incident_capsule()
             .expect("deterministic fixture produces a private capsule");

@@ -26,6 +26,7 @@ const MAX_CAPSULE_FLOORS: usize = 1024;
 pub(super) struct IncidentRecorder {
     capacity: usize,
     bindings: BTreeMap<(String, String), CapsuleBinding>,
+    baseline: CapsuleBaseline,
     actions: VecDeque<CapsuleAction>,
 }
 
@@ -34,6 +35,7 @@ impl IncidentRecorder {
         Self {
             capacity: capacity.clamp(1, MAX_CAPSULE_ACTIONS),
             bindings: BTreeMap::new(),
+            baseline: CapsuleBaseline::default(),
             actions: VecDeque::new(),
         }
     }
@@ -88,6 +90,17 @@ impl IncidentRecorder {
         readiness: Readiness,
         trigger: CapsuleTrigger,
     ) -> IncidentCapsule {
+        let mut baseline = self.baseline.clone();
+        let mut window = self.actions.clone();
+        let mut actions = baseline.preamble_actions(&self.bindings);
+        while actions.len() + window.len() > MAX_CAPSULE_ACTIONS && window.len() > 1 {
+            if let Some(evicted) = window.pop_front() {
+                baseline.apply_evicted(&self.bindings, evicted);
+                actions = baseline.preamble_actions(&self.bindings);
+            }
+        }
+        actions.extend(window);
+
         IncidentCapsule {
             version: INCIDENT_CAPSULE_VERSION.to_owned(),
             context: CapsuleContext {
@@ -100,7 +113,7 @@ impl IncidentRecorder {
                 bindings: self.bindings.values().cloned().collect(),
                 sanitization: None,
             },
-            actions: self.actions.iter().cloned().collect(),
+            actions,
             trigger,
             expected_lifecycle: lifecycle.into(),
             expected_readiness: readiness.into(),
@@ -108,10 +121,314 @@ impl IncidentRecorder {
     }
 
     fn push(&mut self, action: CapsuleAction) {
-        if self.actions.len() == self.capacity {
-            self.actions.pop_front();
+        if self.actions.len() == self.capacity
+            && let Some(evicted) = self.actions.pop_front()
+        {
+            self.baseline.apply_evicted(&self.bindings, evicted);
         }
         self.actions.push_back(action);
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+struct CapsuleBaseline {
+    sources: BTreeMap<String, BaselineSource>,
+    degrading_action: Option<CapsuleAction>,
+}
+
+#[derive(Clone, Debug)]
+struct BaselineSource {
+    session: String,
+    stale: bool,
+    last_sequence: Option<(u64, String)>,
+    cars: BTreeMap<String, BaselineCar>,
+    prior_operational: Option<(String, String)>,
+    operational_car_seen: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct BaselineCar {
+    latest_sequence: u64,
+    position: Option<CapsulePositionEvidence>,
+    motion: Option<CapsuleMotionEvidence>,
+    door: Option<CapsuleDoorEvidence>,
+    mode: Option<CapsuleOperatingModeEvidence>,
+    reported_destination: Option<CapsuleReportedDestination>,
+}
+
+impl BaselineCar {
+    fn empty(sequence: u64) -> Self {
+        Self {
+            latest_sequence: sequence,
+            position: None,
+            motion: None,
+            door: None,
+            mode: None,
+            reported_destination: None,
+        }
+    }
+
+    fn merge(&mut self, update: &CapsuleObservationUpdate) {
+        self.latest_sequence = update.sequence;
+        if update.position.is_some() {
+            self.position = update.position;
+        }
+        if update.motion.is_some() {
+            self.motion = update.motion;
+        }
+        if update.door.is_some() {
+            self.door = update.door;
+        }
+        if update.mode.is_some() {
+            self.mode = update.mode;
+        }
+        if update.reported_destination.is_some() {
+            self.reported_destination = update.reported_destination;
+        }
+    }
+
+    fn to_observation_update(
+        &self,
+        source: &str,
+        session: &str,
+        car: &str,
+    ) -> CapsuleObservationUpdate {
+        CapsuleObservationUpdate {
+            source: source.to_owned(),
+            session: session.to_owned(),
+            sequence: self.latest_sequence,
+            car: car.to_owned(),
+            position: self.position,
+            motion: self.motion,
+            door: self.door,
+            mode: self.mode,
+            reported_destination: self.reported_destination,
+        }
+    }
+
+    fn is_resolved(&self, source: &str, session: &str, car: &str) -> bool {
+        let update: CarObservationUpdate =
+            (&self.to_observation_update(source, session, car)).into();
+        let Some(observation) = (liftassistant_runtime::AssembledCarObservation {
+            latest_provenance: update.provenance.clone(),
+            car: update.car,
+            position: update
+                .position
+                .map(|value| liftassistant_runtime::EvidenceSample {
+                    value,
+                    provenance: update.provenance.clone(),
+                }),
+            motion: update
+                .motion
+                .map(|value| liftassistant_runtime::EvidenceSample {
+                    value,
+                    provenance: update.provenance.clone(),
+                }),
+            door: update
+                .door
+                .map(|value| liftassistant_runtime::EvidenceSample {
+                    value,
+                    provenance: update.provenance.clone(),
+                }),
+            mode: update
+                .mode
+                .map(|value| liftassistant_runtime::EvidenceSample {
+                    value,
+                    provenance: update.provenance.clone(),
+                }),
+            reported_destination: update.reported_destination.map(|value| {
+                liftassistant_runtime::EvidenceSample {
+                    value,
+                    provenance: update.provenance.clone(),
+                }
+            }),
+        })
+        .snapshot() else {
+            return false;
+        };
+        matches!(
+            liftassistant_runtime::resolve_car_observation(&observation),
+            liftassistant_runtime::CarStateResolution::Resolved(_)
+        )
+    }
+}
+
+impl CapsuleBaseline {
+    fn apply_evicted(
+        &mut self,
+        bindings: &BTreeMap<(String, String), CapsuleBinding>,
+        action: CapsuleAction,
+    ) {
+        match action {
+            CapsuleAction::BeginSourceSession { source, session } => {
+                if !bindings
+                    .keys()
+                    .any(|(bound_source, _)| bound_source == &source)
+                {
+                    return;
+                }
+                let mut prior_operational = None;
+                let mut operational_car_seen = None;
+                if let Some(previous) = self.sources.get(&source) {
+                    let invalidated_operational = previous.cars.iter().any(|(car, state)| {
+                        bindings
+                            .get(&(source.clone(), car.clone()))
+                            .is_some_and(|binding| binding.role == CapsuleBindingRole::Operational)
+                            && state.is_resolved(&source, &previous.session, car)
+                    });
+                    if invalidated_operational {
+                        self.degrading_action = None;
+                    } else if let Some(CapsuleAction::Observation { update }) =
+                        &mut self.degrading_action
+                        && update.source == source
+                        && update.session == session
+                    {
+                        update.session = previous.session.clone();
+                    }
+                    if let Some(op_car) = &previous.operational_car_seen {
+                        prior_operational = previous
+                            .prior_operational
+                            .clone()
+                            .or_else(|| Some((previous.session.clone(), op_car.clone())));
+                        operational_car_seen = Some(op_car.clone());
+                    }
+                }
+                self.sources.insert(
+                    source,
+                    BaselineSource {
+                        session,
+                        stale: false,
+                        last_sequence: None,
+                        cars: BTreeMap::new(),
+                        prior_operational,
+                        operational_car_seen,
+                    },
+                );
+            }
+            CapsuleAction::InvalidateSource { source, session } => {
+                let operational_car = bindings.values().find_map(|binding| {
+                    (binding.source == source && binding.role == CapsuleBindingRole::Operational)
+                        .then(|| binding.car.clone())
+                });
+                let Some(source_state) = self.sources.get_mut(&source) else {
+                    return;
+                };
+                if source_state.session != session {
+                    return;
+                }
+                source_state.cars.clear();
+                source_state.stale = true;
+                if let Some(op_car) = operational_car {
+                    source_state.prior_operational = None;
+                    source_state.operational_car_seen = Some(op_car);
+                    self.degrading_action = None;
+                }
+            }
+            CapsuleAction::Observation { update } => {
+                let Some(binding) = bindings.get(&(update.source.clone(), update.car.clone()))
+                else {
+                    return;
+                };
+                let is_operational = binding.role == CapsuleBindingRole::Operational;
+                let Some(source_state) = self.sources.get_mut(&update.source) else {
+                    return;
+                };
+                if is_operational {
+                    self.degrading_action = None;
+                    source_state.prior_operational = None;
+                    source_state.operational_car_seen = Some(update.car.clone());
+                }
+                if source_state.session != update.session {
+                    if is_operational {
+                        self.degrading_action = Some(CapsuleAction::Observation {
+                            update: BaselineCar::empty(update.sequence).to_observation_update(
+                                &update.source,
+                                &update.session,
+                                &update.car,
+                            ),
+                        });
+                    }
+                    return;
+                }
+                if let Some((previous_seq, _)) = &source_state.last_sequence
+                    && update.sequence <= *previous_seq
+                {
+                    if is_operational {
+                        self.degrading_action = Some(CapsuleAction::Observation {
+                            update: BaselineCar::empty(update.sequence).to_observation_update(
+                                &update.source,
+                                &update.session,
+                                &update.car,
+                            ),
+                        });
+                    }
+                    return;
+                }
+                source_state.last_sequence = Some((update.sequence, update.car.clone()));
+                source_state.stale = false;
+                source_state
+                    .cars
+                    .entry(update.car.clone())
+                    .or_insert_with(|| BaselineCar::empty(update.sequence))
+                    .merge(&update);
+            }
+        }
+    }
+
+    fn preamble_actions(
+        &self,
+        _bindings: &BTreeMap<(String, String), CapsuleBinding>,
+    ) -> Vec<CapsuleAction> {
+        let mut preamble = Vec::new();
+        for (source, state) in &self.sources {
+            if state.cars.is_empty()
+                && !state.stale
+                && let Some((prior_session, op_car)) = &state.prior_operational
+            {
+                preamble.push(CapsuleAction::BeginSourceSession {
+                    source: source.clone(),
+                    session: prior_session.clone(),
+                });
+                preamble.push(CapsuleAction::Observation {
+                    update: BaselineCar::empty(1).to_observation_update(
+                        source,
+                        prior_session,
+                        op_car,
+                    ),
+                });
+            }
+            preamble.push(CapsuleAction::BeginSourceSession {
+                source: source.clone(),
+                session: state.session.clone(),
+            });
+            if state.stale {
+                if let Some((sequence, car)) = &state.last_sequence {
+                    preamble.push(CapsuleAction::Observation {
+                        update: BaselineCar::empty(*sequence).to_observation_update(
+                            source,
+                            &state.session,
+                            car,
+                        ),
+                    });
+                }
+                preamble.push(CapsuleAction::InvalidateSource {
+                    source: source.clone(),
+                    session: state.session.clone(),
+                });
+            } else {
+                let mut cars: Vec<_> = state.cars.iter().collect();
+                cars.sort_by_key(|(_, car_state)| car_state.latest_sequence);
+                for (car, car_state) in cars {
+                    preamble.push(CapsuleAction::Observation {
+                        update: car_state.to_observation_update(source, &state.session, car),
+                    });
+                }
+            }
+        }
+        if let Some(degrading) = &self.degrading_action {
+            preamble.push(degrading.clone());
+        }
+        preamble
     }
 }
 
@@ -307,6 +624,8 @@ impl IncidentCapsule {
             .topology
             .iter()
             .copied()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
             .enumerate()
             .map(|(index, floor)| (floor, (index + 1) as i16))
             .collect::<BTreeMap<_, _>>();
@@ -318,6 +637,7 @@ impl IncidentCapsule {
             .iter()
             .map(|floor| mapped_floor(&floor_map, *floor))
             .collect::<Result<Vec<_>, _>>()?;
+        candidate.context.topology.sort_unstable();
         for binding in &mut candidate.context.bindings {
             binding.source = mapped_identity(&source_map, &binding.source, "source")?;
             binding.car = mapped_identity(&car_map, &binding.car, "car")?;
