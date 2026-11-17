@@ -14,6 +14,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, Ordering},
     },
+    thread,
     time::Duration,
     time::SystemTime,
 };
@@ -1016,8 +1017,19 @@ fn run_command(command: HeadlessCommand) -> Result<(), String> {
             let local_addr = listener
                 .local_addr()
                 .map_err(|error| format!("failed to inspect experimental API listener: {error}"))?;
+            let publisher = http_api::ReadModelPublisher::new(host.read_model());
+            let fixture_publisher = publisher.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(300));
+                host.record_transport_failure(
+                    reference_source_id(),
+                    reference_session_id(),
+                    "fixture read-model change".into(),
+                );
+                let _ = fixture_publisher.publish(host.read_model());
+            });
             println!("experimental read-only API fixture listening on http://{local_addr}");
-            http_api::serve(listener, host.read_model(), shutdown)
+            http_api::serve(listener, publisher, shutdown)
         }
     }
 }

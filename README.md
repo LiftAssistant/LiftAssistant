@@ -122,6 +122,15 @@ cargo run -p liftassistant-headless -- --scenario headless-experimental-read-mod
 
 The output is a separate API-boundary JSON DTO rather than serialized canonical Rust structs. It preserves floor-reference versus continuous location, all three reported-destination states, explicit motion/door/mode/readiness/binding-role values, source/session health, and bounded recent diagnostic identities. Its revision is monotonic only within the current host process and is not an observation sequence, source session, persistent version, or stable API promise.
 
+For an isolated developer-only HTTP/SSE boundary proof, explicitly start the fixture on a chosen address:
+
+~~~bash
+cargo run -p liftassistant-headless -- \
+  --serve-experimental-snapshot-fixture 127.0.0.1:8080
+~~~
+
+`GET /api/experimental/v0/snapshot` returns the complete current JSON projection. `GET /api/experimental/v0/events` sends complete `snapshot` events when the read-model revision changes. The stream retains only the latest complete value, so reconnecting recovers current state without a durable cursor or forensic event backlog. Both routes are read-only, return no wildcard CORS policy, and are experimental rather than stable/public API contracts. The fixture is disabled unless this explicit command is used.
+
 Exercise the live Open-RMF subscription proof against an independently running official Hotel simulation:
 
 ~~~bash

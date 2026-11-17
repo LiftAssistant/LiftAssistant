@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.8 and M5.9a–b are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING` but no longer blocks client-platform work. **M5.9c — SSE Current-state Stream is READY.** The current authorization ends after M5.10 and does not include Flutter, WebUI, HA/BMS, or M6.
+M5.1 through M5.8 and M5.9a–c are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING` but no longer blocks client-platform work. **M5.9d — Production Host Integration is READY.** The current authorization ends after M5.10 and does not include Flutter, WebUI, HA/BMS, or M6.
 
 ## Validated baseline
 
@@ -863,8 +863,21 @@ Validation: real-listener focused test, process-level server plus independent `c
 
 ### M5.9c — SSE Current-state Stream
 
+**IMPLEMENTED.**
+
+Implemented behavior and evidence:
+
+- `GET /api/experimental/v0/events` returns `text/event-stream`; every `snapshot` event contains one complete `ExperimentalReadModel`, beginning promptly with the current value and continuing when host-local read-model revision advances;
+- a Tokio watch channel provides one bounded latest value rather than a per-client history queue. Slow consumers may coalesce intermediate revisions and recover from the newest complete state; the stream makes no every-event, durable-cursor, backlog, replay, or exactly-once promise;
+- reconnecting starts a new subscription and immediately receives the then-current complete snapshot. `Last-Event-ID`, cursor persistence, and resume-from-revision behavior were deliberately not added;
+- transport keepalive exists only to maintain the HTTP connection. Client presence, disconnection, backpressure, and keepalive do not enter source freshness, Engine readiness, diagnostics, Flight Recorder, or Incident Capsule behavior;
+- focused real-listener tests prove initial delivery, change push without client polling, a burst of coalesced revisions, latest-value observation by a deliberately slow receiver, and reconnect recovery. A separate child-server plus independent `curl` proof observed an initial snapshot, a pushed newer revision, and the same latest revision after reconnect;
+- HTTP/Tokio dependencies remain confined to `liftassistant-headless`, no write route or CORS policy was added, and the developer fixture remains disabled unless invoked explicitly.
+
+Validation: focused SSE and snapshot listener tests, process-level child server plus independent `curl` streaming/reconnect proof, `cargo fmt --all -- --check`, and warning-free headless all-target clippy pass.
+
+### M5.9d — Production Host Integration
+
 **READY.**
 
-Add `GET /api/experimental/v0/events` with `text/event-stream`. Send the current complete snapshot promptly on connection and then coalesced latest complete snapshots whenever read-model revision changes. Reconnection receives a fresh complete snapshot; no durable cursor/backlog/exactly-once contract is required.
-
-Use a bounded latest-value mechanism rather than an unbounded per-client queue. SSE keepalive, connection state, or client failure must not affect source freshness, Engine readiness, forensic diagnostics, or Incident Capsule ownership. M5.9d is not READY until real streaming, change push without polling, slow-client coalescing, and reconnect behavior pass.
+Integrate the proven snapshot/SSE boundary into the real long-running RMF read-only host behind an explicit listen argument. It must remain disabled by default, use only the real host projection, shut down cooperatively, and warn clearly when an operator explicitly exposes the unauthenticated experimental read-only API beyond loopback. API or client failure must not mutate Engine truth or source/readiness state.
