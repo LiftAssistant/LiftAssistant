@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.4 are implemented: the Rust-native Open-RMF adapter and long-running headless composition have passed official Hotel ingestion, stale/recovery, readiness, graceful-shutdown, and bounded production-diagnostic validation. **M5.5 — Incident Capsule / Deterministic Replay is READY.** No later M5 slice is READY merely because it appears in the roadmap.
+M5.1 through M5.5 are implemented: the Rust-native Open-RMF adapter and long-running headless composition have passed official Hotel ingestion, stale/recovery, readiness, graceful-shutdown, bounded production diagnostics, and fresh-process incident replay. **M5.6 — Sanitization / Community Fixture Path is READY.** No later M5 slice is READY merely because it appears in the roadmap.
 
 ## Validated baseline
 
@@ -769,8 +769,25 @@ Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clip
 
 ### M5.5 — Incident Capsule / Deterministic Replay
 
+**IMPLEMENTED.**
+
+Implemented behavior and evidence:
+
+- the existing headless host now records an independent fixed-capacity window of explicit observation bindings and ordered `begin source session`, canonical observation update, and explicit source-invalidation actions; it does not record wall-clock delays or infer lifecycle from sequence values;
+- `liftassistant.incident-capsule/1` is a private serde/JSON wire layer owned only by headless. It converts current canonical values without adding serde/wire dependencies to model, Core, Engine, or RMF semantics;
+- each capsule contains a producer/version, served-floor topology, explicit source/car/role bindings, bounded ordered actions, a typed deterministic trigger, and expected lifecycle/readiness. File input is capped at 1 MiB and internal collection counts are bounded;
+- capsule validation rejects unknown versions, duplicate topology/binding data, unbound actions, invalid active-session invalidation, and any observation window that lacks a preceding explicit source-session action. Replay never guesses a restart or activates a session from payload sequence/timestamps;
+- replay creates a fresh `ReadOnlyHost`/Engine, rebuilds bindings, explicitly performs recorded session transitions, replays observations and invalidations, then requires the typed trigger and final lifecycle/readiness to match;
+- the executable `headless-incident-capsule-replay` proof covers initial readiness, payload-stale invalidation, same-session recovery, explicit session B reset, incomplete resolution, readiness recovery, and a final duplicate-sequence anomaly. Two captures produce identical JSON; a separate process reads the temporary file and reproduces `observation.sequence-not-increasing`; the file is then removed;
+- production RMF configuration may opt into one create-new `--incident-capsule-out <path>`. The first payload-stale trigger freezes a replayable capsule; existing files are never overwritten and later stale cycles do not produce an unbounded archive;
+- the format remains internal/versioned/experimental. There is no database, background uploader, public schema, coredump claim, root-cause inference, equipment-fault claim, or write path.
+
+Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 106 workspace tests, all six TUI scenarios, the headless lifecycle scenario, the fresh-process capsule scenario, capsule round-trip/version/stale-capture regressions, dependency/wall-clock/write-boundary checks, temporary-artifact cleanup, and Podman-absence checks pass.
+
+### M5.6 — Sanitization / Community Fixture Path
+
 **READY.**
 
-Create the smallest bounded, internal/versioned incident artifact needed to replay deterministic source-session, sequence, freshness invalidation, resolution, and readiness conditions in a fresh Engine/host process. Preserve the bindings and ordered evidence required for reproduction, plus an explicit trigger.
+Add a deterministic sanitization step from a private capsule to a separately written shareable candidate fixture, while preserving action ordering, source/session structure, logical-car relationships, and replay reproduction. Require explicit manual review before the candidate can be treated as shareable.
 
-Do not add a database, unbounded telemetry archive, cloud uploader, stable public schema, or non-deterministic wall-clock replay. M5.6 and later remain not READY until capture into a fresh composition reproduces the relevant deterministic condition.
+Do not claim perfect anonymization or security-certified sanitization, automatically upload/publish artifacts, mutate the private source capsule, or generate a large fictional fixture corpus. M5.7 and later remain not READY until the sanitized candidate itself replays the same deterministic trigger and the manual-review boundary is explicit.

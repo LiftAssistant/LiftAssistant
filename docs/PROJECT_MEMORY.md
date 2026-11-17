@@ -121,6 +121,8 @@ The read-only host separates transport/discovery evidence, payload activity, sou
 
 Production diagnostics now pair the Engine's bounded canonical Flight Recorder with a separate bounded host stream. Host entries have monotonic internal sequences and machine-readable identities for Transport, Source/session, Mapping, Observation/resolution, and Readiness, plus source/session/car/role/native-entity context where applicable. They remain operational evidence rather than equipment-fault, root-cause, repair, or public-schema assertions. Auxiliary diagnostics remain visible without revoking healthy Operational readiness.
 
+The headless host now records a bounded replay-action window and can freeze an opt-in internal incident capsule containing version/context, topology, explicit bindings, source/session actions, canonical observation updates, explicit invalidations, trigger, and expected lifecycle/readiness. Replay always builds a fresh host/Engine and refuses action windows that lack explicit session lifecycle; it never infers a source restart from sequence or payload fields. The current JSON format is private, size-bounded, create-new, and experimental, with no stability, database, upload, or public-schema promise.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

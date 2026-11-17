@@ -1,9 +1,12 @@
 #![forbid(unsafe_code)]
 
+mod incident;
+
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     env, io,
-    process::ExitCode,
+    path::PathBuf,
+    process::{Command, ExitCode},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -34,12 +37,17 @@ use signal_hook::{
     flag,
 };
 
+use incident::{CapsuleTrigger, IncidentCapsule, IncidentRecorder};
+
 const LIFECYCLE_SCENARIO: &str = "headless-read-only-lifecycle";
 const RMF_LIVE_SCENARIO: &str = "headless-rmf-live-proof";
 const RMF_FRESHNESS_SCENARIO: &str = "headless-rmf-freshness-proof";
+const INCIDENT_CAPSULE_SCENARIO: &str = "headless-incident-capsule-replay";
 const RMF_READ_ONLY_HOST_COMMAND: &str = "--run-rmf-read-only";
+const REPLAY_INCIDENT_CAPSULE_COMMAND: &str = "--replay-incident-capsule";
 const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const HOST_DIAGNOSTIC_CAPACITY: usize = 256;
+const INCIDENT_ACTION_CAPACITY: usize = 128;
 const MAX_DDS_DOMAIN_ID: u16 = 232;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -489,6 +497,7 @@ struct ReadOnlyHost {
     source_health: BTreeMap<ObservationSourceId, SourceHealth>,
     lifecycle: HostLifecycle,
     diagnostics: HostDiagnostics,
+    incident_recorder: IncidentRecorder,
 }
 
 impl ReadOnlyHost {
@@ -503,6 +512,7 @@ impl ReadOnlyHost {
                 diagnostics.record(HostEvent::LifecycleChanged(HostLifecycle::Starting));
                 diagnostics
             },
+            incident_recorder: IncidentRecorder::new(INCIDENT_ACTION_CAPACITY),
         }
     }
 
@@ -530,6 +540,7 @@ impl ReadOnlyHost {
     ) -> Result<(), ObservationBindingError> {
         self.engine
             .bind_observation(source.clone(), car.clone(), role)?;
+        self.incident_recorder.record_binding(&source, &car, role);
         self.source_health
             .entry(source)
             .or_insert_with(SourceHealth::new)
@@ -550,6 +561,7 @@ impl ReadOnlyHost {
     }
 
     fn ingest_observation(&mut self, observation: CarObservationUpdate) {
+        self.incident_recorder.record_observation(&observation);
         let observation_source = observation.provenance.source.clone();
         let observation_session = observation.provenance.session.clone();
         let car = observation.car.clone();
@@ -691,6 +703,8 @@ impl ReadOnlyHost {
         session: ObservationSessionId,
     ) -> Result<SourceSessionTransition, SourceSessionError> {
         let transition = self.engine.begin_source_session(source, session)?;
+        self.incident_recorder
+            .record_begin_session(&transition.source, &transition.active_session);
         let health = self
             .source_health
             .get_mut(&transition.source)
@@ -784,6 +798,8 @@ impl ReadOnlyHost {
         let invalidation = self
             .engine
             .invalidate_source_observations(source.clone(), session.clone())?;
+        self.incident_recorder
+            .record_invalidation(&source, &session);
         let health = self
             .source_health
             .get_mut(&source)
@@ -813,6 +829,15 @@ impl ReadOnlyHost {
             self.diagnostics
                 .record(HostEvent::LifecycleChanged(lifecycle));
         }
+    }
+
+    fn capture_incident(&self, trigger: CapsuleTrigger) -> IncidentCapsule {
+        self.incident_recorder.capture(
+            self.engine.topology(),
+            &self.lifecycle,
+            self.readiness(),
+            trigger,
+        )
     }
 }
 
@@ -872,12 +897,14 @@ struct RmfHostConfig {
     bindings: Vec<RmfHostBinding>,
     agv_as_normal: bool,
     human_as_normal: bool,
+    incident_capsule_out: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum HeadlessCommand {
     Scenario(String),
     RunRmfReadOnly(RmfHostConfig),
+    ReplayIncidentCapsule(PathBuf),
 }
 
 fn main() -> ExitCode {
@@ -904,6 +931,11 @@ fn run_command(command: HeadlessCommand) -> Result<(), String> {
                 .map_err(|error| format!("failed to register SIGTERM handler: {error}"))?;
             run_rmf_read_only_host(config, shutdown)
         }
+        HeadlessCommand::ReplayIncidentCapsule(path) => {
+            let report = IncidentCapsule::read(&path)?.replay()?;
+            println!("{}", report.render());
+            Ok(())
+        }
     }
 }
 
@@ -914,13 +946,16 @@ fn parse_command(args: impl Iterator<Item = String>) -> Result<HeadlessCommand, 
         Some(RMF_READ_ONLY_HOST_COMMAND) => {
             parse_rmf_host_config(args.into_iter().skip(1)).map(HeadlessCommand::RunRmfReadOnly)
         }
+        Some(REPLAY_INCIDENT_CAPSULE_COMMAND) if args.len() == 2 => Ok(
+            HeadlessCommand::ReplayIncidentCapsule(PathBuf::from(&args[1])),
+        ),
         _ => Err(headless_usage()),
     }
 }
 
 fn headless_usage() -> String {
     format!(
-        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal]"
+        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}|{INCIDENT_CAPSULE_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal] [--incident-capsule-out <path>]\n       liftassistant-headless {REPLAY_INCIDENT_CAPSULE_COMMAND} <internal-capsule.json>"
     )
 }
 
@@ -940,6 +975,7 @@ fn parse_rmf_host_config(mut args: impl Iterator<Item = String>) -> Result<RmfHo
     let mut native_names = BTreeSet::new();
     let mut agv_as_normal = false;
     let mut human_as_normal = false;
+    let mut incident_capsule_out = None;
 
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -1005,6 +1041,17 @@ fn parse_rmf_host_config(mut args: impl Iterator<Item = String>) -> Result<RmfHo
                     return Err("duplicate --human-as-normal".into());
                 }
             }
+            "--incident-capsule-out" => {
+                let value = parse_value(&mut args, "--incident-capsule-out")?;
+                if value.is_empty() {
+                    return Err("--incident-capsule-out cannot be empty".into());
+                }
+                set_once(
+                    &mut incident_capsule_out,
+                    PathBuf::from(value),
+                    "--incident-capsule-out",
+                )?;
+            }
             other => {
                 return Err(format!(
                     "unknown RMF host option {other:?}\n{}",
@@ -1038,6 +1085,7 @@ fn parse_rmf_host_config(mut args: impl Iterator<Item = String>) -> Result<RmfHo
         bindings,
         agv_as_normal,
         human_as_normal,
+        incident_capsule_out,
     })
 }
 
@@ -1151,6 +1199,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
     );
     let mut reported_lifecycle = host.lifecycle().clone();
     let mut reported_diagnostic_sequence = 0;
+    let mut incident_capsule_out = config.incident_capsule_out.clone();
     emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
     let mut connection_generation = 0_u64;
 
@@ -1245,6 +1294,12 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                             "RMF transport failed ({error}) and source invalidation failed: {invalidation:?}"
                         )
                     })?;
+                write_source_stale_capsule(
+                    &host,
+                    &mut incident_capsule_out,
+                    &config.source,
+                    &session,
+                )?;
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 println!(
                     "readiness={:?} lifecycle={:?} reason=transport-error",
@@ -1261,6 +1316,12 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     .map_err(|error| {
                         format!("failed to revoke stale RMF observations: {error:?}")
                     })?;
+                write_source_stale_capsule(
+                    &host,
+                    &mut incident_capsule_out,
+                    &config.source,
+                    &session,
+                )?;
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 reported_lifecycle = host.lifecycle().clone();
                 println!(
@@ -1279,6 +1340,12 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                             "RMF ingestion failed ({error}) and source invalidation failed: {invalidation:?}"
                         )
                     })?;
+                write_source_stale_capsule(
+                    &host,
+                    &mut incident_capsule_out,
+                    &config.source,
+                    &session,
+                )?;
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 println!(
                     "readiness={:?} lifecycle={:?} reason=ingestion-error",
@@ -1303,6 +1370,22 @@ fn new_host_source_session() -> Result<ObservationSessionId, String> {
         std::process::id(),
         since_epoch.as_nanos()
     )))
+}
+
+fn write_source_stale_capsule(
+    host: &ReadOnlyHost,
+    output: &mut Option<PathBuf>,
+    source: &ObservationSourceId,
+    session: &ObservationSessionId,
+) -> Result<(), String> {
+    let Some(path) = output.as_ref() else {
+        return Ok(());
+    };
+    host.capture_incident(CapsuleTrigger::source_payload_stale(source, session))
+        .write_new(path)?;
+    println!("incident capsule captured path={path:?} trigger=source.payload-stale");
+    *output = None;
+    Ok(())
 }
 
 fn emit_new_host_diagnostics(host: &ReadOnlyHost, reported_sequence: &mut u64) {
@@ -1337,10 +1420,152 @@ fn run_scenario(name: &str) -> Result<String, String> {
         LIFECYCLE_SCENARIO => run_lifecycle_scenario(),
         RMF_LIVE_SCENARIO => run_rmf_live_scenario(),
         RMF_FRESHNESS_SCENARIO => run_rmf_freshness_scenario(),
+        INCIDENT_CAPSULE_SCENARIO => run_incident_capsule_scenario(),
         _ => Err(format!(
-            "unknown scenario {name:?}; available scenarios: {LIFECYCLE_SCENARIO}, {RMF_LIVE_SCENARIO}, {RMF_FRESHNESS_SCENARIO}"
+            "unknown scenario {name:?}; available scenarios: {LIFECYCLE_SCENARIO}, {RMF_LIVE_SCENARIO}, {RMF_FRESHNESS_SCENARIO}, {INCIDENT_CAPSULE_SCENARIO}"
         )),
     }
+}
+
+fn run_incident_capsule_scenario() -> Result<String, String> {
+    let first = capture_reference_incident_capsule()?;
+    let second = capture_reference_incident_capsule()?;
+    let first_json = first.to_json()?;
+    if first_json != second.to_json()? {
+        return Err("identical incident actions did not produce an identical capsule".into());
+    }
+    let in_process = IncidentCapsule::from_json(&first_json)?.replay()?;
+
+    let path = env::temp_dir().join(format!(
+        "liftassistant-incident-capsule-{}.json",
+        std::process::id()
+    ));
+    first.write_new(&path)?;
+    let child_result = (|| {
+        let executable = env::current_exe()
+            .map_err(|error| format!("failed to locate headless executable: {error}"))?;
+        let output = Command::new(executable)
+            .arg(REPLAY_INCIDENT_CAPSULE_COMMAND)
+            .arg(&path)
+            .output()
+            .map_err(|error| format!("failed to start fresh incident replay process: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "fresh incident replay process failed: status={} stdout={} stderr={}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        let stdout = String::from_utf8(output.stdout)
+            .map_err(|error| format!("fresh replay output was not UTF-8: {error}"))?;
+        if !stdout.contains("incident replay: PASS") || !stdout.contains(in_process.trigger_id) {
+            return Err(format!(
+                "fresh incident replay did not report the captured trigger: {stdout:?}"
+            ));
+        }
+        Ok(())
+    })();
+    let cleanup_result = std::fs::remove_file(&path)
+        .map_err(|error| format!("failed to remove temporary incident capsule {path:?}: {error}"));
+    child_result?;
+    cleanup_result?;
+
+    Ok([
+        format!("scenario: {INCIDENT_CAPSULE_SCENARIO}"),
+        "scope: internal/versioned bounded artifact; no stable schema, database, cloud upload, or write authority".into(),
+        "capture determinism: PASS (identical bounded actions produced identical JSON)".into(),
+        "lifecycle coverage: PASS (freshness invalidation, same-session recovery, explicit session reset, incomplete resolution, readiness recovery)".into(),
+        format!(
+            "fresh process replay: PASS (trigger={}, actions={})",
+            in_process.trigger_id, in_process.action_count
+        ),
+        "temporary artifact cleanup: PASS".into(),
+        String::new(),
+    ]
+    .join("\n"))
+}
+
+fn capture_reference_incident_capsule() -> Result<IncidentCapsule, String> {
+    let source = ObservationSourceId::new("fixture/capsule-source");
+    let car = CarId::new("capsule-car");
+    let session_a = ObservationSessionId::new("capsule-session-A");
+    let session_b = ObservationSessionId::new("capsule-session-B");
+    let mut host = ReadOnlyHost::new(
+        BuildingTopology::new([Floor::new(1), Floor::new(2)])
+            .expect("capsule fixture topology is valid"),
+    );
+    host.bind_observation(
+        source.clone(),
+        car.clone(),
+        ObservationBindingRole::Operational,
+    )
+    .map_err(|error| format!("capsule fixture binding failed: {error:?}"))?;
+    host.begin_source_session(source.clone(), session_a.clone())
+        .map_err(|error| format!("capsule fixture session A failed: {error:?}"))?;
+
+    let mut initial = complete_observation(source.clone(), session_a.clone(), 1, Floor::new(1));
+    initial.car = car.clone();
+    host.ingest_observation(initial.into());
+    if host.readiness() != Readiness::ReadOnly {
+        return Err("capsule fixture did not reach initial readiness".into());
+    }
+
+    host.mark_source_payload_stale(source.clone(), session_a.clone())
+        .map_err(|error| format!("capsule fixture invalidation failed: {error:?}"))?;
+    if host.readiness() != Readiness::NotReady {
+        return Err("capsule fixture freshness invalidation did not revoke readiness".into());
+    }
+    let mut recovered = complete_observation(source.clone(), session_a, 2, Floor::new(1));
+    recovered.car = car.clone();
+    host.ingest_observation(recovered.into());
+    if host.readiness() != Readiness::ReadOnly {
+        return Err("capsule fixture did not recover under the active session".into());
+    }
+
+    host.begin_source_session(source.clone(), session_b.clone())
+        .map_err(|error| format!("capsule fixture session B failed: {error:?}"))?;
+    let partial = CarObservationUpdate {
+        provenance: ObservationProvenance {
+            source: source.clone(),
+            session: session_b.clone(),
+            sequence: ObservationSequence::new(1),
+        },
+        car: car.clone(),
+        position: Some(PositionEvidence::FloorReference(Floor::new(2))),
+        motion: None,
+        door: None,
+        mode: None,
+        reported_destination: None,
+    };
+    host.ingest_observation(partial);
+    if host.readiness() != Readiness::NotReady {
+        return Err("capsule fixture incomplete evidence unexpectedly became ready".into());
+    }
+
+    let mut complete = complete_observation(source.clone(), session_b.clone(), 2, Floor::new(2));
+    complete.car = car.clone();
+    host.ingest_observation(complete.clone().into());
+    if host.readiness() != Readiness::ReadOnly {
+        return Err("capsule fixture session B did not resolve".into());
+    }
+    host.ingest_observation(complete.into());
+
+    let anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+        source,
+        session: session_b,
+        previous: ObservationSequence::new(2),
+        received: ObservationSequence::new(2),
+    };
+    if !matches!(host.lifecycle(), HostLifecycle::Degraded(_)) {
+        return Err("capsule fixture duplicate sequence did not degrade readiness".into());
+    }
+    let trigger = CapsuleTrigger::observation_sequence_not_increasing(
+        &car,
+        ObservationBindingRole::Operational,
+        &anomaly,
+    )?;
+    Ok(host.capture_incident(trigger))
 }
 
 fn run_lifecycle_scenario() -> Result<String, String> {
@@ -2031,6 +2256,8 @@ mod tests {
             "--bind",
             "Lift2=B:auxiliary",
             "--agv-as-normal",
+            "--incident-capsule-out",
+            "/tmp/liftassistant-test-incident.json",
         ]))
         .expect("minimal production RMF configuration is valid");
         let HeadlessCommand::RunRmfReadOnly(config) = command else {
@@ -2057,6 +2284,10 @@ mod tests {
         assert_eq!(config.bindings[1].role, ObservationBindingRole::Auxiliary);
         assert!(config.agv_as_normal);
         assert!(!config.human_as_normal);
+        assert_eq!(
+            config.incident_capsule_out,
+            Some(PathBuf::from("/tmp/liftassistant-test-incident.json"))
+        );
     }
 
     #[test]
@@ -2241,6 +2472,78 @@ mod tests {
             .map(|entry| entry.sequence)
             .collect::<Vec<_>>();
         assert_eq!(sequences, vec![3, 4, 5]);
+    }
+
+    #[test]
+    fn incident_capsule_round_trip_replays_lifecycle_and_sequence_trigger() {
+        let capsule = capture_reference_incident_capsule()
+            .expect("deterministic fixture produces an incident capsule");
+        let json = capsule.to_json().expect("internal capsule encodes");
+        assert!(json.contains("liftassistant.incident-capsule/1"));
+        assert!(json.contains("invalidate_source"));
+        assert!(json.contains("begin_source_session"));
+        let decoded = IncidentCapsule::from_json(&json).expect("internal capsule decodes");
+        assert_eq!(decoded, capsule);
+
+        let report = decoded
+            .replay()
+            .expect("fresh host replay reproduces the incident");
+        assert_eq!(report.trigger_id, "observation.sequence-not-increasing");
+        assert_eq!(report.action_count, 8);
+        assert!(report.render().contains("incident replay: PASS"));
+    }
+
+    #[test]
+    fn incident_capsule_rejects_unknown_version() {
+        let capsule = capture_reference_incident_capsule()
+            .expect("deterministic fixture produces an incident capsule");
+        let json = capsule
+            .to_json()
+            .expect("internal capsule encodes")
+            .replace(
+                "liftassistant.incident-capsule/1",
+                "liftassistant.incident-capsule/999",
+            );
+
+        let error = IncidentCapsule::from_json(&json)
+            .expect_err("unknown internal capsule versions fail explicitly");
+        assert!(error.contains("unsupported incident capsule version"));
+    }
+
+    #[test]
+    fn configured_stale_trigger_writes_one_replayable_capsule() {
+        let path = env::temp_dir().join(format!(
+            "liftassistant-stale-capsule-test-{}.json",
+            std::process::id()
+        ));
+        let mut host = reference_host();
+        host.ingest_observation(
+            complete_observation(
+                reference_source_id(),
+                reference_session_id(),
+                1,
+                Floor::new(4),
+            )
+            .into(),
+        );
+        host.mark_source_payload_stale(reference_source_id(), reference_session_id())
+            .expect("fixture source can become stale");
+        let mut output = Some(path.clone());
+        write_source_stale_capsule(
+            &host,
+            &mut output,
+            &reference_source_id(),
+            &reference_session_id(),
+        )
+        .expect("configured incident path captures the first stale trigger");
+        assert_eq!(output, None);
+
+        let report = IncidentCapsule::read(&path)
+            .and_then(|capsule| capsule.replay())
+            .expect("captured stale capsule replays in a fresh host");
+        let cleanup = std::fs::remove_file(&path);
+        cleanup.expect("fixture capsule is removed");
+        assert_eq!(report.trigger_id, "source.payload-stale");
     }
 
     #[test]

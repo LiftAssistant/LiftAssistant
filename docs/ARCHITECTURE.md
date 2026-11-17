@@ -113,6 +113,15 @@ failure can revoke current operational truth but does not become an elevator equ
 fault, inferred root cause, or maintenance action. This line-oriented operator/developer
 view remains internal and experimental; it is not a public registry or persistence format.
 
+An internal incident capsule may freeze a bounded host action window together with topology,
+explicit observation bindings, source/session metadata, a deterministic trigger, and the
+expected lifecycle/readiness outcome. Its replay harness constructs a fresh host/Engine and
+reapplies only recorded explicit session, observation, and invalidation actions. A capsule
+missing an explicit source-session action is rejected rather than inferring lifecycle from an
+observation. The JSON representation is versioned, size-bounded, create-new, and experimental;
+it is neither a public schema nor a telemetry database. Production capture is opt-in and the
+current RMF host writes at most the first configured payload-stale capsule.
+
 The headless host keeps lifecycle and readiness separate: a live process begins
 `Starting/NotReady`, incomplete Operational evidence remains `Synchronizing/NotReady`,
 and sufficient Operational evidence permits `ReadyReadOnly/ReadOnly`. Restart or an

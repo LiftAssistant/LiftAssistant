@@ -88,6 +88,14 @@ cargo run -p liftassistant-tui -- --scenario diagnostic-incident-replay
 
 This scenario records canonical observations and Engine events in a bounded in-memory flight recorder, detects a deliberately repeated source sequence, freezes a small before/after evidence window, and replays the incident through the same deterministic detector. An anomaly is evidence of an invariant violation, not an equipment-fault or root-cause claim. No database, file format, cloud telemetry, or public diagnostic schema is involved.
 
+Exercise the internal versioned incident-capsule path, including a fresh replay process:
+
+~~~bash
+cargo run -p liftassistant-headless -- --scenario headless-incident-capsule-replay
+~~~
+
+The production RMF command may additionally receive `--incident-capsule-out <path>` to create one bounded capsule at the first payload-stale trigger. Files are created without overwriting an existing path and can be replayed with `liftassistant-headless --replay-incident-capsule <path>`. The JSON wire representation is private, experimental, size-bounded, and explicitly versioned; it is not a stable/public schema or an unbounded telemetry archive.
+
 Run the non-interactive headless/read-only lifecycle proof:
 
 ~~~bash
