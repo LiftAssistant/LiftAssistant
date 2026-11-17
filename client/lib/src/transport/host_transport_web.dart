@@ -107,7 +107,10 @@ final class WebHostTransport implements HostTransport {
     }
     final _JSAbortController abortController = _JSAbortController();
     _activeControllers.add(abortController);
-    final Timer timeoutTimer = Timer(requestTimeout, abortController.abort);
+    final Timer timeoutTimer = Timer(
+      requestTimeout,
+      () => abortController.abort(),
+    );
 
     try {
       final _JSHeaders headers = _JSHeaders()
@@ -164,7 +167,10 @@ final class WebHostTransport implements HostTransport {
     }
     final _JSAbortController abortController = _JSAbortController();
     _activeControllers.add(abortController);
-    final Timer connectTimer = Timer(requestTimeout, abortController.abort);
+    final Timer connectTimer = Timer(
+      requestTimeout,
+      () => abortController.abort(),
+    );
 
     final _JSResponse response;
     try {
