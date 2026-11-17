@@ -159,10 +159,11 @@ cargo run -p liftassistant-headless -- --run-rmf-read-only \
   --floor L1=1 --floor L2=2 --floor L3=3 \
   --bind Lift1=A:operational \
   --bind Lift2=B:operational \
+  --api-listen 127.0.0.1:8080 \
   --agv-as-normal
 ~~~
 
-The host creates an adapter-owned source session, reports lifecycle/readiness changes, revokes stale operational truth, reconnects for same-session recovery, and handles SIGINT/SIGTERM cooperatively even before the first payload arrives. Every floor, native-to-logical binding, binding role, interaction-mode projection, and freshness duration is explicit. This CLI is internal/experimental rather than a stable configuration or public API, and it remains subscription-only.
+The host creates an adapter-owned source session, reports lifecycle/readiness changes, revokes stale operational truth, reconnects for same-session recovery, and handles SIGINT/SIGTERM cooperatively even before the first payload arrives. Every floor, native-to-logical binding, binding role, interaction-mode projection, and freshness duration is explicit. The API is disabled when `--api-listen` is omitted. Binding a non-loopback address is allowed only as an explicit operator choice and emits a warning because this experimental read-only API has no authentication, TLS, or RBAC; it also does not enable wildcard CORS. This CLI and wire format are internal/experimental rather than stable public contracts, and the host remains subscription-only.
 
 Its line-oriented internal diagnostics use bounded monotonic host sequences and machine-readable IDs while keeping transport, source/session, mapping, observation/resolution, and readiness evidence distinct. Each applicable record carries source, session, logical car, binding role, and source-native entity context; the Engine Flight Recorder continues to retain bounded canonical observations and semantic events. These records are evidence for operators/developers, not elevator-fault, root-cause, repair, or stable public-schema claims. DDS-backed ROS domains are rejected above the ROS 2 maximum of 232 before transport creation.
 

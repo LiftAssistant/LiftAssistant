@@ -941,6 +941,64 @@ struct RmfHostConfig {
     agv_as_normal: bool,
     human_as_normal: bool,
     incident_capsule_out: Option<PathBuf>,
+    api_listen: Option<SocketAddr>,
+}
+
+struct ExperimentalApiServer {
+    publisher: http_api::ReadModelPublisher,
+    shutdown: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+impl ExperimentalApiServer {
+    fn start(
+        listen: SocketAddr,
+        host: &ReadOnlyHost,
+        shutdown: Arc<AtomicBool>,
+    ) -> Result<Self, String> {
+        let listener = TcpListener::bind(listen)
+            .map_err(|error| format!("failed to bind experimental read-only API: {error}"))?;
+        let local_addr = listener
+            .local_addr()
+            .map_err(|error| format!("failed to inspect experimental API listener: {error}"))?;
+        if !local_addr.ip().is_loopback() {
+            eprintln!(
+                "warning: experimental unauthenticated read-only API is exposed on {local_addr}"
+            );
+        }
+        println!("experimental read-only API listening on http://{local_addr}");
+        let publisher = http_api::ReadModelPublisher::new(host.read_model());
+        let server_publisher = publisher.clone();
+        let server_shutdown = Arc::clone(&shutdown);
+        let thread = thread::Builder::new()
+            .name("liftassistant-experimental-api".into())
+            .spawn(move || {
+                if let Err(error) = http_api::serve(listener, server_publisher, server_shutdown) {
+                    eprintln!("warning: experimental read-only API stopped: {error}");
+                }
+            })
+            .map_err(|error| format!("failed to start experimental API thread: {error}"))?;
+        Ok(Self {
+            publisher,
+            shutdown,
+            thread: Some(thread),
+        })
+    }
+
+    fn publish(&self, host: &ReadOnlyHost) {
+        let _ = self.publisher.publish(host.read_model());
+    }
+}
+
+impl Drop for ExperimentalApiServer {
+    fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        if let Some(thread) = self.thread.take() {
+            if thread.join().is_err() {
+                eprintln!("warning: experimental read-only API thread panicked");
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1060,7 +1118,7 @@ fn parse_command(args: impl Iterator<Item = String>) -> Result<HeadlessCommand, 
 
 fn headless_usage() -> String {
     format!(
-        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}|{INCIDENT_CAPSULE_SCENARIO}|{SANITIZED_CAPSULE_SCENARIO}|{READ_MODEL_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal] [--incident-capsule-out <path>]\n       liftassistant-headless {REPLAY_INCIDENT_CAPSULE_COMMAND} <internal-capsule.json>\n       liftassistant-headless {SANITIZE_INCIDENT_CAPSULE_COMMAND} <private-capsule.json> <candidate.json>\n       liftassistant-headless {SERVE_SNAPSHOT_FIXTURE_COMMAND} <ip:port>"
+        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}|{INCIDENT_CAPSULE_SCENARIO}|{SANITIZED_CAPSULE_SCENARIO}|{READ_MODEL_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal] [--incident-capsule-out <path>] [--api-listen <ip:port>]\n       liftassistant-headless {REPLAY_INCIDENT_CAPSULE_COMMAND} <internal-capsule.json>\n       liftassistant-headless {SANITIZE_INCIDENT_CAPSULE_COMMAND} <private-capsule.json> <candidate.json>\n       liftassistant-headless {SERVE_SNAPSHOT_FIXTURE_COMMAND} <ip:port>"
     )
 }
 
@@ -1081,6 +1139,7 @@ fn parse_rmf_host_config(mut args: impl Iterator<Item = String>) -> Result<RmfHo
     let mut agv_as_normal = false;
     let mut human_as_normal = false;
     let mut incident_capsule_out = None;
+    let mut api_listen = None;
 
     while let Some(flag) = args.next() {
         match flag.as_str() {
@@ -1157,6 +1216,13 @@ fn parse_rmf_host_config(mut args: impl Iterator<Item = String>) -> Result<RmfHo
                     "--incident-capsule-out",
                 )?;
             }
+            "--api-listen" => {
+                let value = parse_value(&mut args, "--api-listen")?;
+                let listen = value
+                    .parse::<SocketAddr>()
+                    .map_err(|error| format!("invalid --api-listen address {value:?}: {error}"))?;
+                set_once(&mut api_listen, listen, "--api-listen")?;
+            }
             other => {
                 return Err(format!(
                     "unknown RMF host option {other:?}\n{}",
@@ -1191,6 +1257,7 @@ fn parse_rmf_host_config(mut args: impl Iterator<Item = String>) -> Result<RmfHo
         agv_as_normal,
         human_as_normal,
         incident_capsule_out,
+        api_listen,
     })
 }
 
@@ -1286,6 +1353,10 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
         .map_err(|error| format!("failed to begin RMF source session: {error:?}"))?;
     let freshness = RmfFreshnessPolicy::new(config.max_payload_silence)
         .map_err(|error| format!("invalid RMF freshness configuration: {error}"))?;
+    let api_server = config
+        .api_listen
+        .map(|listen| ExperimentalApiServer::start(listen, &host, Arc::clone(&shutdown)))
+        .transpose()?;
 
     println!("LiftAssistant RMF read-only host starting");
     println!(
@@ -1325,6 +1396,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     session.clone(),
                     error.to_string(),
                 );
+                publish_read_model(&api_server, &host);
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 return Err(format!(
                     "failed to create RMF read-only subscriber: {error}"
@@ -1332,6 +1404,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
             }
         };
         host.note_transport_subscriber_created(adapter.source());
+        publish_read_model(&api_server, &host);
         emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
         let mut ingestion_error = None;
         let outcome = subscriber.receive_until_stale_or_shutdown(
@@ -1350,6 +1423,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                             native_entity,
                             error.to_string(),
                         );
+                        publish_read_model(&api_server, &host);
                         emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                         ingestion_error = Some(error.to_string());
                         return RmfReceiveControl::Stop;
@@ -1367,11 +1441,13 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                         native_entity,
                         error.clone(),
                     );
+                    publish_read_model(&api_server, &host);
                     emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                     ingestion_error = Some(error);
                     return RmfReceiveControl::Stop;
                 }
                 host.ingest_observation(mapped.update);
+                publish_read_model(&api_server, &host);
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 if host.lifecycle() != &reported_lifecycle {
                     reported_lifecycle = host.lifecycle().clone();
@@ -1399,6 +1475,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                             "RMF transport failed ({error}) and source invalidation failed: {invalidation:?}"
                         )
                     })?;
+                publish_read_model(&api_server, &host);
                 write_source_stale_capsule(
                     &host,
                     &mut incident_capsule_out,
@@ -1421,6 +1498,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     .map_err(|error| {
                         format!("failed to revoke stale RMF observations: {error:?}")
                     })?;
+                publish_read_model(&api_server, &host);
                 write_source_stale_capsule(
                     &host,
                     &mut incident_capsule_out,
@@ -1445,6 +1523,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                             "RMF ingestion failed ({error}) and source invalidation failed: {invalidation:?}"
                         )
                     })?;
+                publish_read_model(&api_server, &host);
                 write_source_stale_capsule(
                     &host,
                     &mut incident_capsule_out,
@@ -1464,6 +1543,12 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
 
     println!("LiftAssistant RMF read-only host stopped gracefully");
     Ok(())
+}
+
+fn publish_read_model(api_server: &Option<ExperimentalApiServer>, host: &ReadOnlyHost) {
+    if let Some(api_server) = api_server {
+        api_server.publish(host);
+    }
 }
 
 fn new_host_source_session() -> Result<ObservationSessionId, String> {
@@ -2525,6 +2610,52 @@ mod tests {
             config.incident_capsule_out,
             Some(PathBuf::from("/tmp/liftassistant-test-incident.json"))
         );
+        assert_eq!(config.api_listen, None);
+    }
+
+    #[test]
+    fn production_api_requires_an_explicit_valid_listen_address() {
+        let command = parse_command(command_args(&[
+            RMF_READ_ONLY_HOST_COMMAND,
+            "--domain-id",
+            "48",
+            "--source-id",
+            "rmf/hotel-production",
+            "--max-silence-ms",
+            "3000",
+            "--floor",
+            "L1=1",
+            "--bind",
+            "Lift1=A:operational",
+            "--api-listen",
+            "127.0.0.1:8080",
+        ]))
+        .expect("explicit loopback API configuration is valid");
+        let HeadlessCommand::RunRmfReadOnly(config) = command else {
+            panic!("expected production host command");
+        };
+        assert_eq!(
+            config.api_listen,
+            Some("127.0.0.1:8080".parse().expect("fixture address parses"))
+        );
+
+        let invalid = parse_command(command_args(&[
+            RMF_READ_ONLY_HOST_COMMAND,
+            "--domain-id",
+            "48",
+            "--source-id",
+            "rmf/hotel-production",
+            "--max-silence-ms",
+            "3000",
+            "--floor",
+            "L1=1",
+            "--bind",
+            "Lift1=A:operational",
+            "--api-listen",
+            "localhost:8080",
+        ]))
+        .expect_err("the API listen address must resolve explicitly to an IP socket");
+        assert!(invalid.contains("invalid --api-listen address"));
     }
 
     #[test]

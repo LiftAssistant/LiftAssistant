@@ -137,6 +137,20 @@ composition does not acquire the simulator or an unproved BACnet transport. This
 second canonical source family can exercise the internal platform; it does not prove live
 BACnet discovery, COV/liveliness/freshness, controller compatibility, or production operation.
 
+The first external read-only client boundary belongs only to `liftassistant-headless`. An
+API-owned `experimental/v0` JSON projection exposes current host lifecycle/readiness,
+Engine-owned operational cars, source/session health and binding roles, recent bounded
+diagnostics, and a host-local monotonic revision without serializing canonical Rust or
+internal event types. HTTP provides a complete current snapshot; SSE distributes the same
+complete current model whenever that revision changes. A bounded latest-value channel may
+coalesce intermediate revisions for slow clients, and reconnect begins from a fresh complete
+snapshot. SSE is therefore current-state distribution, not the Flight Recorder or Incident
+Capsule forensic history, and it promises no durable cursor, exactly-once delivery, or event
+backlog. HTTP connection state and keepalive have no role in source freshness or Engine
+readiness. The server is disabled by default, requires an explicit bind address, has no write
+route or wildcard CORS, and remains experimental and unauthenticated rather than a stable
+public API or authorization boundary.
+
 The headless host keeps lifecycle and readiness separate: a live process begins
 `Starting/NotReady`, incomplete Operational evidence remains `Synchronizing/NotReady`,
 and sufficient Operational evidence permits `ReadyReadOnly/ReadOnly`. Restart or an

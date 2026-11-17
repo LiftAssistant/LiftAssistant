@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.8 and M5.9a–c are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING` but no longer blocks client-platform work. **M5.9d — Production Host Integration is READY.** The current authorization ends after M5.10 and does not include Flutter, WebUI, HA/BMS, or M6.
+M5.1 through M5.9 are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING` but no longer blocks client-platform work. **M5.10 — Independent External CLI Client is READY.** The current authorization ends after M5.10 and does not include Flutter, WebUI, HA/BMS, or M6.
 
 ## Validated baseline
 
@@ -878,6 +878,27 @@ Validation: focused SSE and snapshot listener tests, process-level child server 
 
 ### M5.9d — Production Host Integration
 
+**IMPLEMENTED.**
+
+Implemented behavior and evidence:
+
+- the real long-running RMF read-only composition accepts optional `--api-listen <ip:port>`; omission leaves the API fully disabled, and invalid/duplicate addresses fail configuration explicitly;
+- an explicit non-loopback bind is allowed but emits a clear `experimental unauthenticated read-only API` warning. No implicit `0.0.0.0`, authentication/TLS/RBAC fiction, wildcard CORS, or write endpoint was added;
+- HTTP serving runs in its own headless-boundary thread and consumes only complete projected models. Binding failure fails the explicitly requested startup, while later server/client failure can only emit an API warning and cannot mutate Engine, source health, operational truth, or readiness;
+- every real host mutation path publishes the latest projection: subscriber creation, discovery/mapping outcome, canonical ingestion, transport failure, and stale invalidation. Unchanged revisions are ignored and the SSE boundary retains only the newest complete value;
+- the server shares cooperative SIGINT/SIGTERM shutdown without converting the existing RMF composition to Tokio. HTTP dependencies remain absent from model, Core, Engine, runtime, and RMF adapter crates;
+- a real production-host process with no RMF publisher exposed the explicitly configured loopback API, served `Synchronizing/NotReady` snapshot and SSE state from the actual Host, retained no CORS header, then exited successfully on SIGTERM with its API listener gone. The API-disabled default is also covered by configuration regression.
+
+Validation: production configuration tests, warning-free focused headless all-target clippy, real production Host plus independent `curl` process proof, cooperative shutdown/resource cleanup checks, and diff/whitespace review pass.
+
+### M5.9 — Experimental Read-only API
+
+**IMPLEMENTED — M5.9a through M5.9d complete.**
+
+The bounded API exits are satisfied: snapshot and SSE work across real process boundaries, state changes are pushed without client polling, complete latest-value snapshots permit reconnect recovery without unbounded history, serving is disabled by default, client/server concerns cannot alter Engine truth, and no write/CORS/canonical/protocol-specific/stable-public boundary was introduced.
+
+### M5.10 — Independent External CLI Client
+
 **READY.**
 
-Integrate the proven snapshot/SSE boundary into the real long-running RMF read-only host behind an explicit listen argument. It must remain disabled by default, use only the real host projection, shut down cooperatively, and warn clearly when an operator explicitly exposes the unauthenticated experimental read-only API beyond loopback. API or client failure must not mutate Engine truth or source/readiness state.
+Add one minimal separate read-only CLI process that consumes only the experimental HTTP snapshot/SSE boundary and displays revision, lifecycle/readiness, cars, source/session summary, and recent diagnostics. It must not instantiate Engine, link the RMF adapter, share host memory, add a client SDK/framework, or start Flutter/WebUI work. Completion requires a real Host process plus independent LiftAssistant CLI process proof, then the mandatory HUMAN-CHECK boundary.

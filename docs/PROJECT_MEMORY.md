@@ -127,6 +127,8 @@ A deterministic sanitization step can produce a separate candidate capsule witho
 
 The M5.8 architecture check reuses the existing recorded BACnet Lift mapper as a headless test-only dependency. BACnet-origin canonical observations exercise the same explicit host binding/session, readiness and stale recovery, typed diagnostics, incident replay, and sanitization boundaries as RMF without adding `liftassistant-sim` or a BACnet stack to the normal headless dependency tree. This is durable evidence that those internal platform paths are protocol-neutral, while live BACnet transport, COV/liveliness/freshness, controller compatibility, and a second live production source remain unvalidated and blocked on real external input.
 
+The first Host-to-external-client boundary is an explicitly enabled, headless-owned HTTP JSON snapshot plus SSE current-state stream. Its separate `experimental/v0` DTO projects existing lifecycle/readiness, Engine-owned cars, source/session health, roles, bounded diagnostics, and a host-local revision without changing canonical semantics or freezing internal Rust/event structures. SSE retains only the latest complete snapshot and may coalesce intermediate revisions; reconnect receives current state, while Flight Recorder and Incident Capsule retain forensic/replay responsibility. API connection/keepalive state cannot affect source freshness or Engine readiness. The server has no write route, wildcard CORS, authentication, TLS, or RBAC claim and does not bind anywhere unless the operator explicitly supplies a listen address.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.
