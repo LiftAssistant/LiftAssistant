@@ -5,9 +5,14 @@ import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
 
 class SourceHealthCard extends StatelessWidget {
-  const SourceHealthCard({super.key, required this.source});
+  const SourceHealthCard({
+    super.key,
+    required this.source,
+    this.fillRowHeight = false,
+  });
 
   final SourceHealth source;
+  final bool fillRowHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -51,7 +56,7 @@ class SourceHealthCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(5),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: fillRowHeight ? MainAxisSize.max : MainAxisSize.min,
           children: <Widget>[
             // Source header + 3 orthogonal health dimensions
             Padding(
@@ -62,23 +67,31 @@ class SourceHealthCard extends StatelessWidget {
                   Row(
                     children: <Widget>[
                       Expanded(
-                        child: Text(
-                          source.source,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: instrumentMonoStyle(
-                            context,
-                            fontSize: 13.5,
-                            fontWeight: FontWeight.w700,
+                        flex: 2,
+                        child: Tooltip(
+                          message: 'ObservationSourceId: ${source.source}',
+                          child: Text(
+                            source.source,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: instrumentMonoStyle(
+                              context,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        '${source.observations.length} bound',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: palette.mutedText,
+                      Flexible(
+                        child: Text(
+                          '${source.observations.length} bound',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: palette.mutedText,
+                          ),
                         ),
                       ),
                     ],
@@ -86,7 +99,7 @@ class SourceHealthCard extends StatelessWidget {
                   const SizedBox(height: 6),
                   Wrap(
                     spacing: 14,
-                    runSpacing: 5,
+                    runSpacing: 4,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: <Widget>[
                       _SourceTelemetryItem(
@@ -123,7 +136,7 @@ class SourceHealthCard extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
-                    vertical: 6,
+                    vertical: 5.5,
                   ),
                   child: Row(
                     children: <Widget>[
@@ -157,7 +170,7 @@ class SourceHealthCard extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
-                    vertical: 8,
+                    vertical: 7.5,
                   ),
                   child: Text(
                     'No bound logical cars on this source.',
@@ -171,6 +184,9 @@ class SourceHealthCard extends StatelessWidget {
                   observation: source.observations[i],
                   isFirst: i == 0,
                 ),
+
+            if (fillRowHeight)
+              Expanded(child: ColoredBox(color: palette.surface)),
           ],
         ),
       ),
@@ -199,13 +215,19 @@ class _SourceTelemetryItem extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Text(
-            '$label ',
-            style: TextStyle(fontSize: 11, color: palette.mutedText),
+          Flexible(
+            flex: 2,
+            child: Text(
+              '$label ',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: palette.mutedText),
+            ),
           ),
           StatusDot(color: dotColor, hollow: hollowDot, size: 6),
           const SizedBox(width: 4.5),
           Flexible(
+            flex: 4,
             child: Tooltip(
               message: '$label: $value',
               child: Text(
@@ -256,54 +278,56 @@ class _ObservationBindingRow extends StatelessWidget {
       decoration: BoxDecoration(
         color: isFirst
             ? palette.elevatedSurface
-            : palette.elevatedSurface.withValues(alpha: 0.7),
+            : palette.elevatedSurface.withValues(alpha: 0.72),
         border: Border(top: BorderSide(color: palette.border)),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6.5),
         child: Wrap(
           spacing: 8,
           runSpacing: 4,
           alignment: WrapAlignment.spaceBetween,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            Row(
-              mainAxisSize: MainAxisSize.min,
+            Wrap(
+              spacing: 7,
+              runSpacing: 3,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
-                Flexible(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 150),
-                    child: Tooltip(
-                      message: observation.car,
-                      child: Text(
-                        observation.car,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: instrumentMonoStyle(
-                          context,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                        ),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  child: Tooltip(
+                    message: observation.car,
+                    child: Text(
+                      observation.car,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: instrumentMonoStyle(
+                        context,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: SemanticBadge(
-                    label: isOperational ? 'Operational' : 'Auxiliary · diag',
-                    foreground: isOperational
-                        ? palette.operationalRole
-                        : palette.auxiliaryRole,
-                    background: isOperational
-                        ? palette.operationalRoleContainer
-                        : palette.auxiliaryRoleContainer,
-                    outlined: !isOperational,
-                    tooltip: isOperational
-                        ? 'Operational authority: permitted into LiftAssistant operational truth when resolved.'
-                        : 'Auxiliary role: inspectable and diagnostic only — excluded from operational truth and never used for automatic failover.',
-                  ),
+                SemanticBadge(
+                  label: isOperational ? 'Operational' : 'Auxiliary',
+                  foreground: isOperational
+                      ? palette.operationalRole
+                      : palette.auxiliaryRole,
+                  background: isOperational
+                      ? palette.operationalRoleContainer
+                      : palette.auxiliaryRoleContainer,
+                  outlined: !isOperational,
+                  tooltip: isOperational
+                      ? 'Operational authority: permitted into LiftAssistant operational truth when resolved.'
+                      : 'Auxiliary role: inspectable and diagnostic only — excluded from operational truth and never used for automatic failover.',
                 ),
+                if (!isOperational)
+                  Text(
+                    'diagnostic only',
+                    style: TextStyle(fontSize: 10.5, color: palette.mutedText),
+                  ),
               ],
             ),
             Row(
@@ -311,21 +335,25 @@ class _ObservationBindingRow extends StatelessWidget {
               children: <Widget>[
                 StatusDot(color: availColor, hollow: availHollow, size: 6.5),
                 const SizedBox(width: 5),
-                Text(
-                  observation.availability.wireValue,
-                  style: instrumentMonoStyle(
-                    context,
-                    fontSize: 11.5,
-                    fontWeight:
-                        observation.availability ==
-                            ObservationAvailability.resolved
-                        ? FontWeight.w500
-                        : FontWeight.w700,
-                    color:
-                        observation.availability ==
-                            ObservationAvailability.resolved
-                        ? palette.subtleText
-                        : availColor,
+                Flexible(
+                  child: Text(
+                    observation.availability.wireValue,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: instrumentMonoStyle(
+                      context,
+                      fontSize: 11.5,
+                      fontWeight:
+                          observation.availability ==
+                              ObservationAvailability.resolved
+                          ? FontWeight.w500
+                          : FontWeight.w700,
+                      color:
+                          observation.availability ==
+                              ObservationAvailability.resolved
+                          ? palette.subtleText
+                          : availColor,
+                    ),
                   ),
                 ),
               ],

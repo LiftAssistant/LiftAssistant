@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
+import '../api/host_url.dart';
 import '../api/read_model.dart';
 import '../state/client_controller.dart';
 import '../state/client_state.dart';
@@ -31,6 +33,26 @@ class ClientShellPage extends StatefulWidget {
 
 class _ClientShellPageState extends State<ClientShellPage> {
   CompactSection _compactSection = CompactSection.cars;
+  final DiagnosticsFilterController _diagnosticsFilter =
+      DiagnosticsFilterController();
+  HostEndpoint? _lastEndpoint;
+
+  @override
+  void dispose() {
+    _diagnosticsFilter.dispose();
+    super.dispose();
+  }
+
+  void _syncEndpointReset(HostEndpoint? currentEndpoint) {
+    if (_lastEndpoint != null &&
+        currentEndpoint != null &&
+        _lastEndpoint != currentEndpoint) {
+      _diagnosticsFilter.resetAll();
+    }
+    if (currentEndpoint != null) {
+      _lastEndpoint = currentEndpoint;
+    }
+  }
 
   void _openHostConfig(ClientState state) {
     showHostConnectionModal(
@@ -52,6 +74,8 @@ class _ClientShellPageState extends State<ClientShellPage> {
       listenable: widget.controller,
       builder: (BuildContext context, _) {
         final ClientState state = widget.controller.state;
+        _syncEndpointReset(state.endpoint);
+
         final Size viewport = MediaQuery.sizeOf(context);
         final bool isSplitDesktop =
             viewport.width >= 920 && viewport.height >= 460;
@@ -65,6 +89,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                     context,
                     state,
                     state.snapshot!,
+                    viewport: viewport,
                     isSplitDesktop: isSplitDesktop,
                   ),
           ),
@@ -79,13 +104,17 @@ class _ClientShellPageState extends State<ClientShellPage> {
     double screenWidth,
   ) {
     final InstrumentPalette palette = context.palette;
-    final bool showReadOnlyTag = screenWidth >= 620;
-    final bool showEndpointOriginInline = screenWidth >= 540;
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final double barHeight = (44.0 * textScale.clamp(1.0, 1.45))
+        .roundToDouble();
+    final bool showReadOnlyTag = screenWidth >= 620 && textScale <= 1.35;
+    final bool showEndpointOriginInline =
+        screenWidth >= (540.0 * textScale.clamp(1.0, 1.35));
     final (String phaseLabel, Color phaseColor, Color _, bool phaseHollow) =
         describeConnectionPhase(state.phase, palette);
 
     return PreferredSize(
-      preferredSize: const Size.fromHeight(46),
+      preferredSize: Size.fromHeight(barHeight),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: palette.surface,
@@ -93,10 +122,10 @@ class _ClientShellPageState extends State<ClientShellPage> {
         ),
         child: SafeArea(
           bottom: false,
-          child: SizedBox(
-            height: 46,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: barHeight),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
               child: Row(
                 children: <Widget>[
                   Expanded(
@@ -110,19 +139,21 @@ class _ClientShellPageState extends State<ClientShellPage> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 14.5,
+                              fontSize: 14,
                               fontWeight: FontWeight.w600,
+                              letterSpacing: -0.15,
                             ),
                           ),
                         ),
                         if (showReadOnlyTag) ...<Widget>[
                           const SizedBox(width: 8),
                           Tooltip(
-                            message: 'Strictly read-only experimental/v0 client; zero elevator write controls.',
+                            message:
+                                'Strictly read-only experimental/v0 client; zero elevator write controls.',
                             child: Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 6,
-                                vertical: 2,
+                                vertical: 1.5,
                               ),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(4),
@@ -149,81 +180,89 @@ class _ClientShellPageState extends State<ClientShellPage> {
                   ConstrainedBox(
                     constraints: BoxConstraints(
                       maxWidth: showEndpointOriginInline
-                          ? 340
+                          ? (screenWidth * 0.46).clamp(220.0, 350.0)
                           : (screenWidth * 0.42).clamp(110.0, 168.0),
                     ),
                     child: InkWell(
                       key: const Key('topbar-host-button'),
                       borderRadius: BorderRadius.circular(5),
                       onTap: () => _openHostConfig(state),
-                      child: Container(
-                        height: 30,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        decoration: BoxDecoration(
-                          color: palette.elevatedSurface,
-                          borderRadius: BorderRadius.circular(5),
-                          border: Border.all(color: palette.border),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: <Widget>[
-                            Flexible(
-                              child: Row(
-                                key: const Key('topbar-connection-phase-badge'),
-                                mainAxisSize: MainAxisSize.min,
-                                children: <Widget>[
-                                  StatusDot(
-                                    color: phaseColor,
-                                    hollow: phaseHollow,
-                                    size: 6.5,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 30),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: palette.elevatedSurface,
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(color: palette.border),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                Flexible(
+                                  child: Row(
+                                    key: const Key(
+                                      'topbar-connection-phase-badge',
+                                    ),
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: <Widget>[
+                                      StatusDot(
+                                        color: phaseColor,
+                                        hollow: phaseHollow,
+                                        size: 6.5,
+                                      ),
+                                      const SizedBox(width: 5),
+                                      Flexible(
+                                        child: Text(
+                                          phaseLabel,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: instrumentMonoStyle(
+                                            context,
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: phaseColor,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(width: 5),
+                                ),
+                                Container(
+                                  width: 1,
+                                  height: 13,
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 7,
+                                  ),
+                                  color: palette.border,
+                                ),
+                                if (showEndpointOriginInline)
                                   Flexible(
                                     child: Text(
-                                      phaseLabel,
+                                      state.endpoint?.origin ?? 'Configure',
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: instrumentMonoStyle(
                                         context,
-                                        fontSize: 10.5,
-                                        fontWeight: FontWeight.w700,
-                                        color: phaseColor,
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w500,
+                                        color: palette.subtleText,
                                       ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Container(
-                              width: 1,
-                              height: 13,
-                              margin: const EdgeInsets.symmetric(horizontal: 7),
-                              color: palette.border,
-                            ),
-                            if (showEndpointOriginInline)
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 190,
-                                ),
-                                child: Text(
-                                  state.endpoint?.origin ?? 'No host',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: instrumentMonoStyle(
-                                    context,
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w500,
+                                  )
+                                else
+                                  Icon(
+                                    Icons.dns_outlined,
+                                    size: 13.5,
                                     color: palette.subtleText,
                                   ),
-                                ),
-                              )
-                            else
-                              Icon(
-                                Icons.dns_outlined,
-                                size: 13.5,
-                                color: palette.subtleText,
-                              ),
-                          ],
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -304,7 +343,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                               Expanded(
                                 child: Text(
                                   'Requesting snapshot from ${state.endpoint?.origin ?? "Host"}...',
-                                  maxLines: 1,
+                                  maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontSize: 12.5,
@@ -364,13 +403,19 @@ class _ClientShellPageState extends State<ClientShellPage> {
     BuildContext context,
     ClientState state,
     ReadModelSnapshot snapshot, {
+    required Size viewport,
     required bool isSplitDesktop,
   }) {
     final InstrumentPalette palette = context.palette;
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
     final bool hasAlerts =
         state.hasRetainedStaleSnapshot || state.error != null;
 
     if (isSplitDesktop) {
+      final double inspectorWidth = (viewport.width * 0.36).clamp(340.0, 460.0);
+      final bool pinDiagnosticsToolbar =
+          viewport.height >= 540 && textScale <= 1.4;
+
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -395,32 +440,45 @@ class _ClientShellPageState extends State<ClientShellPage> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  // Left primary stage: Operational Cars + Observation Sources
+                  // Left primary stage: Sliver-virtualized Operational Cars + Observation Sources
                   Expanded(
-                    flex: 6,
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          SectionHeader(
-                            title: 'Operational Cars',
-                            count: snapshot.operationalCars.length,
-                            trailingNote: 'Engine operational truth',
+                    child: CustomScrollView(
+                      slivers: <Widget>[
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                          sliver: SliverToBoxAdapter(
+                            child: SectionHeader(
+                              title: 'Operational Cars',
+                              count: snapshot.operationalCars.length,
+                            ),
                           ),
-                          const SizedBox(height: 10),
-                          _buildCarsGridOrEmpty(context, snapshot),
-                          const SizedBox(height: 20),
-                          SectionHeader(
-                            title: 'Observation Sources',
-                            count: snapshot.sources.length,
-                            trailingNote:
-                                'Session · transport · payload · role',
+                        ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                          sliver: _buildCarsSliver(
+                            context,
+                            snapshot,
+                            textScale: textScale,
                           ),
-                          const SizedBox(height: 10),
-                          _buildSourcesListOrEmpty(context, snapshot),
-                        ],
-                      ),
+                        ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+                          sliver: SliverToBoxAdapter(
+                            child: SectionHeader(
+                              title: 'Observation Sources',
+                              count: snapshot.sources.length,
+                            ),
+                          ),
+                        ),
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                          sliver: _buildSourcesSliver(
+                            context,
+                            snapshot,
+                            textScale: textScale,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   VerticalDivider(
@@ -428,25 +486,75 @@ class _ClientShellPageState extends State<ClientShellPage> {
                     thickness: 1,
                     color: palette.border,
                   ),
-                  // Right inspector pane: Full Host Diagnostics log
-                  Expanded(
-                    flex: 5,
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: <Widget>[
-                          SectionHeader(
-                            title: 'Host Diagnostics',
-                            count: snapshot.recentDiagnostics.length,
+                  // Right focused inspector pane: Pinned toolbar + ListView.builder Host Diagnostics
+                  SizedBox(
+                    width: inspectorWidth,
+                    child: pinDiagnosticsToolbar
+                        ? Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: <Widget>[
+                                Tooltip(
+                                  message:
+                                      'Diagnostic entries are machine-readable Host evidence only — NOT confirmed elevator equipment faults, root causes, or repair instructions.',
+                                  child: SectionHeader(
+                                    title: 'Host Diagnostics',
+                                    count: snapshot.recentDiagnostics.length,
+                                    trailingNote: 'Host evidence · non-fault',
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Expanded(
+                                  child: DiagnosticEvidencePanel(
+                                    diagnostics: snapshot.recentDiagnostics,
+                                    filterController: _diagnosticsFilter,
+                                    expandList: true,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ListenableBuilder(
+                            listenable: _diagnosticsFilter,
+                            builder: (BuildContext context, _) {
+                              return CustomScrollView(
+                                slivers: <Widget>[
+                                  SliverPadding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      14,
+                                      16,
+                                      10,
+                                    ),
+                                    sliver: SliverToBoxAdapter(
+                                      child: SectionHeader(
+                                        title: 'Host Diagnostics',
+                                        count:
+                                            snapshot.recentDiagnostics.length,
+                                        trailingNote:
+                                            'Host evidence · non-fault',
+                                      ),
+                                    ),
+                                  ),
+                                  for (final Widget s in buildDiagnosticSlivers(
+                                    context: context,
+                                    diagnostics: snapshot.recentDiagnostics,
+                                    controller: _diagnosticsFilter,
+                                  ))
+                                    SliverPadding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                      ),
+                                      sliver: s,
+                                    ),
+                                  const SliverToBoxAdapter(
+                                    child: SizedBox(height: 16),
+                                  ),
+                                ],
+                              );
+                            },
                           ),
-                          const SizedBox(height: 10),
-                          DiagnosticEvidencePanel(
-                            diagnostics: snapshot.recentDiagnostics,
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
                 ],
               ),
@@ -456,7 +564,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
       );
     }
 
-    // Compact / Mobile / Landscape layout: pinned telemetry + slim 3-tab bar (zero duplicate Overview!)
+    // Compact / Mobile / Short-Landscape layout: 1-line telemetry + slim 3-tab strip + lazy slivers
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
@@ -467,37 +575,64 @@ class _ClientShellPageState extends State<ClientShellPage> {
         ),
         _buildCompactTabStrip(context, snapshot),
         Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                if (hasAlerts) ...<Widget>[
-                  ClientAlertBanners(
-                    state: state,
-                    onReconnectNow: widget.controller.reconnectNow,
-                    onConfigureHost: () => _openHostConfig(state),
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                AnimatedOpacity(
-                  duration: const Duration(milliseconds: 150),
-                  opacity: state.isSnapshotLive ? 1.0 : 0.72,
-                  child: switch (_compactSection) {
-                    CompactSection.cars => _buildCarsGridOrEmpty(
-                      context,
-                      snapshot,
-                    ),
-                    CompactSection.sources => _buildSourcesListOrEmpty(
-                      context,
-                      snapshot,
-                    ),
-                    CompactSection.diagnostics => DiagnosticEvidencePanel(
-                      diagnostics: snapshot.recentDiagnostics,
-                    ),
-                  },
-                ),
-              ],
+          child: AnimatedOpacity(
+            duration: const Duration(milliseconds: 150),
+            opacity: state.isSnapshotLive ? 1.0 : 0.72,
+            child: ListenableBuilder(
+              listenable: _diagnosticsFilter,
+              builder: (BuildContext context, _) {
+                return CustomScrollView(
+                  slivers: <Widget>[
+                    if (hasAlerts)
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                        sliver: SliverToBoxAdapter(
+                          child: ClientAlertBanners(
+                            state: state,
+                            onReconnectNow: widget.controller.reconnectNow,
+                            onConfigureHost: () => _openHostConfig(state),
+                          ),
+                        ),
+                      ),
+                    ...switch (_compactSection) {
+                      CompactSection.cars => <Widget>[
+                        SliverPadding(
+                          padding: const EdgeInsets.all(12),
+                          sliver: _buildCarsSliver(
+                            context,
+                            snapshot,
+                            textScale: textScale,
+                          ),
+                        ),
+                      ],
+                      CompactSection.sources => <Widget>[
+                        SliverPadding(
+                          padding: const EdgeInsets.all(12),
+                          sliver: _buildSourcesSliver(
+                            context,
+                            snapshot,
+                            textScale: textScale,
+                          ),
+                        ),
+                      ],
+                      CompactSection.diagnostics => <Widget>[
+                        const SliverToBoxAdapter(child: SizedBox(height: 10)),
+                        for (final Widget s in buildDiagnosticSlivers(
+                          context: context,
+                          diagnostics: snapshot.recentDiagnostics,
+                          controller: _diagnosticsFilter,
+                          showCompactCue: true,
+                        ))
+                          SliverPadding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            sliver: s,
+                          ),
+                        const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                      ],
+                    },
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -516,104 +651,190 @@ class _ClientShellPageState extends State<ClientShellPage> {
         color: palette.surface,
         border: Border(bottom: BorderSide(color: palette.border)),
       ),
-      child: SizedBox(
-        height: 36,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            _CompactTabButton(
-              key: const Key('compact-tab-cars'),
-              label: 'Cars',
-              count: snapshot.operationalCars.length,
-              selected: _compactSection == CompactSection.cars,
-              onTap: () =>
-                  setState(() => _compactSection = CompactSection.cars),
-            ),
-            _CompactTabButton(
-              key: const Key('compact-tab-sources'),
-              label: 'Sources',
-              count: snapshot.sources.length,
-              selected: _compactSection == CompactSection.sources,
-              onTap: () =>
-                  setState(() => _compactSection = CompactSection.sources),
-            ),
-            _CompactTabButton(
-              key: const Key('compact-tab-diagnostics'),
-              label: 'Diagnostics',
-              count: snapshot.recentDiagnostics.length,
-              selected: _compactSection == CompactSection.diagnostics,
-              onTap: () =>
-                  setState(() => _compactSection = CompactSection.diagnostics),
-            ),
-          ],
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 36),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _CompactTabButton(
+                key: const Key('compact-tab-cars'),
+                label: 'Cars',
+                count: snapshot.operationalCars.length,
+                selected: _compactSection == CompactSection.cars,
+                onTap: () =>
+                    setState(() => _compactSection = CompactSection.cars),
+              ),
+              _CompactTabButton(
+                key: const Key('compact-tab-sources'),
+                label: 'Sources',
+                count: snapshot.sources.length,
+                selected: _compactSection == CompactSection.sources,
+                onTap: () =>
+                    setState(() => _compactSection = CompactSection.sources),
+              ),
+              _CompactTabButton(
+                key: const Key('compact-tab-diagnostics'),
+                label: 'Diagnostics',
+                count: snapshot.recentDiagnostics.length,
+                selected: _compactSection == CompactSection.diagnostics,
+                onTap: () => setState(
+                  () => _compactSection = CompactSection.diagnostics,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildCarsGridOrEmpty(
+  Widget _buildCarsSliver(
     BuildContext context,
-    ReadModelSnapshot snapshot,
-  ) {
-    if (snapshot.operationalCars.isEmpty) {
-      return _EmptyOperationalCarsPanel(sources: snapshot.sources);
+    ReadModelSnapshot snapshot, {
+    required double textScale,
+  }) {
+    final List<OperationalCar> cars = snapshot.operationalCars;
+    if (cars.isEmpty) {
+      return SliverToBoxAdapter(
+        child: _EmptyOperationalCarsPanel(sources: snapshot.sources),
+      );
     }
 
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final int columns =
-            (constraints.maxWidth >= 540 &&
-                snapshot.operationalCars.length >= 2)
-            ? 2
-            : 1;
-        const double spacing = 10;
-        final double cardWidth =
-            (constraints.maxWidth - spacing * (columns - 1)) / columns;
+    return SliverLayoutBuilder(
+      builder: (BuildContext context, SliverConstraints sliverConstraints) {
+        final double width = sliverConstraints.crossAxisExtent;
+        final int columns;
+        if (cars.length == 1 || width < 520 || textScale > 1.45) {
+          columns = 1;
+        } else if (cars.length >= 3 && width >= 860 && textScale <= 1.2) {
+          columns = 3;
+        } else {
+          columns = 2;
+        }
 
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: <Widget>[
-            for (final OperationalCar car in snapshot.operationalCars)
-              SizedBox(
-                width: cardWidth,
-                child: OperationalCarCard(car: car),
-              ),
-          ],
+        const double spacing = 10;
+        final double cardWidth = (width - spacing * (columns - 1)) / columns;
+        final bool useTabularFooter = cardWidth >= 250 && textScale <= 1.35;
+        final int rowCount = (cars.length + columns - 1) ~/ columns;
+
+        return SliverList.builder(
+          itemCount: rowCount,
+          itemBuilder: (BuildContext context, int rowIndex) {
+            final Widget rowWidget;
+            if (columns == 1) {
+              rowWidget = OperationalCarCard(
+                car: cars[rowIndex],
+                useTabularFooter: useTabularFooter,
+              );
+            } else {
+              final int start = rowIndex * columns;
+              rowWidget = IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    for (int col = 0; col < columns; col++) ...<Widget>[
+                      if (col > 0) const SizedBox(width: spacing),
+                      Expanded(
+                        child: (start + col < cars.length)
+                            ? OperationalCarCard(
+                                car: cars[start + col],
+                                stretchToRowHeight: true,
+                                useTabularFooter: useTabularFooter,
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }
+
+            if (rowIndex == 0) {
+              return rowWidget;
+            }
+            return Padding(
+              padding: const EdgeInsets.only(top: spacing),
+              child: rowWidget,
+            );
+          },
         );
       },
     );
   }
 
-  Widget _buildSourcesListOrEmpty(
+  Widget _buildSourcesSliver(
     BuildContext context,
-    ReadModelSnapshot snapshot,
-  ) {
+    ReadModelSnapshot snapshot, {
+    required double textScale,
+  }) {
     final InstrumentPalette palette = context.palette;
-    if (snapshot.sources.isEmpty) {
-      return DecoratedBox(
-        decoration: BoxDecoration(
-          color: palette.surface,
-          borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: palette.border),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Text(
-            'No observation sources configured on this Host.',
-            style: TextStyle(fontSize: 12, color: palette.mutedText),
+    final List<SourceHealth> sources = snapshot.sources;
+    if (sources.isEmpty) {
+      return SliverToBoxAdapter(
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: palette.surface,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: palette.border),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Text(
+              'No observation sources configured on this Host.',
+              style: TextStyle(fontSize: 12, color: palette.mutedText),
+            ),
           ),
         ),
       );
     }
 
-    return Column(
-      children: <Widget>[
-        for (int i = 0; i < snapshot.sources.length; i++) ...<Widget>[
-          if (i > 0) const SizedBox(height: 8),
-          SourceHealthCard(source: snapshot.sources[i]),
-        ],
-      ],
+    return SliverLayoutBuilder(
+      builder: (BuildContext context, SliverConstraints sliverConstraints) {
+        final double width = sliverConstraints.crossAxisExtent;
+        final int columns =
+            (sources.length >= 2 && width >= 720 && textScale <= 1.25) ? 2 : 1;
+        const double spacing = 8;
+        final int rowCount = (sources.length + columns - 1) ~/ columns;
+
+        return SliverList.builder(
+          itemCount: rowCount,
+          itemBuilder: (BuildContext context, int rowIndex) {
+            final Widget rowWidget;
+            if (columns == 1) {
+              rowWidget = SourceHealthCard(source: sources[rowIndex]);
+            } else {
+              final int start = rowIndex * columns;
+              rowWidget = IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    for (int col = 0; col < columns; col++) ...<Widget>[
+                      if (col > 0) const SizedBox(width: spacing),
+                      Expanded(
+                        child: (start + col < sources.length)
+                            ? SourceHealthCard(
+                                source: sources[start + col],
+                                fillRowHeight: true,
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            }
+
+            if (rowIndex == 0) {
+              return rowWidget;
+            }
+            return Padding(
+              padding: const EdgeInsets.only(top: spacing),
+              child: rowWidget,
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -704,33 +925,43 @@ class _CompactTabButton extends StatelessWidget {
                 ? Border(bottom: BorderSide(color: palette.info, width: 2))
                 : null,
           ),
-          child: Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Flexible(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      color: fg,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: Center(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Flexible(
+                    flex: 3,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: fg,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '$count',
-                  style: instrumentMonoStyle(
-                    context,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: selected ? palette.info : palette.mutedText,
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      '$count',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: instrumentMonoStyle(
+                        context,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: selected ? palette.info : palette.mutedText,
+                      ),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -783,7 +1014,7 @@ class _EmptyOperationalCarsPanel extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              'Requires complete location, motion, directed door, and mode from an Operational authority (Auxiliary bindings never enter operational truth).',
+              'Awaiting complete Operational observation state (location, motion, door, mode). Auxiliary bindings remain diagnostic-only.',
               style: TextStyle(
                 fontSize: 11.5,
                 height: 1.35,

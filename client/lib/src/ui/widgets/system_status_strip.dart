@@ -131,13 +131,13 @@ class HostTelemetryBar extends StatelessWidget {
         border: Border(bottom: BorderSide(color: palette.border)),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6.5),
         child: LayoutBuilder(
           builder: (BuildContext context, BoxConstraints constraints) {
             final bool showContractRight = constraints.maxWidth >= 680;
             final Widget leftCluster = Wrap(
-              spacing: 18,
-              runSpacing: 5,
+              spacing: 16,
+              runSpacing: 4,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 _TelemetryCell(
@@ -155,33 +155,49 @@ class HostTelemetryBar extends StatelessWidget {
                   tooltip: readinessTip,
                 ),
                 Tooltip(
-                  message: 'Host-local revision; monotonic within one Host process lifetime and resets on Host restart.',
+                  message:
+                      'Host-local revision (${snapshot.apiVersion}); monotonic within one Host process lifetime and resets on Host restart.',
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      Text(
-                        'Rev ',
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: palette.mutedText,
+                      Flexible(
+                        flex: 2,
+                        child: Text(
+                          'Rev ',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: palette.mutedText,
+                          ),
                         ),
                       ),
-                      Text(
-                        '#${snapshot.revision}',
-                        style: instrumentMonoStyle(
-                          context,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                      Flexible(
+                        flex: 3,
+                        child: Text(
+                          '#${snapshot.revision}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: instrumentMonoStyle(
+                            context,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                       if (!isLive) ...<Widget>[
                         const SizedBox(width: 5),
-                        Text(
-                          '(retained)',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: palette.caution,
+                        Flexible(
+                          flex: 3,
+                          child: Text(
+                            '(retained)',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: palette.caution,
+                            ),
                           ),
                         ),
                       ],
@@ -195,16 +211,6 @@ class HostTelemetryBar extends StatelessWidget {
                     foreground: palette.info,
                     background: palette.infoContainer,
                     monospace: true,
-                  ),
-                if (!showContractRight)
-                  Text(
-                    snapshot.apiVersion,
-                    style: instrumentMonoStyle(
-                      context,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: palette.mutedText,
-                    ),
                   ),
               ],
             );
@@ -221,7 +227,7 @@ class HostTelemetryBar extends StatelessWidget {
                   snapshot.apiVersion,
                   style: instrumentMonoStyle(
                     context,
-                    fontSize: 11.5,
+                    fontSize: 11,
                     fontWeight: FontWeight.w500,
                     color: palette.mutedText,
                   ),
@@ -258,15 +264,25 @@ class _TelemetryCell extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Text(
-            '$label ',
-            style: TextStyle(fontSize: 11.5, color: palette.mutedText),
+          Flexible(
+            flex: 2,
+            child: Text(
+              '$label ',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: palette.mutedText),
+            ),
           ),
           StatusDot(color: dotColor, hollow: hollowDot, size: 6.5),
           const SizedBox(width: 5),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          Flexible(
+            flex: 3,
+            child: Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),

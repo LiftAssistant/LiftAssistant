@@ -7,6 +7,8 @@ import 'package:liftassistant_client/src/state/client_controller.dart';
 import 'package:liftassistant_client/src/transport/host_transport.dart';
 import 'package:liftassistant_client/src/ui/app.dart';
 import 'package:liftassistant_client/src/ui/widgets/car_card.dart';
+import 'package:liftassistant_client/src/ui/widgets/semantic_badge.dart';
+import 'package:liftassistant_client/src/ui/widgets/source_card.dart';
 
 const String _richFixtureJson = '''
 {
@@ -137,7 +139,7 @@ final class _WidgetTestTransport implements HostTransport {
 
 void main() {
   testWidgets(
-    'desktop split console renders cars, sources, and filterable diagnostics simultaneously without redundant tab chrome or write controls',
+    'desktop split console renders equal-height cars/sources, flush-right headers, and filterable diagnostics without redundant tab chrome or write controls',
     (WidgetTester tester) async {
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(1366, 900);
@@ -182,6 +184,26 @@ void main() {
       expect(find.text('ReadOnly'), findsOneWidget);
       expect(find.text('#12'), findsOneWidget);
 
+      // SectionHeader trailingNote aligns flush with the right edge of Host Diagnostics header.
+      final Rect diagHeaderRect = tester.getRect(
+        find.widgetWithText(SectionHeader, 'Host Diagnostics'),
+      );
+      final Rect diagNoteRect = tester.getRect(
+        find.text('Host evidence · non-fault'),
+      );
+      expect((diagHeaderRect.right - diagNoteRect.right).abs(), lessThan(2.0));
+
+      // Side-by-side car cards and side-by-side source cards share exact row height on 1366x900.
+      final Rect car0 = tester.getRect(find.byType(OperationalCarCard).at(0));
+      final Rect car1 = tester.getRect(find.byType(OperationalCarCard).at(1));
+      expect(car0.top, equals(car1.top));
+      expect(car0.height, equals(car1.height));
+
+      final Rect src0 = tester.getRect(find.byType(SourceHealthCard).at(0));
+      final Rect src1 = tester.getRect(find.byType(SourceHealthCard).at(1));
+      expect(src0.top, equals(src1.top));
+      expect(src0.height, equals(src1.height));
+
       // Location precision distinction: Floor ref vs Continuous position.
       expect(find.text('Floor ref'), findsOneWidget);
       expect(find.text('Floor 3'), findsOneWidget);
@@ -190,16 +212,45 @@ void main() {
       expect(find.text('Nearest Floor 2 (+0.25)'), findsOneWidget);
 
       // Source-reported destination is labeled concisely without conflation.
+      expect(find.text('Source dest'), findsNWidgets(2));
       expect(find.text('Floor 6'), findsOneWidget);
       expect(find.text('Unknown'), findsOneWidget);
 
       // Source Operational vs Auxiliary distinction & discovery!=payload callout.
-      expect(find.text('Operational'), findsNWidgets(2));
-      expect(find.text('Auxiliary · diag'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(SourceHealthCard),
+          matching: find.text('Operational'),
+        ),
+        findsNWidgets(2),
+      );
+      expect(
+        find.descendant(
+          of: find.byType(SourceHealthCard),
+          matching: find.text('Auxiliary'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('diagnostic only'), findsOneWidget);
       expect(
         find.textContaining('Discovery observed without active payload'),
         findsOneWidget,
       );
+
+      // Even at 1040x800 laptop width, primary left stage keeps 2 equal-height car columns!
+      tester.view.physicalSize = const Size(1040, 800);
+      await tester.pumpAndSettle();
+      final Rect laptopCar0 = tester.getRect(
+        find.byType(OperationalCarCard).at(0),
+      );
+      final Rect laptopCar1 = tester.getRect(
+        find.byType(OperationalCarCard).at(1),
+      );
+      expect(laptopCar0.top, equals(laptopCar1.top));
+      expect(laptopCar0.height, equals(laptopCar1.height));
+
+      tester.view.physicalSize = const Size(1366, 900);
+      await tester.pumpAndSettle();
 
       // Full filterable diagnostics stream is immediately available on desktop right pane.
       expect(find.text('readiness.changed'), findsOneWidget);
@@ -210,7 +261,7 @@ void main() {
       expect(find.text('mapping.rejected'), findsOneWidget);
       expect(find.text('readiness.changed'), findsNothing);
 
-      // Reset filter, test role filter and search input.
+      // Reset filter, test role filter and search input + clear button.
       await tester.tap(find.byKey(const Key('diag-filter-all')));
       await tester.pumpAndSettle();
       expect(find.text('readiness.changed'), findsOneWidget);
@@ -219,6 +270,18 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('mapping.rejected'), findsOneWidget);
       expect(find.text('readiness.changed'), findsNothing);
+
+      await tester.tap(find.byKey(const Key('diag-filter-all')));
+      await tester.enterText(
+        find.byKey(const Key('diagnostics-search-input')),
+        'LiftObj',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('mapping.rejected'), findsOneWidget);
+      expect(find.text('readiness.changed'), findsNothing);
+      await tester.tap(find.byKey(const Key('diagnostics-search-clear')));
+      await tester.pumpAndSettle();
+      expect(find.text('readiness.changed'), findsOneWidget);
 
       // Open and close on-demand semantic reference modal.
       await tester.tap(find.byKey(const Key('topbar-semantics-button')));
@@ -241,7 +304,7 @@ void main() {
   );
 
   testWidgets(
-    'mobile layout shows operational cars above the fold, switches 3 non-overlapping tabs cleanly, and surfaces disconnect + Host revision reset',
+    'mobile layout shows operational cars above the fold, preserves diagnostic filters across tabs/resizes, and surfaces disconnect + Host revision reset',
     (WidgetTester tester) async {
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(360, 780);
@@ -277,7 +340,7 @@ void main() {
       expect(secondCarRect.bottom, lessThan(780));
       expect(tester.takeException(), isNull);
 
-      // Visit Sources, Diagnostics, and back to Cars with zero layout overflow.
+      // Visit Sources, then Diagnostics, apply filter + search, switch tabs AND resize across desktop/mobile!
       await tester.tap(find.byKey(const Key('compact-tab-sources')));
       await tester.pumpAndSettle();
       expect(find.text('rmf/site-main'), findsOneWidget);
@@ -286,7 +349,34 @@ void main() {
       await tester.tap(find.byKey(const Key('compact-tab-diagnostics')));
       await tester.pumpAndSettle();
       expect(find.text('mapping.rejected'), findsOneWidget);
-      expect(tester.takeException(), isNull);
+      expect(find.text('readiness.changed'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('diag-filter-layer-mapping')));
+      await tester.enterText(
+        find.byKey(const Key('diagnostics-search-input')),
+        'LiftObj',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('readiness.changed'), findsNothing);
+
+      // Switch away to Cars and back to Diagnostics: filter & query remain intact!
+      await tester.tap(find.byKey(const Key('compact-tab-cars')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('compact-tab-diagnostics')));
+      await tester.pumpAndSettle();
+      expect(find.text('mapping.rejected'), findsOneWidget);
+      expect(find.text('readiness.changed'), findsNothing);
+
+      // Resize across 920x460 split-desktop breakpoint and back: filter & query remain intact!
+      tester.view.physicalSize = const Size(1280, 800);
+      await tester.pumpAndSettle();
+      expect(find.text('mapping.rejected'), findsOneWidget);
+      expect(find.text('readiness.changed'), findsNothing);
+
+      tester.view.physicalSize = const Size(360, 780);
+      await tester.pumpAndSettle();
+      expect(find.text('mapping.rejected'), findsOneWidget);
+      expect(find.text('readiness.changed'), findsNothing);
 
       await tester.tap(find.byKey(const Key('compact-tab-cars')));
       await tester.pumpAndSettle();
@@ -367,6 +457,14 @@ void main() {
             "door": "closed",
             "operating_mode": "normal",
             "reported_destination": {"kind": "none"}
+          },
+          {
+            "id": "car-outlier",
+            "location": {"kind": "continuous", "floor_position": 2.85, "nearest_floor": 2},
+            "motion": {"state": "moving", "direction": "down"},
+            "door": "obstructed",
+            "operating_mode": "fire_service",
+            "reported_destination": {"kind": "known", "floor": -1}
           }
         ],
         "sources": [],
@@ -433,12 +531,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
 
-      // Verify -0.00 / +-0.00 NEVER appear anywhere (neither main position nor signed delta!).
+      // Verify -0.00 / +-0.00 NEVER appear anywhere, and +0.85 outlier delta renders accurately.
       expect(find.textContaining('-0.00'), findsNothing);
       expect(find.textContaining('+-0.00'), findsNothing);
       expect(find.text('0.00'), findsOneWidget);
       expect(find.text('Nearest Floor 2 (+0.00)'), findsOneWidget);
       expect(find.text('Nearest Floor 0 (+0.00)'), findsOneWidget);
+      expect(find.text('Nearest Floor 2 (+0.85)'), findsOneWidget);
+      expect(find.text('Floor -1'), findsOneWidget);
 
       // Verify long CarId does not overflow on 360x780 mobile portrait or 800x300 short landscape + modal.
       tester.view.physicalSize = const Size(360, 780);
@@ -478,6 +578,131 @@ void main() {
         find.text('Client disconnected — retained snapshot (#5) is NOT live'),
         findsOneWidget,
       );
+    },
+  );
+
+  testWidgets(
+    'handles 2.0x OS accessibility text scaling without overflow and lazily virtualizes large car/diagnostic fleets',
+    (WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(320, 568);
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      final StringBuffer carsBuf = StringBuffer();
+      for (int i = 0; i < 60; i++) {
+        if (i > 0) carsBuf.write(',');
+        carsBuf.write('''
+        {
+          "id": "fleet-car-$i",
+          "location": {"kind": "floor", "floor": ${i % 20}},
+          "motion": {"state": "moving", "direction": "up"},
+          "door": "closed",
+          "operating_mode": "normal",
+          "reported_destination": {"kind": "known", "floor": ${(i + 3) % 20}}
+        }
+        ''');
+      }
+
+      final StringBuffer diagBuf = StringBuffer();
+      for (int i = 1; i <= 200; i++) {
+        if (i > 1) diagBuf.write(',');
+        diagBuf.write('''
+        {
+          "sequence": $i,
+          "layer": "observation",
+          "id": "observation.updated.$i",
+          "source": "rmf/site-main",
+          "session": "session-alpha",
+          "car": "fleet-car-${i % 60}",
+          "role": "operational",
+          "native_entity": "Lift_$i"
+        }
+        ''');
+      }
+
+      final String largeFleetJson = '''
+      {
+        "api_version": "experimental/v0",
+        "revision": 42,
+        "lifecycle": "ready_read_only",
+        "readiness": "read_only",
+        "operational_cars": [$carsBuf],
+        "sources": [
+          {
+            "source": "rmf/site-main",
+            "session": {"state": "active", "session": "session-alpha"},
+            "transport": "discovery_observed",
+            "payload": "awaiting",
+            "observations": [
+              {"car": "fleet-car-0", "role": "operational", "availability": "resolved"},
+              {"car": "fleet-car-1", "role": "auxiliary", "availability": "unresolved"}
+            ]
+          }
+        ],
+        "recent_diagnostics": [$diagBuf]
+      }
+      ''';
+
+      final _WidgetTestTransport transport = _WidgetTestTransport()
+        ..currentSnapshot = largeFleetJson;
+      final ClientController controller = ClientController(
+        transport: transport,
+        initialUrlInput: 'http://127.0.0.1:8080',
+      );
+      addTearDown(() {
+        controller.dispose();
+        transport.dispose();
+      });
+
+      await tester.pumpWidget(
+        LiftAssistantClientApp(
+          controller: controller,
+          initialHostUrl: 'http://127.0.0.1:8080',
+          autoConnect: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      // SliverList.builder lazy virtualization: far fewer than 60 OperationalCarCards materialized!
+      expect(
+        tester.widgetList(find.byType(OperationalCarCard)).length,
+        lessThan(15),
+      );
+
+      // Check Sources and Diagnostics tabs at 2.0x text scale on 320x568 without overflow!
+      await tester.tap(find.byKey(const Key('compact-tab-sources')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.byKey(const Key('compact-tab-diagnostics')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      // Scroll past the 2.0x-scaled filter toolbar on 320x568; oldest entry (#1) stays unmaterialized offscreen!
+      await tester.drag(find.byType(CustomScrollView), const Offset(0, -320));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('observation.updated.200'), findsOneWidget);
+      expect(find.text('observation.updated.1'), findsNothing);
+
+      // Desktop split console at 2.0x text scale AND at 1.0x virtualization check.
+      tester.view.physicalSize = const Size(1366, 900);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(
+        tester.widgetList(find.byType(OperationalCarCard)).length,
+        lessThan(30),
+      );
+      expect(find.text('observation.updated.200'), findsOneWidget);
+      expect(find.text('observation.updated.1'), findsNothing);
     },
   );
 }

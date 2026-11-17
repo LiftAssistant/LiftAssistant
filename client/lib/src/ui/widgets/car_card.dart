@@ -5,9 +5,16 @@ import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
 
 class OperationalCarCard extends StatelessWidget {
-  const OperationalCarCard({super.key, required this.car});
+  const OperationalCarCard({
+    super.key,
+    required this.car,
+    this.stretchToRowHeight = false,
+    this.useTabularFooter = true,
+  });
 
   final OperationalCar car;
+  final bool stretchToRowHeight;
+  final bool useTabularFooter;
 
   Color? _leftStripeColor(InstrumentPalette palette) {
     if (car.operatingMode == CarOperatingMode.fireService ||
@@ -46,85 +53,69 @@ class OperationalCarCard extends StatelessWidget {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
+            mainAxisSize: stretchToRowHeight
+                ? MainAxisSize.max
+                : MainAxisSize.min,
+            mainAxisAlignment: stretchToRowHeight
+                ? MainAxisAlignment.spaceBetween
+                : MainAxisAlignment.start,
             children: <Widget>[
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 11),
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     // Header: Logical CarId + Operating Mode
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 22),
-                      child: Row(
-                        children: <Widget>[
-                          Expanded(
-                            child: Tooltip(
-                              message: 'Logical CarId: ${car.id}',
-                              child: Text(
-                                car.id,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: instrumentMonoStyle(
-                                  context,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Tooltip(
+                            message: 'Logical CarId: ${car.id}',
+                            child: Text(
+                              car.id,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: instrumentMonoStyle(
+                                context,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          _ModeReadout(mode: car.operatingMode),
-                        ],
-                      ),
+                        ),
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: _ModeReadout(mode: car.operatingMode),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 9),
 
-                    // Hero: Door/Motion Cabin Schematic + Honest Location Precision
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(minHeight: 42),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: <Widget>[
-                          _CarApertureGraphic(
-                            door: car.door,
-                            motion: car.motion,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _LocationReadout(location: car.location),
-                          ),
-                        ],
-                      ),
+                    // Primary readout: Hoistway/Portal Indicator + Honest Location Precision
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: <Widget>[
+                        _CarApertureGraphic(
+                          door: car.door,
+                          motion: car.motion,
+                        ),
+                        const SizedBox(width: 11),
+                        Expanded(
+                          child: _LocationReadout(location: car.location),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
 
-              // Compact 3-cell bottom telemetry strip (zero nested boxes)
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: palette.elevatedSurface,
-                  border: Border(top: BorderSide(color: palette.border)),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 7.5,
-                  ),
-                  child: Wrap(
-                    spacing: 14,
-                    runSpacing: 5,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: <Widget>[
-                      _MotionCell(motion: car.motion),
-                      _DoorCell(door: car.door),
-                      _ReportedDestinationCell(
-                        destination: car.reportedDestination,
-                      ),
-                    ],
-                  ),
-                ),
+              // Bottom tabular telemetry strip (aligned columns across cars; overflow-safe at 2.0x scale)
+              _CarTelemetryFooter(
+                motion: car.motion,
+                door: car.door,
+                reportedDestination: car.reportedDestination,
+                useTabularColumns: useTabularFooter,
               ),
             ],
           ),
@@ -149,14 +140,18 @@ class _ModeReadout extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              StatusDot(color: palette.ok, size: 6.5),
+              StatusDot(color: palette.ok, size: 6),
               const SizedBox(width: 5),
-              Text(
-                'Normal',
-                style: TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600,
-                  color: palette.subtleText,
+              Flexible(
+                child: Text(
+                  'Normal',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                    color: palette.subtleText,
+                  ),
                 ),
               ),
             ],
@@ -211,31 +206,26 @@ class _LocationReadout extends StatelessWidget {
 
     switch (location) {
       case FloorLocation(:final floor):
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+        return Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            Wrap(
-              spacing: 8,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                Text(
-                  'Floor $floor',
-                  style: instrumentMonoStyle(
-                    context,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                SemanticBadge(
-                  label: 'Floor ref',
-                  foreground: palette.subtleText,
-                  background: palette.neutralContainer,
-                  outlined: true,
-                  tooltip: 'Discrete floor association only (kind: floor). Host holds no continuous coordinate for this car.',
-                ),
-              ],
+            Text(
+              'Floor $floor',
+              style: instrumentMonoStyle(
+                context,
+                fontSize: 18.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            SemanticBadge(
+              label: 'Floor ref',
+              foreground: palette.subtleText,
+              background: palette.neutralContainer,
+              outlined: true,
+              tooltip:
+                  'Discrete floor association only (kind: floor). Host holds no continuous coordinate for this car.',
             ),
           ],
         );
@@ -247,9 +237,9 @@ class _LocationReadout extends StatelessWidget {
         final String signedDelta = normalizedDelta >= 0
             ? '+${normalizedDelta.toStringAsFixed(2)}'
             : normalizedDelta.toStringAsFixed(2);
-        // Clamp visual offset indicator to [-0.5, +0.5] around nearestFloor.
+        final bool isClamped = rawDelta < -0.5 || rawDelta > 0.5;
         final double clampedFraction =
-            ((rawDelta.clamp(-0.5, 0.5)) + 0.5); // 0.0 .. 1.0
+            (rawDelta.clamp(-0.5, 0.5)) + 0.5; // 0.0 .. 1.0
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -264,87 +254,118 @@ class _LocationReadout extends StatelessWidget {
                   normalizedPos.toStringAsFixed(2),
                   style: instrumentMonoStyle(
                     context,
-                    fontSize: 19,
+                    fontSize: 18.5,
                     fontWeight: FontWeight.w700,
-                  ),
-                ),
-                Text(
-                  'Nearest Floor $nearestFloor ($signedDelta)',
-                  style: instrumentMonoStyle(
-                    context,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w500,
-                    color: palette.subtleText,
                   ),
                 ),
                 SemanticBadge(
                   label: 'Continuous',
                   foreground: palette.info,
                   background: palette.infoContainer,
-                  tooltip: 'Genuine continuous position evidence held by Host (kind: continuous).',
+                  tooltip:
+                      'Genuine continuous position evidence held by Host (kind: continuous).',
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            _ContinuousOffsetGauge(fraction: clampedFraction),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                Text(
+                  'Nearest Floor $nearestFloor ($signedDelta)',
+                  style: instrumentMonoStyle(
+                    context,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: palette.subtleText,
+                  ),
+                ),
+                _ContinuousOffsetGauge(
+                  fraction: clampedFraction,
+                  clamped: isClamped,
+                  signedDelta: signedDelta,
+                ),
+              ],
+            ),
           ],
         );
     }
   }
 }
 
-/// Subtle landing-offset scale rendered ONLY when [ContinuousLocation] is present.
+/// Subtle landing-offset scale (`[-0.5, +0.5]`) rendered ONLY when [ContinuousLocation] is present.
 class _ContinuousOffsetGauge extends StatelessWidget {
-  const _ContinuousOffsetGauge({required this.fraction});
+  const _ContinuousOffsetGauge({
+    required this.fraction,
+    required this.clamped,
+    required this.signedDelta,
+  });
+
+  static const double _gaugeWidth = 72;
 
   final double fraction;
+  final bool clamped;
+  final String signedDelta;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 160),
+    final Color markerColor = clamped ? palette.caution : palette.info;
+    final double markerX = (_gaugeWidth - 6) * fraction;
+
+    return Tooltip(
+      message: clamped
+          ? 'Offset $signedDelta exceeds ±0.50 landing window (gauge pinned at boundary).'
+          : 'Landing offset $signedDelta within [-0.50, +0.50] window.',
       child: SizedBox(
+        width: _gaugeWidth,
         height: 8,
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            final double width = constraints.maxWidth;
-            final double markerX = (width - 6) * fraction;
-            return Stack(
-              alignment: Alignment.centerLeft,
-              children: <Widget>[
-                Container(height: 2, width: width, color: palette.border),
-                Positioned(
-                  left: (width / 2) - 0.5,
-                  top: 1,
-                  bottom: 1,
-                  child: Container(width: 1, color: palette.mutedText),
+        child: Stack(
+          alignment: Alignment.centerLeft,
+          children: <Widget>[
+            Container(height: 2, width: _gaugeWidth, color: palette.border),
+            Positioned(
+              left: (_gaugeWidth / 2) - 0.5,
+              top: 1,
+              bottom: 1,
+              child: Container(width: 1, color: palette.mutedText),
+            ),
+            AnimatedPositioned(
+              duration: const Duration(milliseconds: 140),
+              curve: Curves.easeOutCubic,
+              left: markerX,
+              child: Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: clamped ? Colors.transparent : markerColor,
+                  borderRadius: BorderRadius.circular(1.5),
+                  border: clamped
+                      ? Border.all(color: markerColor, width: 1.5)
+                      : null,
                 ),
-                AnimatedPositioned(
-                  duration: const Duration(milliseconds: 140),
-                  curve: Curves.easeOutCubic,
-                  left: markerX,
-                  child: Container(
-                    width: 6,
-                    height: 6,
-                    decoration: BoxDecoration(
-                      color: palette.info,
-                      borderRadius: BorderRadius.circular(1.5),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// Geometric cabin + split-door schematic reflecting [CarDoorState] and [CarMotion].
+/// Architectural elevator portal (transom + split door leaves + landing sill)
+/// reflecting [CarDoorState] and [CarMotion] without resembling a media pause icon.
 class _CarApertureGraphic extends StatelessWidget {
   const _CarApertureGraphic({required this.door, required this.motion});
+
+  static const double _outerWidth = 38;
+  static const double _outerHeight = 42;
+  static const double _borderWidth = 1.15;
+  static const double _horizontalPad = 3.0;
+  static const double _innerWidth =
+      _outerWidth - (_borderWidth * 2) - (_horizontalPad * 2);
 
   final CarDoorState door;
   final CarMotion motion;
@@ -352,16 +373,16 @@ class _CarApertureGraphic extends StatelessWidget {
   double _doorGapFraction() {
     switch (door) {
       case CarDoorState.closed:
-        return 0.04;
+        return 0.0;
       case CarDoorState.opening:
       case CarDoorState.closing:
-        return 0.44;
+        return 0.42;
       case CarDoorState.open:
-        return 0.80;
+        return 0.78;
       case CarDoorState.obstructed:
-        return 0.56;
+        return 0.54;
       case CarDoorState.fault:
-        return 0.34;
+        return 0.32;
     }
   }
 
@@ -373,12 +394,17 @@ class _CarApertureGraphic extends StatelessWidget {
       CarDoorState.obstructed => palette.caution,
       CarDoorState.open => palette.ok,
       CarDoorState.opening || CarDoorState.closing => palette.info,
-      CarDoorState.closed => palette.border,
+      CarDoorState.closed =>
+        motion is MovingMotion ? palette.info : palette.border,
     };
     final Color leafColor = switch (door) {
-      CarDoorState.fault => palette.danger.withValues(alpha: 0.35),
-      CarDoorState.obstructed => palette.caution.withValues(alpha: 0.35),
-      _ => palette.subtleText.withValues(alpha: 0.28),
+      CarDoorState.fault => palette.danger.withValues(alpha: 0.28),
+      CarDoorState.obstructed => palette.caution.withValues(alpha: 0.28),
+      _ => palette.subtleText.withValues(alpha: 0.16),
+    };
+    final Color transomColor = switch (motion) {
+      MovingMotion() => palette.info,
+      StoppedMotion() => palette.mutedText.withValues(alpha: 0.45),
     };
 
     final IconData? motionArrow = switch (motion) {
@@ -389,65 +415,92 @@ class _CarApertureGraphic extends StatelessWidget {
             : Icons.keyboard_arrow_down_rounded,
     };
 
+    final double gap = _innerWidth * _doorGapFraction();
+    final double leafW = ((_innerWidth - gap) / 2).clamp(2.0, _innerWidth / 2);
+
     return SizedBox(
-      width: 38,
-      height: 40,
+      width: _outerWidth,
+      height: _outerHeight,
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: palette.elevatedSurface,
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: frameColor, width: 1.2),
+          border: Border.all(color: frameColor, width: _borderWidth),
         ),
         child: Padding(
-          padding: const EdgeInsets.all(3),
-          child: LayoutBuilder(
-            builder: (BuildContext context, BoxConstraints box) {
-              final double innerW = box.maxWidth;
-              final double gap = innerW * _doorGapFraction();
-              final double leafW = ((innerW - gap) / 2).clamp(2.0, innerW / 2);
-
-              return Stack(
-                alignment: Alignment.center,
-                children: <Widget>[
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      curve: Curves.easeOutCubic,
-                      width: leafW,
-                      height: box.maxHeight,
-                      decoration: BoxDecoration(
-                        color: leafColor,
-                        borderRadius: BorderRadius.circular(1.5),
+          padding: const EdgeInsets.fromLTRB(
+            _horizontalPad,
+            3,
+            _horizontalPad,
+            2.5,
+          ),
+          child: Column(
+            children: <Widget>[
+              // Hoistway transom indicator bar
+              Container(
+                height: 2.5,
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: transomColor,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+              const SizedBox(height: 2),
+              // Door aperture + leaves
+              Expanded(
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: <Widget>[
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        curve: Curves.easeOutCubic,
+                        width: leafW,
+                        height: double.infinity,
+                        decoration: BoxDecoration(
+                          color: leafColor,
+                          border: Border(
+                            right: BorderSide(
+                              color: palette.border,
+                              width: 0.8,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      curve: Curves.easeOutCubic,
-                      width: leafW,
-                      height: box.maxHeight,
-                      decoration: BoxDecoration(
-                        color: leafColor,
-                        borderRadius: BorderRadius.circular(1.5),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        curve: Curves.easeOutCubic,
+                        width: leafW,
+                        height: double.infinity,
+                        decoration: BoxDecoration(
+                          color: leafColor,
+                          border: Border(
+                            left: BorderSide(color: palette.border, width: 0.8),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                  if (door == CarDoorState.fault)
-                    Icon(Icons.close_rounded, size: 13, color: palette.danger)
-                  else if (door == CarDoorState.obstructed)
-                    Icon(
-                      Icons.priority_high_rounded,
-                      size: 13,
-                      color: palette.caution,
-                    )
-                  else if (motionArrow != null)
-                    Icon(motionArrow, size: 16, color: palette.info),
-                ],
-              );
-            },
+                    if (door == CarDoorState.fault)
+                      Icon(Icons.close_rounded, size: 13, color: palette.danger)
+                    else if (door == CarDoorState.obstructed)
+                      Icon(
+                        Icons.priority_high_rounded,
+                        size: 13,
+                        color: palette.caution,
+                      )
+                    else if (motionArrow != null)
+                      Icon(motionArrow, size: 15, color: palette.info),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 1.5),
+              // Landing sill threshold line
+              Container(height: 1.5, width: double.infinity, color: frameColor),
+            ],
           ),
         ),
       ),
@@ -455,60 +508,38 @@ class _CarApertureGraphic extends StatelessWidget {
   }
 }
 
-class _MotionCell extends StatelessWidget {
-  const _MotionCell({required this.motion});
+class _CarTelemetryFooter extends StatelessWidget {
+  const _CarTelemetryFooter({
+    required this.motion,
+    required this.door,
+    required this.reportedDestination,
+    required this.useTabularColumns,
+  });
 
   final CarMotion motion;
-
-  @override
-  Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-    switch (motion) {
-      case StoppedMotion():
-        return _CompactKv(
-          label: 'Motion',
-          value: 'Stopped',
-          valueColor: palette.subtleText,
-          emphasize: false,
-        );
-      case MovingMotion(:final direction):
-        final bool isUp = direction == MotionDirection.up;
-        return Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(
-              'Motion ',
-              style: TextStyle(fontSize: 11, color: palette.mutedText),
-            ),
-            Icon(
-              isUp ? Icons.north_rounded : Icons.south_rounded,
-              size: 12,
-              color: palette.info,
-            ),
-            const SizedBox(width: 2),
-            Text(
-              isUp ? 'Moving Up' : 'Moving Down',
-              style: TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: palette.info,
-              ),
-            ),
-          ],
-        );
-    }
-  }
-}
-
-class _DoorCell extends StatelessWidget {
-  const _DoorCell({required this.door});
-
   final CarDoorState door;
+  final ReportedDestination reportedDestination;
+  final bool useTabularColumns;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
-    final (String text, Color color, bool emphasize) = switch (door) {
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+
+    final (
+      String motionText,
+      Color motionColor,
+      bool motionEmph,
+      IconData? motionIcon,
+    ) = switch (motion) {
+      StoppedMotion() => ('Stopped', palette.subtleText, false, null),
+      MovingMotion(:final direction) =>
+        direction == MotionDirection.up
+            ? ('Moving Up', palette.info, true, Icons.north_rounded)
+            : ('Moving Down', palette.info, true, Icons.south_rounded),
+    };
+
+    final (String doorText, Color doorColor, bool doorEmph) = switch (door) {
       CarDoorState.closed => ('Closed', palette.subtleText, false),
       CarDoorState.opening => ('Opening', palette.info, true),
       CarDoorState.open => ('Open', palette.ok, true),
@@ -517,73 +548,203 @@ class _DoorCell extends StatelessWidget {
       CarDoorState.fault => ('Fault', palette.danger, true),
     };
 
-    return _CompactKv(
-      label: 'Door',
-      value: text,
-      valueColor: color,
-      emphasize: emphasize,
-    );
-  }
-}
-
-class _ReportedDestinationCell extends StatelessWidget {
-  const _ReportedDestinationCell({required this.destination});
-
-  final ReportedDestination destination;
-
-  @override
-  Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-    final (
-      String valueText,
-      Color valueColor,
-      bool emphasize,
-    ) = switch (destination) {
-      KnownReportedDestination(:final floor) => (
-        'Floor $floor',
-        palette.info,
-        true,
-      ),
-      NoReportedDestination() => ('None', palette.subtleText, false),
-      UnknownReportedDestination() => ('Unknown', palette.caution, true),
-    };
-
-    return Tooltip(
-      message: 'External source reported destination evidence — NOT a LiftAssistant desired target, call assignment, or command.',
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Text(
-            'Source dest ',
-            style: TextStyle(fontSize: 11, color: palette.mutedText),
+    final (String destText, Color destColor, bool destEmph) =
+        switch (reportedDestination) {
+          KnownReportedDestination(:final floor) => (
+            'Floor $floor',
+            palette.info,
+            true,
           ),
-          Text(
-            valueText,
-            style: instrumentMonoStyle(
-              context,
-              fontSize: 11.5,
-              fontWeight: emphasize ? FontWeight.w700 : FontWeight.w500,
-              color: valueColor,
+          NoReportedDestination() => ('None', palette.subtleText, false),
+          UnknownReportedDestination() => ('Unknown', palette.caution, true),
+        };
+
+    const String destTooltip =
+        'External source reported destination evidence — NOT a LiftAssistant desired target, call assignment, or command.';
+
+    final bool showTabular = useTabularColumns && textScale <= 1.35;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.elevatedSurface,
+        border: Border(top: BorderSide(color: palette.border)),
+      ),
+      child: showTabular
+          ? Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 6.5,
+              ),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    flex: 4,
+                    child: _TabularField(
+                      label: 'Motion',
+                      value: motionText,
+                      valueColor: motionColor,
+                      emphasize: motionEmph,
+                      leadingIcon: motionIcon,
+                    ),
+                  ),
+                  Container(
+                    width: 1,
+                    height: 22,
+                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    color: palette.border,
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: _TabularField(
+                      label: 'Door',
+                      value: doorText,
+                      valueColor: doorColor,
+                      emphasize: doorEmph,
+                    ),
+                  ),
+                  Container(
+                    width: 1,
+                    height: 22,
+                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    color: palette.border,
+                  ),
+                  Expanded(
+                    flex: 4,
+                    child: Tooltip(
+                      message: destTooltip,
+                      child: _TabularField(
+                        label: 'Source dest',
+                        value: destText,
+                        valueColor: destColor,
+                        emphasize: destEmph,
+                        monospaceValue: true,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 5,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  _SafeInlineKv(
+                    label: 'Motion',
+                    value: motionText,
+                    valueColor: motionColor,
+                    emphasize: motionEmph,
+                    leadingIcon: motionIcon,
+                  ),
+                  _SafeInlineKv(
+                    label: 'Door',
+                    value: doorText,
+                    valueColor: doorColor,
+                    emphasize: doorEmph,
+                  ),
+                  Tooltip(
+                    message: destTooltip,
+                    child: _SafeInlineKv(
+                      label: 'Source dest',
+                      value: destText,
+                      valueColor: destColor,
+                      emphasize: destEmph,
+                      monospaceValue: true,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
     );
   }
 }
 
-class _CompactKv extends StatelessWidget {
-  const _CompactKv({
+class _TabularField extends StatelessWidget {
+  const _TabularField({
     required this.label,
     required this.value,
     required this.valueColor,
     required this.emphasize,
+    this.leadingIcon,
+    this.monospaceValue = false,
   });
 
   final String label;
   final String value;
   final Color valueColor;
   final bool emphasize;
+  final IconData? leadingIcon;
+  final bool monospaceValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 10, color: palette.mutedText, height: 1.1),
+        ),
+        const SizedBox(height: 2),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (leadingIcon != null) ...<Widget>[
+              Icon(leadingIcon, size: 11.5, color: valueColor),
+              const SizedBox(width: 2.5),
+            ],
+            Flexible(
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: monospaceValue
+                    ? instrumentMonoStyle(
+                        context,
+                        fontSize: 11.5,
+                        fontWeight: emphasize
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: valueColor,
+                      )
+                    : TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: emphasize
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: valueColor,
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _SafeInlineKv extends StatelessWidget {
+  const _SafeInlineKv({
+    required this.label,
+    required this.value,
+    required this.valueColor,
+    required this.emphasize,
+    this.leadingIcon,
+    this.monospaceValue = false,
+  });
+
+  final String label;
+  final String value;
+  final Color valueColor;
+  final bool emphasize;
+  final IconData? leadingIcon;
+  final bool monospaceValue;
 
   @override
   Widget build(BuildContext context) {
@@ -591,16 +752,37 @@ class _CompactKv extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Text(
-          '$label ',
-          style: TextStyle(fontSize: 11, color: palette.mutedText),
+        Flexible(
+          flex: 2,
+          child: Text(
+            '$label ',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: palette.mutedText),
+          ),
         ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 11.5,
-            fontWeight: emphasize ? FontWeight.w700 : FontWeight.w500,
-            color: valueColor,
+        if (leadingIcon != null) ...<Widget>[
+          Icon(leadingIcon, size: 11.5, color: valueColor),
+          const SizedBox(width: 2),
+        ],
+        Flexible(
+          flex: 3,
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: monospaceValue
+                ? instrumentMonoStyle(
+                    context,
+                    fontSize: 11.5,
+                    fontWeight: emphasize ? FontWeight.w700 : FontWeight.w500,
+                    color: valueColor,
+                  )
+                : TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: emphasize ? FontWeight.w700 : FontWeight.w500,
+                    color: valueColor,
+                  ),
           ),
         ),
       ],

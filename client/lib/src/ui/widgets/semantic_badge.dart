@@ -121,63 +121,78 @@ class SectionHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
-    return Row(
+    final Widget titleCluster = Row(
+      mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Flexible(
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Flexible(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              if (count != null) ...<Widget>[
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 1,
-                  ),
-                  decoration: BoxDecoration(
-                    color: palette.elevatedSurface,
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: palette.border),
-                  ),
-                  child: Text(
-                    '$count',
-                    style: instrumentMonoStyle(
-                      context,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: palette.subtleText,
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-        if (trailingNote != null) ...<Widget>[
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              trailingNote!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 11.5, color: palette.mutedText),
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              letterSpacing: -0.1,
             ),
           ),
-        ] else
-          const Spacer(),
-        if (trailing != null) ...<Widget>[const SizedBox(width: 8), trailing!],
+        ),
+        if (count != null) ...<Widget>[
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5.5, vertical: 1),
+            decoration: BoxDecoration(
+              color: palette.elevatedSurface,
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: palette.border),
+            ),
+            child: Text(
+              '$count',
+              style: instrumentMonoStyle(
+                context,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: palette.subtleText,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+
+    if (trailingNote == null && trailing == null) {
+      return Align(alignment: Alignment.centerLeft, child: titleCluster);
+    }
+
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: <Widget>[
+        Flexible(flex: 5, child: titleCluster),
+        Flexible(
+          flex: 6,
+          child: Padding(
+            padding: const EdgeInsets.only(left: 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: <Widget>[
+                if (trailingNote != null)
+                  Flexible(
+                    child: Text(
+                      trailingNote!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.right,
+                      style: TextStyle(fontSize: 11, color: palette.mutedText),
+                    ),
+                  ),
+                if (trailing != null) ...<Widget>[
+                  if (trailingNote != null) const SizedBox(width: 8),
+                  trailing!,
+                ],
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
