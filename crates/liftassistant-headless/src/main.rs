@@ -584,13 +584,20 @@ impl ReadOnlyHost {
 
     fn ingest_observation(&mut self, observation: CarObservationUpdate) {
         self.bump_read_model_revision();
-        self.incident_recorder.record_observation(&observation);
         let observation_source = observation.provenance.source.clone();
         let observation_session = observation.provenance.session.clone();
         let car = observation.car.clone();
         let role = self
             .engine
             .observation_binding_role(&observation_source, &car);
+        if role.is_some()
+            && self
+                .engine
+                .active_source_session(&observation_source)
+                .is_some()
+        {
+            self.incident_recorder.record_observation(&observation);
+        }
         let is_operational = role == Some(ObservationBindingRole::Operational);
 
         if is_operational
@@ -3117,6 +3124,524 @@ mod tests {
                 .expect("sanitized unsorted-topology capsule replays")
                 .trigger_id,
             "observation.sequence-not-increasing"
+        );
+    }
+
+    #[test]
+    fn mixed_role_source_preserves_synchronizing_across_session_reset_and_invalidation_eviction() {
+        let source = ObservationSourceId::new("fixture/mixed-role-source");
+        let car_op = CarId::new("A");
+        let car_aux = CarId::new("B");
+        let topology =
+            BuildingTopology::new([Floor::new(1), Floor::new(3)]).expect("valid topology");
+
+        // Subcase A: Operational resolved in s1, reset to s2 (Synchronizing), then >128 Auxiliary updates.
+        let mut host = ReadOnlyHost::new(topology.clone());
+        host.bind_observation(
+            source.clone(),
+            car_op.clone(),
+            ObservationBindingRole::Operational,
+        )
+        .expect("operational car binding");
+        host.bind_observation(
+            source.clone(),
+            car_aux.clone(),
+            ObservationBindingRole::Auxiliary,
+        )
+        .expect("auxiliary car binding");
+        let session_1 = ObservationSessionId::new("mixed-session-1");
+        let session_2 = ObservationSessionId::new("mixed-session-2");
+        host.begin_source_session(source.clone(), session_1.clone())
+            .expect("session 1");
+        let mut op_initial = complete_observation(source.clone(), session_1, 1, Floor::new(1));
+        op_initial.car = car_op.clone();
+        host.ingest_observation(op_initial.into());
+        assert_eq!(host.lifecycle(), &HostLifecycle::ReadyReadOnly);
+
+        host.begin_source_session(source.clone(), session_2.clone())
+            .expect("session 2 invalidates operational car A");
+        assert_eq!(host.lifecycle(), &HostLifecycle::Synchronizing);
+
+        for sequence in 1..=135 {
+            let mut aux_obs =
+                complete_observation(source.clone(), session_2.clone(), sequence, Floor::new(3));
+            aux_obs.car = car_aux.clone();
+            host.ingest_observation(aux_obs.into());
+        }
+        let mut duplicate_aux =
+            complete_observation(source.clone(), session_2.clone(), 135, Floor::new(3));
+        duplicate_aux.car = car_aux.clone();
+        host.ingest_observation(duplicate_aux.into());
+        assert_eq!(host.lifecycle(), &HostLifecycle::Synchronizing);
+
+        let anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+            source: source.clone(),
+            session: session_2.clone(),
+            previous: ObservationSequence::new(135),
+            received: ObservationSequence::new(135),
+        };
+        let trigger = CapsuleTrigger::observation_sequence_not_increasing(
+            &car_aux,
+            ObservationBindingRole::Auxiliary,
+            &anomaly,
+        )
+        .expect("auxiliary sequence anomaly trigger");
+        let reset_capsule = host.capture_incident(trigger);
+        let reset_report = reset_capsule
+            .replay()
+            .expect("mixed-role post-reset synchronizing capsule replays");
+        assert_eq!(
+            reset_report.trigger_id,
+            "observation.sequence-not-increasing"
+        );
+        let (sanitized_reset, _) = reset_capsule
+            .sanitize_candidate()
+            .expect("mixed-role post-reset capsule sanitizes");
+        sanitized_reset
+            .replay()
+            .expect("sanitized mixed-role post-reset capsule replays");
+
+        // Subcase B: Operational invalidated in s1, then >128 Auxiliary updates while Operational stays silent.
+        let mut stale_host = ReadOnlyHost::new(topology);
+        stale_host
+            .bind_observation(
+                source.clone(),
+                car_op.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .expect("operational car binding");
+        stale_host
+            .bind_observation(
+                source.clone(),
+                car_aux.clone(),
+                ObservationBindingRole::Auxiliary,
+            )
+            .expect("auxiliary car binding");
+        let stale_session = ObservationSessionId::new("mixed-stale-session");
+        stale_host
+            .begin_source_session(source.clone(), stale_session.clone())
+            .expect("stale session");
+        let mut op_obs =
+            complete_observation(source.clone(), stale_session.clone(), 1, Floor::new(1));
+        op_obs.car = car_op;
+        stale_host.ingest_observation(op_obs.into());
+        stale_host
+            .mark_source_payload_stale(source.clone(), stale_session.clone())
+            .expect("operational source marked stale");
+        assert_eq!(stale_host.lifecycle(), &HostLifecycle::Synchronizing);
+
+        for sequence in 2..=136 {
+            let mut aux_obs = complete_observation(
+                source.clone(),
+                stale_session.clone(),
+                sequence,
+                Floor::new(3),
+            );
+            aux_obs.car = car_aux.clone();
+            stale_host.ingest_observation(aux_obs.into());
+        }
+        let mut dup =
+            complete_observation(source.clone(), stale_session.clone(), 136, Floor::new(3));
+        dup.car = car_aux.clone();
+        stale_host.ingest_observation(dup.into());
+        assert_eq!(stale_host.lifecycle(), &HostLifecycle::Synchronizing);
+
+        let stale_anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+            source,
+            session: stale_session,
+            previous: ObservationSequence::new(136),
+            received: ObservationSequence::new(136),
+        };
+        let stale_trigger = CapsuleTrigger::observation_sequence_not_increasing(
+            &car_aux,
+            ObservationBindingRole::Auxiliary,
+            &stale_anomaly,
+        )
+        .expect("auxiliary sequence trigger");
+        stale_host
+            .capture_incident(stale_trigger)
+            .replay()
+            .expect("mixed-role post-invalidation synchronizing capsule replays");
+    }
+
+    #[test]
+    fn evicted_operational_degradation_preserves_exact_session_and_sequence_context() {
+        let topology =
+            BuildingTopology::new([Floor::new(1), Floor::new(2)]).expect("valid topology");
+
+        // Subcase A: Incomplete operational observation + duplicate seq in s1, followed by s2 reset and >128 aux updates.
+        let s1 = ObservationSourceId::new("fixture/op-source");
+        let s2 = ObservationSourceId::new("fixture/aux-source");
+        let car_a = CarId::new("A");
+        let car_b = CarId::new("B");
+        let mut host = ReadOnlyHost::new(topology.clone());
+        host.bind_observation(
+            s1.clone(),
+            car_a.clone(),
+            ObservationBindingRole::Operational,
+        )
+        .expect("bind A");
+        host.bind_observation(s2.clone(), car_b.clone(), ObservationBindingRole::Auxiliary)
+            .expect("bind B");
+        let sess_1 = ObservationSessionId::new("op-sess-1");
+        let sess_2 = ObservationSessionId::new("op-sess-2");
+        let aux_sess = ObservationSessionId::new("aux-sess-1");
+        host.begin_source_session(s1.clone(), sess_1.clone())
+            .expect("start op-sess-1");
+        host.begin_source_session(s2.clone(), aux_sess.clone())
+            .expect("start aux-sess-1");
+
+        let partial = CarObservationUpdate {
+            provenance: ObservationProvenance {
+                source: s1.clone(),
+                session: sess_1.clone(),
+                sequence: ObservationSequence::new(1),
+            },
+            car: car_a.clone(),
+            position: Some(PositionEvidence::FloorReference(Floor::new(1))),
+            motion: None,
+            door: None,
+            mode: None,
+            reported_destination: None,
+        };
+        host.ingest_observation(partial.clone());
+        host.ingest_observation(partial);
+        assert!(matches!(host.lifecycle(), HostLifecycle::Degraded(_)));
+
+        // Non-invalidating session reset (no resolved state in sess_1) leaves host Degraded.
+        host.begin_source_session(s1.clone(), sess_2)
+            .expect("start op-sess-2");
+        assert!(matches!(host.lifecycle(), HostLifecycle::Degraded(_)));
+
+        for sequence in 1..=135 {
+            let mut aux_obs =
+                complete_observation(s2.clone(), aux_sess.clone(), sequence, Floor::new(2));
+            aux_obs.car = car_b.clone();
+            host.ingest_observation(aux_obs.into());
+        }
+        let anomaly_a = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+            source: s1,
+            session: sess_1,
+            previous: ObservationSequence::new(1),
+            received: ObservationSequence::new(1),
+        };
+        let trigger_a = CapsuleTrigger::observation_sequence_not_increasing(
+            &car_a,
+            ObservationBindingRole::Operational,
+            &anomaly_a,
+        )
+        .expect("operational sequence trigger");
+        let capsule_a = host.capture_incident(trigger_a);
+        capsule_a
+            .replay()
+            .expect("evicted pre-session-reset operational anomaly replays with exact session");
+        let (sanitized_a, _) = capsule_a
+            .sanitize_candidate()
+            .expect("pre-session-reset anomaly capsule sanitizes");
+        sanitized_a
+            .replay()
+            .expect("sanitized pre-session-reset anomaly capsule replays");
+
+        // Subcase B: Same source with Operational car A (anomaly at seq=5) + Auxiliary car B advancing seq=6..=145.
+        let shared = ObservationSourceId::new("fixture/shared-source");
+        let shared_sess = ObservationSessionId::new("shared-sess-1");
+        let mut shared_host = ReadOnlyHost::new(topology);
+        shared_host
+            .bind_observation(
+                shared.clone(),
+                car_a.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .expect("bind A operational");
+        shared_host
+            .bind_observation(
+                shared.clone(),
+                car_b.clone(),
+                ObservationBindingRole::Auxiliary,
+            )
+            .expect("bind B auxiliary");
+        shared_host
+            .begin_source_session(shared.clone(), shared_sess.clone())
+            .expect("start shared session");
+
+        let mut op_five =
+            complete_observation(shared.clone(), shared_sess.clone(), 5, Floor::new(1));
+        op_five.car = car_a.clone();
+        shared_host.ingest_observation(op_five.clone().into());
+        shared_host.ingest_observation(op_five.into());
+        assert!(matches!(
+            shared_host.lifecycle(),
+            HostLifecycle::Degraded(_)
+        ));
+
+        for sequence in 6..=145 {
+            let mut aux_obs =
+                complete_observation(shared.clone(), shared_sess.clone(), sequence, Floor::new(2));
+            aux_obs.car = car_b.clone();
+            shared_host.ingest_observation(aux_obs.into());
+        }
+        let anomaly_b = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+            source: shared,
+            session: shared_sess,
+            previous: ObservationSequence::new(5),
+            received: ObservationSequence::new(5),
+        };
+        let trigger_b = CapsuleTrigger::observation_sequence_not_increasing(
+            &car_a,
+            ObservationBindingRole::Operational,
+            &anomaly_b,
+        )
+        .expect("exact watermark=5 operational sequence trigger");
+        shared_host
+            .capture_incident(trigger_b)
+            .replay()
+            .expect("evicted anomaly before same-source auxiliary sequence advance replays");
+    }
+
+    #[test]
+    fn unbound_and_pre_session_rejections_do_not_poison_incident_capsule_capture() {
+        let source = ObservationSourceId::new("fixture/clean-recorder");
+        let session = ObservationSessionId::new("clean-session-1");
+        let car = CarId::new("A");
+        let mut host = ReadOnlyHost::new(
+            BuildingTopology::new([Floor::new(1), Floor::new(2)]).expect("valid topology"),
+        );
+        host.bind_observation(
+            source.clone(),
+            car.clone(),
+            ObservationBindingRole::Operational,
+        )
+        .expect("bind operational car");
+
+        // Pre-session observation before begin_source_session:
+        let mut pre_session =
+            complete_observation(source.clone(), session.clone(), 1, Floor::new(1));
+        pre_session.car = car.clone();
+        host.ingest_observation(pre_session.into());
+
+        // Unbound car observation after session starts:
+        host.begin_source_session(source.clone(), session.clone())
+            .expect("begin session");
+        let mut unbound_car =
+            complete_observation(source.clone(), session.clone(), 1, Floor::new(1));
+        unbound_car.car = CarId::new("UNBOUND");
+        host.ingest_observation(unbound_car.into());
+
+        // Unbound source observation:
+        let unbound_source = complete_observation(
+            ObservationSourceId::new("fixture/unbound-source"),
+            ObservationSessionId::new("unbound-session"),
+            1,
+            Floor::new(1),
+        );
+        host.ingest_observation(unbound_source.into());
+
+        // Normal valid ingestion followed by stale capture must encode and replay cleanly.
+        let mut valid = complete_observation(source.clone(), session.clone(), 1, Floor::new(2));
+        valid.car = car;
+        host.ingest_observation(valid.into());
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+
+        host.mark_source_payload_stale(source.clone(), session.clone())
+            .expect("mark stale");
+        let capsule =
+            host.capture_incident(CapsuleTrigger::source_payload_stale(&source, &session));
+        let json = capsule
+            .to_json()
+            .expect("unbound/pre-session rejections must not poison capsule validation");
+        assert_eq!(
+            IncidentCapsule::from_json(&json)
+                .and_then(|decoded| decoded.replay())
+                .expect("captured capsule replays cleanly")
+                .trigger_id,
+            "source.payload-stale"
+        );
+    }
+
+    #[test]
+    fn max_binding_compaction_and_multi_source_rollover_stay_within_capsule_bounds() {
+        let topology =
+            BuildingTopology::new([Floor::new(1), Floor::new(4)]).expect("valid topology");
+
+        // 1 Operational + 255 Auxiliary cars on one source (256 total bindings = MAX_CAPSULE_BINDINGS).
+        let source = ObservationSourceId::new("fixture/max-bindings");
+        let session = ObservationSessionId::new("max-bindings-session");
+        let mut dense_host = ReadOnlyHost::new(topology.clone());
+        let op_car = CarId::new("op-000");
+        dense_host
+            .bind_observation(
+                source.clone(),
+                op_car.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .expect("bind operational");
+        for index in 1..=255 {
+            dense_host
+                .bind_observation(
+                    source.clone(),
+                    CarId::new(format!("aux-{index:03}")),
+                    ObservationBindingRole::Auxiliary,
+                )
+                .expect("bind auxiliary");
+        }
+        dense_host
+            .begin_source_session(source.clone(), session.clone())
+            .expect("begin dense session");
+        let mut op_obs = complete_observation(source.clone(), session.clone(), 1, Floor::new(1));
+        op_obs.car = op_car.clone();
+        dense_host.ingest_observation(op_obs.into());
+        for index in 1..=255_u64 {
+            let mut aux_obs =
+                complete_observation(source.clone(), session.clone(), index + 1, Floor::new(4));
+            aux_obs.car = CarId::new(format!("aux-{index:03}"));
+            dense_host.ingest_observation(aux_obs.into());
+        }
+        dense_host.ingest_observation(CarObservationUpdate {
+            provenance: ObservationProvenance {
+                source: source.clone(),
+                session: session.clone(),
+                sequence: ObservationSequence::new(257),
+            },
+            car: op_car.clone(),
+            position: None,
+            motion: None,
+            door: Some(DoorEvidence::MovingUnknownDirection),
+            mode: None,
+            reported_destination: None,
+        });
+        let dense_capsule = dense_host.capture_incident(CapsuleTrigger::ObservationUnresolved {
+            source: source.as_str().to_owned(),
+            session: session.as_str().to_owned(),
+            car: op_car.as_str().to_owned(),
+        });
+        let dense_report = dense_capsule
+            .replay()
+            .expect("256-binding host compacts auxiliary preamble within MAX_CAPSULE_ACTIONS");
+        assert!(dense_report.action_count <= 256);
+        assert_eq!(dense_report.trigger_id, "observation.unresolved");
+
+        // Multi-source (3 sources) interleaved session resets, invalidations, and inactive-session rejection across 256 rollover.
+        let s_a = ObservationSourceId::new("fixture/multi-z");
+        let s_b = ObservationSourceId::new("fixture/multi-a");
+        let s_aux = ObservationSourceId::new("fixture/multi-m-aux");
+        let car_1 = CarId::new("car-1");
+        let car_2 = CarId::new("car-2");
+        let mut multi = ReadOnlyHost::new(topology);
+        multi.incident_recorder = IncidentRecorder::new(256);
+        multi
+            .bind_observation(
+                s_a.clone(),
+                car_1.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .expect("bind s_a");
+        multi
+            .bind_observation(
+                s_b.clone(),
+                car_2.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .expect("bind s_b");
+        multi
+            .bind_observation(
+                s_aux.clone(),
+                car_1.clone(),
+                ObservationBindingRole::Auxiliary,
+            )
+            .expect("bind s_aux");
+
+        let sa_1 = ObservationSessionId::new("sa-1");
+        let sa_2 = ObservationSessionId::new("sa-2");
+        let sb_1 = ObservationSessionId::new("sb-1");
+        let sb_2 = ObservationSessionId::new("sb-2");
+        let saux_1 = ObservationSessionId::new("saux-1");
+        multi
+            .begin_source_session(s_a.clone(), sa_1.clone())
+            .unwrap();
+        multi
+            .begin_source_session(s_b.clone(), sb_1.clone())
+            .unwrap();
+        multi
+            .begin_source_session(s_aux.clone(), saux_1.clone())
+            .unwrap();
+
+        let mut c1 = complete_observation(s_a.clone(), sa_1.clone(), 1, Floor::new(1));
+        c1.car = car_1.clone();
+        multi.ingest_observation(c1.into());
+        let mut c2 = complete_observation(s_b.clone(), sb_1.clone(), 1, Floor::new(4));
+        c2.car = car_2.clone();
+        multi.ingest_observation(c2.into());
+        assert_eq!(multi.readiness(), Readiness::ReadOnly);
+
+        // Interleave session resets + early inactive-session packet before activation + stale invalidation.
+        let mut early_sa2 = complete_observation(s_a.clone(), sa_2.clone(), 1, Floor::new(1));
+        early_sa2.car = car_1.clone();
+        multi.ingest_observation(early_sa2.into());
+        assert!(matches!(multi.lifecycle(), HostLifecycle::Degraded(_)));
+        multi
+            .begin_source_session(s_a.clone(), sa_2.clone())
+            .unwrap();
+        multi.mark_source_payload_stale(s_b.clone(), sb_1).unwrap();
+        multi
+            .begin_source_session(s_b.clone(), sb_2.clone())
+            .unwrap();
+        let mut c2_recovered = complete_observation(s_b.clone(), sb_2.clone(), 1, Floor::new(4));
+        c2_recovered.car = car_2.clone();
+        multi.ingest_observation(c2_recovered.into());
+        let mut c1_recovered = complete_observation(s_a.clone(), sa_2.clone(), 1, Floor::new(1));
+        c1_recovered.car = car_1.clone();
+        multi.ingest_observation(c1_recovered.into());
+        assert_eq!(multi.readiness(), Readiness::ReadOnly);
+
+        // Delayed retired-session packet on s_a degrades host, then flood 260 auxiliary updates to roll window past 256.
+        let mut delayed_sa1 = complete_observation(s_a.clone(), sa_1, 9, Floor::new(1));
+        delayed_sa1.car = car_1.clone();
+        multi.ingest_observation(delayed_sa1.into());
+        assert!(matches!(multi.lifecycle(), HostLifecycle::Degraded(_)));
+
+        for sequence in 1..=260 {
+            let mut aux_obs =
+                complete_observation(s_aux.clone(), saux_1.clone(), sequence, Floor::new(1));
+            aux_obs.car = car_1.clone();
+            multi.ingest_observation(aux_obs.into());
+        }
+        let mut dup_aux = complete_observation(s_aux.clone(), saux_1.clone(), 260, Floor::new(1));
+        dup_aux.car = car_1.clone();
+        multi.ingest_observation(dup_aux.into());
+
+        let multi_anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+            source: s_aux,
+            session: saux_1,
+            previous: ObservationSequence::new(260),
+            received: ObservationSequence::new(260),
+        };
+        let multi_trigger = CapsuleTrigger::observation_sequence_not_increasing(
+            &car_1,
+            ObservationBindingRole::Auxiliary,
+            &multi_anomaly,
+        )
+        .expect("multi-source trigger");
+        let multi_capsule = multi.capture_incident(multi_trigger);
+        let multi_report = multi_capsule
+            .replay()
+            .expect("3-source interleaved session/invalidation/inactive rollover replays");
+        assert!(multi_report.action_count <= 256);
+        let (multi_sanitized, _) = multi_capsule
+            .sanitize_candidate()
+            .expect("3-source rollover capsule sanitizes");
+        multi_sanitized
+            .replay()
+            .expect("sanitized 3-source rollover capsule replays");
+
+        // Conflicting operational bindings in JSON must be rejected at decode validation.
+        let conflicting_json = multi_capsule
+            .to_json()
+            .unwrap()
+            .replace("\"role\": \"auxiliary\"", "\"role\": \"operational\"");
+        assert!(
+            IncidentCapsule::from_json(&conflicting_json)
+                .expect_err("conflicting operational bindings must fail validation")
+                .contains("conflicting operational bindings")
         );
     }
 
