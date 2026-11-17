@@ -1,6 +1,6 @@
 # Project memory
 
-Last consolidated: 2026-11-17
+Last consolidated: 2026-11-18
 
 This file contains durable project facts and decisions only.
 
@@ -130,6 +130,8 @@ The M5.8 architecture check reuses the existing recorded BACnet Lift mapper as a
 The first Host-to-external-client boundary is an explicitly enabled, headless-owned HTTP JSON snapshot plus SSE current-state stream. Its separate `experimental/v0` DTO projects existing lifecycle/readiness, Engine-owned cars, source/session health, roles, bounded diagnostics, and a host-local revision without changing canonical semantics or freezing internal Rust/event structures. SSE retains only the latest complete snapshot and may coalesce intermediate revisions; reconnect receives current state, while Flight Recorder and Incident Capsule retain forensic/replay responsibility. API connection/keepalive state cannot affect source freshness or Engine readiness. The server has no write route, wildcard CORS, authentication, TLS, or RBAC claim and does not bind anywhere unless the operator explicitly supplies a listen address.
 
 `liftassistant-cli` is the first independent external client proof. It is a separate process with only HTTP/JSON parsing and display dependencies, owns a small local `experimental/v0` parser, and consumes snapshot or continuous SSE state without linking any LiftAssistant canonical, Engine, RMF, simulator, or headless crate. It displays revision, lifecycle/readiness, cars, source/session/observation summaries, and recent diagnostic identities. This validates the process boundary but intentionally creates no shared SDK, generated schema, write path, or frontend-technology decision.
+
+`client/` (`liftassistant_client`) establishes the first independent graphical client over `experimental/v0` HTTP + SSE across Android, Linux, and Web using Flutter. It remains completely outside the Rust workspace, synchronizes strictly from complete snapshots (accepting Host-local revision sequence resets across Host restarts and marking retained state non-live while reconnecting), preserves floor-reference versus continuous location, reported-destination evidence boundaries, `Operational` versus `Auxiliary` authority roles, multi-layer health distinctions, and non-fault diagnostic semantics, and remains strictly read-only. Real persistent SSE integration exposed and fixed premature watch-channel closure and shutdown hang on active SSE connections in `liftassistant-headless`, while confirming that browser deployments require same-origin hosting/reverse proxying unless explicit origin policy is later designed alongside authentication/TLS.
 
 ## License
 

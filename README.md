@@ -140,6 +140,15 @@ cargo run -p liftassistant-cli -- watch http://127.0.0.1:8080
 
 The CLI prints Host lifecycle/readiness and revision, operational cars, source/session/observation summaries, and recent diagnostic identities. `watch` continuously consumes complete SSE snapshots; `--max-snapshots <n>` is available for bounded automation. The client has its own small `experimental/v0` parser and communicates only over HTTP/SSE: it neither links nor instantiates Engine, the RMF adapter, a write boundary, or a shared client SDK.
 
+Consume the same boundary from the independent Flutter graphical client (`client/`, targeting Android, Linux, and Web):
+
+~~~bash
+cd client
+flutter run -d linux
+~~~
+
+The graphical client connects to an explicitly configured `http://host:port`, loads a complete `experimental/v0` snapshot, subscribes to continuous SSE `snapshot` events, recovers across disconnects and Host restarts (including Host-local revision resets), and remains strictly read-only. Because `liftassistant-headless` intentionally omits wildcard CORS headers on unauthenticated HTTP, browser deployments should serve `flutter build web --no-web-resources-cdn` from the same origin (for example behind a local/LAN reverse proxy forwarding `/api/experimental/v0/*`).
+
 Exercise the live Open-RMF subscription proof against an independently running official Hotel simulation:
 
 ~~~bash
@@ -197,6 +206,8 @@ Calls now have deterministic identity and persistent Core-owned state. Multiple 
 ~~~text
 AGENTS.md                  authoritative AI-agent workflow
 agent.md                   compatibility/navigation pointer
+
+client/                    independent Flutter read-only graphical client (Android, Linux, Web)
 
 crates/
   liftassistant-cli/       independent experimental HTTP/SSE read-only client

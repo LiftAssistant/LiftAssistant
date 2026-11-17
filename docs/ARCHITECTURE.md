@@ -95,6 +95,16 @@ lifecycle/readiness and revision, operational cars, source/session summaries, an
 diagnostic identities. This proves separation without creating a shared client SDK, generated
 schema, generic messaging layer, or commitment to a future frontend technology.
 
+`client/` (`liftassistant_client`) is the first independent graphical client across that same
+`experimental/v0` HTTP snapshot plus SSE boundary, targeting Android, Linux, and Web from one
+shared Flutter codebase with platform-specific code limited to native `dart:io` versus browser
+`fetch`/`ReadableStream` streaming. It links no LiftAssistant Rust crate, owns no elevator or
+dispatch truth, replaces its read state from complete snapshots, accepts Host-local revision
+resets across Host restarts without durable cursors or event-log replay, and exposes no write
+capability. Browser Same-Origin Policy on unauthenticated HTTP means Web deployments currently
+use same-origin hosting or reverse proxying rather than relaxing the Host's no-wildcard-CORS
+posture.
+
 ## Determinism boundary
 
 The simulator advances only when given an explicit elapsed simulation duration.

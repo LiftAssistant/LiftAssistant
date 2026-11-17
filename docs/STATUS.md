@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.10 are implemented and accepted. HUMAN authorized **M5.11 — LiftAssistant Client** (independent read-only Flutter graphical client targeting Android, Linux, and Web over `experimental/v0` HTTP + SSE); second-family live production validation remains `EXTERNAL_VALIDATION_PENDING`. **Current slice: M5.11 IN PROGRESS.**
+M5.1 through M5.11 are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING`. **Completion mode: HUMAN-CHECK.** M5.11 LiftAssistant Client first version is implemented and runtime-validated against the real Host across Android, Linux, and Web; further milestone progression awaits HUMAN review.
 
 ## Validated baseline
 
@@ -914,11 +914,27 @@ Validation: three focused CLI parser/renderer/SSE tests, `cargo fmt --all -- --c
 
 ### M5.11 — LiftAssistant Client
 
-**IN PROGRESS.**
+**IMPLEMENTED — MANDATORY HUMAN-CHECK BOUNDARY REACHED.**
 
-Authorized scope:
+Implemented behavior and evidence:
 
-- independent external Flutter read-only graphical client targeting Android, Linux, and Web;
-- consumes only the existing `liftassistant-headless` `experimental/v0` HTTP snapshot (`GET /api/experimental/v0/snapshot`) and SSE stream (`GET /api/experimental/v0/events`);
-- preserves complete-snapshot synchronization, Host-local revision reset across Host restarts, floor-vs-continuous location precision, reported-destination evidence boundaries, `Operational` vs `Auxiliary` authority roles, multi-layer health distinctions, and non-fault diagnostic evidence semantics;
-- strictly read-only with no write endpoint, intent submission, or placeholder control UI.
+- `client/` (`liftassistant_client`) is an independent Flutter graphical client targeting Android, Linux, and Web with zero Cargo/FFI/crate dependency on LiftAssistant model, Core, Engine, runtime, RMF, simulator, TUI, or headless internals;
+- clean four-layer client architecture (`HostTransport` -> `ExperimentalV0Decoder` -> `ClientController`/`ClientState` -> adaptive Flutter UI) shares API models, strict validation, SSE framing, synchronization/reconnect state, and UI across all three platforms, using conditional imports only where native `dart:io` `HttpClient` streaming differs from browser `dart:js_interop` `fetch` + `ReadableStreamDefaultReader` + `AbortController`;
+- synchronization is strictly complete-snapshot centric (`GET /api/experimental/v0/snapshot` followed by `GET /api/experimental/v0/events` SSE `event: snapshot` replacement) with bounded exponential-backoff reconnect, immediate manual reconnect, inactivity watchdog over SSE keepalives, non-live marking of retained snapshots during disconnection, clearing of prior Host state when switching endpoints, acceptance of smaller revisions across Host restarts, and explicit `UnsupportedApiVersionException` / `MalformedReadModelException` reporting without field guessing;
+- UI preserves LiftAssistant semantic boundaries without inventing backend truth: discrete `FloorLocation` versus genuine `ContinuousLocation`, `ReportedDestination` (`Known`/`None`/`Unknown`) as external source evidence rather than desired target or call assignment, `Operational` versus `Auxiliary` binding authority (with explicit non-failover semantics), six distinct health dimensions (client link, Host lifecycle, Host readiness, source session, transport discovery, payload activity, and per-car observation availability), and recent diagnostics as machine-readable Host evidence rather than equipment-fault or repair assertions;
+- strictly read-only: exposes zero call, target, park, door, mode, or protocol write controls or endpoints;
+- real persistent SSE client integration exposed a latent bug in `liftassistant-headless` (`crates/liftassistant-headless/src/http_api.rs`): `--serve-experimental-snapshot-fixture` dropped its last `watch::Sender` after its 300 ms update (prematurely closing SSE streams), while cooperative shutdown waited indefinitely on active SSE connections until clients closed sockets. Fixed in a standalone commit by keeping a shutdown-bounded relay watch channel inside `http_api::serve`, covered by a focused Rust regression test;
+- **CLIENT API PRESSURE / Architecture Pressure recorded (no speculative backend rewrite performed):**
+  1. *Browser Same-Origin vs unauthenticated no-wildcard-CORS Host API*: `liftassistant-headless` rightly omits wildcard `Access-Control-Allow-Origin` on unauthenticated plain HTTP. Direct cross-origin browser requests are therefore blocked by browser Same-Origin Policy; Web deployments currently require same-origin hosting/reverse proxying (verified in Chrome) until explicit origin configuration and/or authenticated TLS deployment semantics are reviewed.
+  2. *Plain-HTTP cleartext boundary on mobile OS policies*: Android API 28+ blocks cleartext HTTP by default; `AndroidManifest.xml` explicitly enables `usesCleartextTraffic="true"` for the M5.11 local/LAN `experimental/v0` scope without claiming TLS or authentication.
+  3. *Projected topology / unresolved reason detail*: when `operational_cars` is empty (for example `Starting`/`Synchronizing`), `experimental/v0` intentionally projects per-car availability (`awaiting`/`incomplete`/`unresolved`/`revoked`) and diagnostic IDs (`observation.unresolved`, `mapping.rejected`) without served-floor topology metadata or human-formatted diagnostic prose; M5.11 needs neither to satisfy read-only operational visibility, so no additive DTO expansion was introduced.
+
+Platform build and runtime validation against real `liftassistant-headless`:
+
+- **Linux desktop (`VALIDATED — BUILD + REAL HOST RUNTIME`)**: `flutter build linux --release` succeeded; native GTK release binary launched before Host startup (survived offline), auto-connected to `--serve-experimental-snapshot-fixture`, received live pushed SSE revision, survived Host `SIGTERM`, and auto-reconnected across Host restart/revision reset to `--run-rmf-read-only --api-listen ...`.
+- **Web (`VALIDATED — BUILD + REAL CHROME + REAL HOST RUNTIME`)**: `flutter build web --no-web-resources-cdn` (including Wasm dry-run check) succeeded; real `/usr/bin/google-chrome-stable` booted the self-contained bundle via a same-origin static/API reverse proxy, survived initial 502 while Host was offline, auto-connected and held a steady `fetch` `ReadableStream` SSE connection without polling, survived Host stop, and reconnected across Host restart/revision reset to `--run-rmf-read-only`.
+- **Android (`VALIDATED — DEBUG/RELEASE APK BUILD + REAL ANDROID EMULATOR + REAL HOST RUNTIME`)**: `flutter build apk --debug` and `flutter build apk --release` succeeded; booted `Medium_Phone_API_36.1` (Android API 36.1), installed APK via `adb`, verified `http://10.0.2.2:<port>` cleartext HTTP routing while Host was offline, live SSE snapshot push from `--serve-experimental-snapshot-fixture`, process survival across Host stop, and automatic reconnect across Host restart/revision reset to `--run-rmf-read-only`.
+
+Validation: `cargo fmt --all -- --check`, warning-free workspace all-target `cargo clippy`, all 120 Rust workspace tests, `dart analyze --fatal-infos` (zero issues), all 19 Flutter unit/widget/socket/real-Host-process tests, and real process-level runtime proofs on Linux, Web (Chrome), and Android Emulator pass. All test processes, listeners, temporary Chrome profiles, and Android emulator instances were cleaned up.
+
+Stop at `HUMAN-CHECK` after M5.11 first-version delivery and real three-platform Host validation.
