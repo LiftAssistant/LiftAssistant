@@ -114,6 +114,14 @@ cargo run -p liftassistant-headless -- --scenario headless-read-only-lifecycle
 
 This scenario uses an internal recorded canonical-observation source and exercises no transport. It proves that process existence is distinct from readiness: partial evidence remains `Synchronizing`, complete evidence reaches `ReadyReadOnly`, and a repeated source sequence moves the host to `Degraded`/not-ready while retaining the last known state for inspection. The headless binary has no TUI, simulator, `IntentSink`, passenger-elevator write path, deployment claim, or stable public API.
 
+Inspect the pure `experimental/v0` read-model projection without opening a socket:
+
+~~~bash
+cargo run -p liftassistant-headless -- --scenario headless-experimental-read-model
+~~~
+
+The output is a separate API-boundary JSON DTO rather than serialized canonical Rust structs. It preserves floor-reference versus continuous location, all three reported-destination states, explicit motion/door/mode/readiness/binding-role values, source/session health, and bounded recent diagnostic identities. Its revision is monotonic only within the current host process and is not an observation sequence, source session, persistent version, or stable API promise.
+
 Exercise the live Open-RMF subscription proof against an independently running official Hotel simulation:
 
 ~~~bash

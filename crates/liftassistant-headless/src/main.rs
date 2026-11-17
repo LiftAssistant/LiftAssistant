@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod incident;
+mod read_api;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -44,6 +45,7 @@ const RMF_LIVE_SCENARIO: &str = "headless-rmf-live-proof";
 const RMF_FRESHNESS_SCENARIO: &str = "headless-rmf-freshness-proof";
 const INCIDENT_CAPSULE_SCENARIO: &str = "headless-incident-capsule-replay";
 const SANITIZED_CAPSULE_SCENARIO: &str = "headless-sanitized-capsule-replay";
+const READ_MODEL_SCENARIO: &str = "headless-experimental-read-model";
 const RMF_READ_ONLY_HOST_COMMAND: &str = "--run-rmf-read-only";
 const REPLAY_INCIDENT_CAPSULE_COMMAND: &str = "--replay-incident-capsule";
 const SANITIZE_INCIDENT_CAPSULE_COMMAND: &str = "--sanitize-incident-capsule";
@@ -500,6 +502,7 @@ struct ReadOnlyHost {
     lifecycle: HostLifecycle,
     diagnostics: HostDiagnostics,
     incident_recorder: IncidentRecorder,
+    read_model_revision: u64,
 }
 
 impl ReadOnlyHost {
@@ -515,6 +518,7 @@ impl ReadOnlyHost {
                 diagnostics
             },
             incident_recorder: IncidentRecorder::new(INCIDENT_ACTION_CAPACITY),
+            read_model_revision: 1,
         }
     }
 
@@ -534,6 +538,17 @@ impl ReadOnlyHost {
         &self.diagnostics
     }
 
+    fn read_model(&self) -> read_api::ExperimentalReadModel {
+        read_api::ExperimentalReadModel::project(self)
+    }
+
+    fn bump_read_model_revision(&mut self) {
+        self.read_model_revision = self
+            .read_model_revision
+            .checked_add(1)
+            .expect("experimental read-model revision space exhausted");
+    }
+
     fn bind_observation(
         &mut self,
         source: ObservationSourceId,
@@ -551,6 +566,7 @@ impl ReadOnlyHost {
         if role == ObservationBindingRole::Operational {
             self.required_operational_cars.insert(car);
         }
+        self.bump_read_model_revision();
         Ok(())
     }
 
@@ -563,6 +579,7 @@ impl ReadOnlyHost {
     }
 
     fn ingest_observation(&mut self, observation: CarObservationUpdate) {
+        self.bump_read_model_revision();
         self.incident_recorder.record_observation(&observation);
         let observation_source = observation.provenance.source.clone();
         let observation_session = observation.provenance.session.clone();
@@ -730,37 +747,53 @@ impl ReadOnlyHost {
         if invalidated_operational_state {
             self.transition(HostLifecycle::Synchronizing);
         }
+        self.bump_read_model_revision();
         Ok(transition)
     }
 
     fn note_transport_subscriber_created(&mut self, source: &ObservationSourceId) {
-        if let Some(health) = self.source_health.get_mut(source) {
+        let changed = if let Some(health) = self.source_health.get_mut(source) {
+            if health.transport_discovery != TransportDiscoveryState::Unknown {
+                return;
+            }
             health.transport_discovery = TransportDiscoveryState::SubscriberCreated;
             let SourceSessionActivity::Active(session) = &health.session else {
-                return;
+                return self.bump_read_model_revision();
             };
             self.diagnostics
                 .record(HostEvent::TransportSubscriberCreated {
                     source: source.clone(),
                     session: session.clone(),
                 });
+            true
+        } else {
+            false
+        };
+        if changed {
+            self.bump_read_model_revision();
         }
     }
 
     fn note_transport_discovery(&mut self, source: &ObservationSourceId) {
-        if let Some(health) = self.source_health.get_mut(source) {
+        let changed = if let Some(health) = self.source_health.get_mut(source) {
             if health.transport_discovery == TransportDiscoveryState::DiscoveryObserved {
                 return;
             }
             health.transport_discovery = TransportDiscoveryState::DiscoveryObserved;
             let SourceSessionActivity::Active(session) = &health.session else {
-                return;
+                return self.bump_read_model_revision();
             };
             self.diagnostics
                 .record(HostEvent::TransportDiscoveryObserved {
                     source: source.clone(),
                     session: session.clone(),
                 });
+            true
+        } else {
+            false
+        };
+        if changed {
+            self.bump_read_model_revision();
         }
     }
 
@@ -775,6 +808,7 @@ impl ReadOnlyHost {
             session,
             message,
         });
+        self.bump_read_model_revision();
     }
 
     fn record_mapping_rejection(
@@ -790,6 +824,7 @@ impl ReadOnlyHost {
             native_entity,
             message,
         });
+        self.bump_read_model_revision();
     }
 
     fn mark_source_payload_stale(
@@ -822,6 +857,7 @@ impl ReadOnlyHost {
         if source_has_operational_binding {
             self.transition(HostLifecycle::Synchronizing);
         }
+        self.bump_read_model_revision();
         Ok(invalidation)
     }
 
@@ -830,6 +866,7 @@ impl ReadOnlyHost {
             self.lifecycle = lifecycle.clone();
             self.diagnostics
                 .record(HostEvent::LifecycleChanged(lifecycle));
+            self.bump_read_model_revision();
         }
     }
 
@@ -978,7 +1015,7 @@ fn parse_command(args: impl Iterator<Item = String>) -> Result<HeadlessCommand, 
 
 fn headless_usage() -> String {
     format!(
-        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}|{INCIDENT_CAPSULE_SCENARIO}|{SANITIZED_CAPSULE_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal] [--incident-capsule-out <path>]\n       liftassistant-headless {REPLAY_INCIDENT_CAPSULE_COMMAND} <internal-capsule.json>\n       liftassistant-headless {SANITIZE_INCIDENT_CAPSULE_COMMAND} <private-capsule.json> <candidate.json>"
+        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}|{INCIDENT_CAPSULE_SCENARIO}|{SANITIZED_CAPSULE_SCENARIO}|{READ_MODEL_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal] [--incident-capsule-out <path>]\n       liftassistant-headless {REPLAY_INCIDENT_CAPSULE_COMMAND} <internal-capsule.json>\n       liftassistant-headless {SANITIZE_INCIDENT_CAPSULE_COMMAND} <private-capsule.json> <candidate.json>"
     )
 }
 
@@ -1445,10 +1482,31 @@ fn run_scenario(name: &str) -> Result<String, String> {
         RMF_FRESHNESS_SCENARIO => run_rmf_freshness_scenario(),
         INCIDENT_CAPSULE_SCENARIO => run_incident_capsule_scenario(),
         SANITIZED_CAPSULE_SCENARIO => run_sanitized_capsule_scenario(),
+        READ_MODEL_SCENARIO => run_read_model_scenario(),
         _ => Err(format!(
-            "unknown scenario {name:?}; available scenarios: {LIFECYCLE_SCENARIO}, {RMF_LIVE_SCENARIO}, {RMF_FRESHNESS_SCENARIO}, {INCIDENT_CAPSULE_SCENARIO}, {SANITIZED_CAPSULE_SCENARIO}"
+            "unknown scenario {name:?}; available scenarios: {LIFECYCLE_SCENARIO}, {RMF_LIVE_SCENARIO}, {RMF_FRESHNESS_SCENARIO}, {INCIDENT_CAPSULE_SCENARIO}, {SANITIZED_CAPSULE_SCENARIO}, {READ_MODEL_SCENARIO}"
         )),
     }
+}
+
+fn run_read_model_scenario() -> Result<String, String> {
+    let mut host = reference_host();
+    host.ingest_observation(
+        complete_observation(
+            reference_source_id(),
+            reference_session_id(),
+            1,
+            Floor::new(4),
+        )
+        .into(),
+    );
+    let model = host.read_model();
+    let revision = model.revision();
+    let json = serde_json::to_string_pretty(&model)
+        .map_err(|error| format!("failed to encode experimental read model: {error}"))?;
+    Ok(format!(
+        "scenario: {READ_MODEL_SCENARIO}\nstatus: PASS (pure experimental/v0 projection; no socket)\nrevision: {revision}\n{json}"
+    ))
 }
 
 fn run_sanitized_capsule_scenario() -> Result<String, String> {
@@ -3073,6 +3131,8 @@ mod tests {
 
         host.note_transport_subscriber_created(&reference_source_id());
         host.note_transport_discovery(&reference_source_id());
+        let discovered_revision = host.read_model().revision();
+        host.note_transport_subscriber_created(&reference_source_id());
 
         let health = host
             .source_health(&reference_source_id())
@@ -3088,6 +3148,7 @@ mod tests {
         );
         assert_eq!(host.readiness(), Readiness::NotReady);
         assert!(host.engine.car_states().is_empty());
+        assert_eq!(host.read_model().revision(), discovered_revision);
     }
 
     #[test]

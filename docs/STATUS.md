@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.8 are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING` but no longer blocks client-platform work. **M5.9a — Pure Experimental Read-model Projection is READY.** The current authorization ends after M5.10 and does not include Flutter, WebUI, HA/BMS, or M6.
+M5.1 through M5.8 and M5.9a are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING` but no longer blocks client-platform work. **M5.9b — Experimental HTTP Snapshot is READY.** The current authorization ends after M5.10 and does not include Flutter, WebUI, HA/BMS, or M6.
 
 ## Validated baseline
 
@@ -834,8 +834,22 @@ External validation pending: no live BACnet Lift endpoint, sanitized real BACnet
 
 ### M5.9a — Pure Experimental Read-model Projection
 
+**IMPLEMENTED.**
+
+Implemented behavior and evidence:
+
+- an API-boundary-owned `ExperimentalReadModel` projects existing `ReadOnlyHost`/Engine facts without deriving serde on canonical model, Core, Engine, runtime, or adapter types and without serializing `HostEvent`, `EngineEvent`, ingestion errors, or Rust `Debug` output;
+- JSON carries `api_version=experimental/v0`, host-local monotonic revision, lifecycle/readiness, sorted operational cars, source/session/transport/payload/availability state, binding roles, and the already bounded recent host diagnostic identities/context;
+- tagged wire representations preserve floor-reference versus continuous location and Known/None/Unknown reported destinations. Motion direction, door state, operating mode, source-session activity, binding role, and observation availability remain explicit rather than inferred or collapsed;
+- revision begins at 1 for each new Host process, advances with projected host changes, is independent of an observation sequence fixture of 99, and has no persistence, database, session, or canonical-model meaning;
+- the executable `headless-experimental-read-model` scenario emits and inspects one complete JSON projection without opening a socket. No score, confidence, estimate, universal health value, generic message bus, client SDK, or stable/public API claim was added.
+
+Validation: focused projection tests, warning-free headless all-target clippy, `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 113 workspace tests, the pure projection executable scenario, canonical serde/dependency checks, and diff/whitespace review pass.
+
+### M5.9b — Experimental HTTP Snapshot
+
 **READY.**
 
-Project current `ReadOnlyHost`/Engine facts into a small API-boundary-owned `experimental/v0` read model without opening a socket. Preserve floor-reference versus continuous location, all three reported-destination variants, explicit motion/door/mode/readiness/binding-role representations, truthful source/session state, bounded recent diagnostics, and a host-local monotonic read-model revision.
+Serve `GET /api/experimental/v0/snapshot` from a real process with `Cache-Control: no-store`, returning the current complete `ExperimentalReadModel`. The HTTP boundary belongs only to headless/service composition, remains disabled by default, and must be validated by an independent HTTP request to a real listening server.
 
-Do not serialize canonical/internal structs directly, expose Rust `Debug` output, add HTTP dependencies outside headless, add inferred scores/quality/estimates, make API revision an observation sequence, or create a generic messaging/client framework. M5.9b and later are not READY until this projection is tested and reviewed.
+Expose no semantic mutation route, wildcard CORS, implicit `0.0.0.0` listener, authentication/TLS fiction, stable API claim, or HTTP dependency in model/Core/Engine/runtime/RMF. M5.9c is not READY until the snapshot path and API isolation pass process-level validation.
