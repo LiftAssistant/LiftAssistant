@@ -185,7 +185,11 @@ final class IoHostTransport implements HostTransport {
       await parsedSubscription?.cancel();
       _releaseClient(client, force: true);
       if (!outputController.isClosed) {
-        await outputController.close();
+        if (outputController.hasListener) {
+          await outputController.close();
+        } else {
+          unawaited(outputController.close());
+        }
       }
     }
 

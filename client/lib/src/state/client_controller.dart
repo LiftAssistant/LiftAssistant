@@ -249,11 +249,21 @@ class ClientController extends ChangeNotifier {
     if (_disposed || opId != _operationId) {
       return;
     }
-    await _cancelActiveOperations();
-    if (_disposed || opId != _operationId) {
-      return;
-    }
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    final StreamSubscription<String>? sub = _sseSubscription;
+    _sseSubscription = null;
+    final HostSseConnection? sse = _activeSse;
+    _activeSse = null;
+
     _handleConnectionFailure(opId, endpoint, error, attempt: 1);
+
+    if (sub != null) {
+      await sub.cancel();
+    }
+    if (sse != null) {
+      await sse.close();
+    }
   }
 
   void _applyIncomingSnapshot(

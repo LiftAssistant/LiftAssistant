@@ -286,10 +286,18 @@ final class WebHostTransport implements HostTransport {
       } catch (_) {}
       await parsedSubscription?.cancel();
       if (!byteController.isClosed) {
-        await byteController.close();
+        if (byteController.hasListener) {
+          await byteController.close();
+        } else {
+          unawaited(byteController.close());
+        }
       }
       if (!outputController.isClosed) {
-        await outputController.close();
+        if (outputController.hasListener) {
+          await outputController.close();
+        } else {
+          unawaited(outputController.close());
+        }
       }
     }
 

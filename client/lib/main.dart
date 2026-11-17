@@ -1,14 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'src/ui/app.dart';
+
 void main() {
-  runApp(
-    const MaterialApp(
-      debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        body: Center(
-          child: Text('LiftAssistant Client'),
-        ),
-      ),
-    ),
-  );
+  runApp(const LiftAssistantClientApp());
 }
