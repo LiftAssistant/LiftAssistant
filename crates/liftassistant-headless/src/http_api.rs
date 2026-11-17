@@ -67,20 +67,36 @@ pub(super) fn serve(
     runtime.block_on(async move {
         let listener = tokio::net::TcpListener::from_std(listener)
             .map_err(|error| format!("failed to adopt experimental API listener: {error}"))?;
-        axum::serve(listener, router(publisher))
+        let mut upstream = publisher.subscribe();
+        let (models_tx, models_rx) = watch::channel(upstream.borrow_and_update().clone());
+        let relay_shutdown = Arc::clone(&shutdown);
+        tokio::spawn(async move {
+            let _publisher_guard = publisher;
+            loop {
+                tokio::select! {
+                    () = wait_for_shutdown(Arc::clone(&relay_shutdown)) => break,
+                    changed = upstream.changed() => {
+                        if changed.is_err() {
+                            break;
+                        }
+                        let latest = upstream.borrow_and_update().clone();
+                        let _ = models_tx.send_replace(latest);
+                    }
+                }
+            }
+        });
+        axum::serve(listener, router(models_rx))
             .with_graceful_shutdown(wait_for_shutdown(shutdown))
             .await
             .map_err(|error| format!("experimental API server failed: {error}"))
     })
 }
 
-fn router(publisher: ReadModelPublisher) -> Router {
+fn router(models: watch::Receiver<ExperimentalReadModel>) -> Router {
     Router::new()
         .route(SNAPSHOT_PATH, get(snapshot))
         .route(EVENTS_PATH, get(events))
-        .with_state(ApiState {
-            models: publisher.subscribe(),
-        })
+        .with_state(ApiState { models })
 }
 
 async fn snapshot(
@@ -342,5 +358,78 @@ mod tests {
             .join()
             .expect("server thread joins")
             .expect("server shuts down cleanly");
+    }
+
+    #[test]
+    fn sse_stays_open_after_external_publisher_drop_and_closes_on_shutdown() {
+        let mut host = ReadOnlyHost::new(BuildingTopology::reference_eight_floor());
+        let source = liftassistant_model::ObservationSourceId::new("fixture/sse-lifetime");
+        host.bind_observation(
+            source.clone(),
+            CarId::new("A"),
+            ObservationBindingRole::Operational,
+        )
+        .expect("binding succeeds");
+        let publisher = ReadModelPublisher::new(host.read_model());
+        let external_publisher = publisher.clone();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback listener binds");
+        let address = listener.local_addr().expect("listener has an address");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = Arc::clone(&shutdown);
+        let server = thread::spawn(move || serve(listener, publisher, server_shutdown));
+
+        let mut stream = (0..50)
+            .find_map(|_| match TcpStream::connect(address) {
+                Ok(stream) => Some(stream),
+                Err(_) => {
+                    thread::sleep(Duration::from_millis(10));
+                    None
+                }
+            })
+            .expect("SSE listener accepts a connection");
+        stream
+            .set_read_timeout(Some(Duration::from_millis(120)))
+            .expect("read timeout configures");
+        write!(
+            stream,
+            "GET {EVENTS_PATH} HTTP/1.1\r\nHost: {address}\r\nAccept: text/event-stream\r\n\r\n"
+        )
+        .expect("SSE request writes");
+
+        host.record_transport_failure(
+            source,
+            liftassistant_model::ObservationSessionId::new("sse-lifetime-session"),
+            "final fixture update".into(),
+        );
+        let final_revision = host.read_model().revision();
+        assert!(external_publisher.publish(host.read_model()));
+        drop(external_publisher);
+
+        let mut response = Vec::new();
+        read_until(
+            &mut stream,
+            &mut response,
+            &format!("\"revision\":{final_revision}"),
+        );
+
+        // Stream must remain open (WouldBlock/TimedOut, not EOF 0) while shutdown is false.
+        let mut probe = [0_u8; 64];
+        match stream.read(&mut probe) {
+            Ok(0) => panic!("SSE stream closed prematurely before shutdown"),
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => panic!("unexpected SSE read error: {error}"),
+        }
+
+        // Cooperative shutdown must terminate open SSE streams without waiting for client drop.
+        shutdown.store(true, Ordering::Relaxed);
+        server
+            .join()
+            .expect("server thread joins")
+            .expect("server shuts down cleanly with active SSE client");
     }
 }
