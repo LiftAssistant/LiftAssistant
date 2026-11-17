@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod adapter_validation;
 mod app;
 mod replay;
 mod scenario;

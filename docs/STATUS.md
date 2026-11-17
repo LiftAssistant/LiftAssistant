@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.6 are implemented: the Rust-native Open-RMF adapter and long-running headless composition have passed official Hotel ingestion, stale/recovery, readiness, graceful-shutdown, bounded production diagnostics, fresh-process incident replay, and deterministic sanitization/replay. **M5.7 — Adapter Validation Profiles is READY.** No later M5 slice is READY merely because it appears in the roadmap.
+M5.1 through M5.7 are implemented: the Rust-native Open-RMF adapter and long-running headless composition have passed official Hotel ingestion, stale/recovery, readiness, graceful-shutdown, bounded production diagnostics, fresh-process incident replay, deterministic sanitization/replay, and bounded adapter-contract validation against both live/recorded RMF and recorded-only BACnet evidence. **M5.8 — Second Production Source Family is READY only for the evidence-bounded architecture check below.** No later M5 slice is READY merely because it appears in the roadmap.
 
 ## Validated baseline
 
@@ -802,8 +802,23 @@ Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clip
 
 ### M5.7 — Adapter Validation Profiles
 
-**READY.**
+**IMPLEMENTED.**
 
-Build the smallest internal adapter-validation profiles justified by the repeated RMF live/recorded behavior and the existing recorded BACnet family. Check explicit native-to-logical mapping, required binding, explicit session lifecycle, source-global sequence, incremental/ambiguity semantics, restart invalidation, canonical-path ownership, and absence of writes.
+Implemented behavior and evidence:
 
-Do not call profiles certified/conformant/safety-validated, freeze a public adapter SDK/schema, build a generic plugin framework, or manufacture live-source evidence. M5.8 and later remain not READY until the same bounded contract can exercise RMF plus the existing recorded second family without hiding source-specific ambiguity.
+- the developer-only `adapter-validation-profiles` executable scenario runs the same fixed checklist against the concrete Open-RMF observation adapter and the existing recorded BACnet Lift mapper; it introduces no adapter trait, registry, public schema, plugin boundary, or canonical domain type;
+- both profiles verify explicit native-to-logical identity, mandatory Engine binding, explicit source-session activation, source-global/session-local sequence, ambiguity as present canonical evidence rather than omission, restart invalidation and old-session rejection, unique Engine-owned operational state, and an observation-only path with no write action;
+- the RMF profile proves one source maps `Lift1` and `Lift2` to distinct logical cars, rejects logical-CarId text as an unconfigured native lift, separates RMF `session_id` from the adapter SourceSession, preserves door-moving/empty-destination/source-specific-mode ambiguity, and resets its sequence only under an explicit new adapter session;
+- the BACnet profile proves `Object_Name` remains source context while the caller supplies the logical CarId, rejects unconfigured universal floors, preserves multi-door disagreement as `DoorEvidence::Unknown`, and exercises the same Engine binding/session/restart path across two logical cars;
+- evidence scope remains explicit in machine-executable output: RMF is backed by the official live Hotel proof plus recorded regression, while BACnet is recorded mapping only and has no supplied live production endpoint;
+- two runs produce an identical report. The output says these are internal engineering checks and not certification; no family is called certified, conformant, safety-validated, or live when that evidence does not exist.
+
+Validation: focused warning-free TUI clippy, all 22 TUI tests, deterministic execution of the new profile scenario, and diff/whitespace review pass before workspace validation.
+
+### M5.8 — Second Production Source Family
+
+**READY — EVIDENCE-BOUNDED ARCHITECTURE CHECK.**
+
+Use the existing recorded BACnet Lift evidence to check that the M5 runtime-health, diagnostics, incident-capsule, sanitization, and validation assumptions did not become RMF-only. Keep all source-specific ambiguity and lifecycle ownership explicit. Do not invent BACnet packets, transport, COV behavior, controller behavior, or live claims.
+
+If a second live production source cannot be implemented and validated without a supplied live endpoint, sanitized real capture, documented controller API, or other real external input, record `BLOCKED BY EXTERNAL INPUT`. Do not manufacture the missing evidence or promote M5.9.

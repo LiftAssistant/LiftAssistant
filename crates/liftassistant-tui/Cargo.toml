@@ -12,5 +12,6 @@ crossterm = "0.28"
 liftassistant-core = { path = "../liftassistant-core" }
 liftassistant-engine = { path = "../liftassistant-engine" }
 liftassistant-model = { path = "../liftassistant-model" }
+liftassistant-rmf = { path = "../liftassistant-rmf" }
 liftassistant-runtime = { path = "../liftassistant-runtime" }
 liftassistant-sim = { path = "../liftassistant-sim" }

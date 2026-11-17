@@ -80,6 +80,14 @@ cargo run -p liftassistant-tui -- --scenario bacnet-recorded-read-only
 
 This experiment maps a typed in-memory projection of decoded BACnet Lift properties into the same canonical observation/Engine ingestion path. Universal floor numbers remain configured floor references; multi-door status is not collapsed when doors disagree; and BACnet object `Out_Of_Service` decoupling makes operational evidence unknown rather than pretending the car is in LiftAssistant's `OutOfService` mode. It implements no BACnet packet codec, transport, discovery, property write, live connection, or conformance claim.
 
+Run the internal observation-adapter validation profiles:
+
+~~~bash
+cargo run -p liftassistant-tui -- --scenario adapter-validation-profiles
+~~~
+
+The scenario applies one bounded checklist to the concrete Open-RMF adapter and recorded BACnet mapper: explicit native-to-logical identity, Engine binding, source sessions, source-global sequence, ambiguity preservation, restart invalidation, canonical Engine ownership, and an observation-only path. Its report keeps RMF's official live-plus-recorded evidence separate from BACnet's recorded-only evidence. These are deterministic engineering checks, not certification, conformance, safety validation, or evidence of a live BACnet endpoint.
+
 Inspect bounded diagnostic capture and deterministic incident replay:
 
 ~~~bash

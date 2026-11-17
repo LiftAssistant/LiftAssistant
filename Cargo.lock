@@ -1038,6 +1038,7 @@ dependencies = [
  "liftassistant-core",
  "liftassistant-engine",
  "liftassistant-model",
+ "liftassistant-rmf",
  "liftassistant-runtime",
  "liftassistant-sim",
  "ratatui",
