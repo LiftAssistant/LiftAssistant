@@ -667,10 +667,22 @@ The proof used the official rootless Kilted image at digest `sha256:601a6bb7c04d
 
 ### M5.1b — RMF-owned live subscription and canonical ingestion
 
-**HUMAN-CHECK — frozen observation semantics block an operational live state.**
+**READY — HUMAN decision: explicit source-local interaction-mode projection.**
 
-The successful M5.1a payload proof also reproduced the official Hotel source's steady-state `current_mode=MODE_AGV`. The accepted RMF mapping intentionally preserves `MODE_AGV` and `MODE_HUMAN` as `OperatingModeEvidence::SourceSpecific`: they describe RMF control/session context and are not silently equivalent to a LiftAssistant `OperatingMode`. Resolver therefore keeps these otherwise complete live snapshots unresolved, so Engine cannot expose the operational `CarState` required by the M5.1 exit or reach a truthful ReadyReadOnly state.
+The M5.1a payload proof reproduced the official Hotel source's steady-state `current_mode=MODE_AGV`. Open-RMF defines `MODE_AGV` and `MODE_HUMAN` as RMF interaction/control modes, while the same field may also report exceptional lift states such as fire or offline. They therefore remain source-specific evidence by default and are not globally redefined as LiftAssistant operating modes.
 
-No adapter implementation was committed after discovering this boundary. Continuing requires an explicit HUMAN decision on how a configured RMF source can establish LiftAssistant operating-mode evidence. The narrow candidates are an RMF-specific explicit mapping policy, or a deliberate change to the completeness required for operational state; either changes a frozen semantic or its accepted use and cannot be selected by implementation convenience. Mapping `MODE_AGV` directly to `OperatingMode::Normal`, inventing a default mode, or bypassing Resolver is not authorized.
+The approved resolution keeps operational `CarState` completeness and the existing Resolver unchanged. An RMF adapter may use an explicit, per-configured-source mapping policy to promote `MODE_AGV` and/or `MODE_HUMAN` to `OperatingMode::Normal` only when that source/site configuration deliberately asserts that the RMF interaction mode represents ordinary LiftAssistant service availability for that integration. This is an adapter-side projection, not a universal equivalence.
 
-M5.2 and later dependent slices are not READY while this gate remains unresolved. The Rust-native transport proof remains valid and read-only; no ROS/RMF dependency entered model, Core, Engine, or the workspace dependency graph.
+Required boundaries:
+
+- the default remains conservative: without an explicit source-local projection, `MODE_AGV`/`MODE_HUMAN` remain `OperatingModeEvidence::SourceSpecific` and the operational state stays unresolved;
+- the policy is opt-in per configured RMF source, not a global default and not inferred from `available_modes`, source names, payload history, or convenience;
+- raw `current_mode`, `available_modes`, and RMF session context remain preserved as source context even when a configured projection supplies canonical `OperatingMode::Normal` evidence;
+- `MODE_FIRE` continues to map to `FireService`, `MODE_OFFLINE` to `OutOfService`, and `MODE_UNKNOWN` remains unknown; `MODE_EMERGENCY` remains source-specific/unresolved unless separately reviewed;
+- this approval does not authorize arbitrary RMF-mode mappings to `Independent`, `Inspection`, or other canonical modes;
+- the official Hotel simulation may explicitly opt in to `MODE_AGV -> Normal` for its live validation profile, but that test configuration must not become a production default;
+- do not weaken Resolver completeness, bypass canonical `CarObservationUpdate`, or add a generic mode-mapping framework.
+
+M5.1b implementation should introduce only the smallest RMF-owned configuration/type required by this policy, share the existing RMF semantic mapper between recorded and live paths, keep ROS/RMF dependencies out of model/Core/Engine, use explicit native `lift_name` to logical `CarId` mapping and existing binding/session semantics, and prove the configured/default mode paths with focused regressions.
+
+M5.2 and later dependent slices remain not READY until M5.1b completes its live canonical-ingestion exit evidence. The Rust-native transport proof remains valid and read-only; this HUMAN decision grants no write authority and changes no canonical model type.
