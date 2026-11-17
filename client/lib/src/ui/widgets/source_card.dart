@@ -67,7 +67,6 @@ class SourceHealthCard extends StatelessWidget {
                   Row(
                     children: <Widget>[
                       Expanded(
-                        flex: 2,
                         child: Tooltip(
                           message: 'ObservationSourceId: ${source.source}',
                           child: Text(
@@ -83,13 +82,17 @@ class SourceHealthCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Flexible(
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 116),
                         child: Text(
                           '${source.observations.length} bound',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
+                          textAlign: TextAlign.right,
+                          style: instrumentMonoStyle(
+                            context,
                             fontSize: 11,
+                            fontWeight: FontWeight.w500,
                             color: palette.mutedText,
                           ),
                         ),
@@ -125,6 +128,8 @@ class SourceHealthCard extends StatelessWidget {
                 ],
               ),
             ),
+
+            if (fillRowHeight) const Spacer(),
 
             // Discovery != usable payload contextual callout
             if (discoveryWithoutActivePayload)
@@ -184,9 +189,6 @@ class SourceHealthCard extends StatelessWidget {
                   observation: source.observations[i],
                   isFirst: i == 0,
                 ),
-
-            if (fillRowHeight)
-              Expanded(child: ColoredBox(color: palette.surface)),
           ],
         ),
       ),
@@ -215,8 +217,8 @@ class _SourceTelemetryItem extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Flexible(
-            flex: 2,
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 96),
             child: Text(
               '$label ',
               maxLines: 1,
@@ -227,7 +229,6 @@ class _SourceTelemetryItem extends StatelessWidget {
           StatusDot(color: dotColor, hollow: hollowDot, size: 6),
           const SizedBox(width: 4.5),
           Flexible(
-            flex: 4,
             child: Tooltip(
               message: '$label: $value',
               child: Text(

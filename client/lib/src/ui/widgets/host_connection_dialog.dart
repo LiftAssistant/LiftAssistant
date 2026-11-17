@@ -221,12 +221,28 @@ class _HostConnectionFormState extends State<HostConnectionForm> {
         ),
         if (kIsWeb) ...<Widget>[
           const SizedBox(height: 10),
-          Text(
-            'Web note: serve from the same origin (or reverse proxy /api/experimental/v0/*); Host omits wildcard CORS.',
-            style: TextStyle(
-              fontSize: 11.5,
-              height: 1.35,
-              color: palette.mutedText,
+          Text.rich(
+            TextSpan(
+              style: TextStyle(
+                fontSize: 11.5,
+                height: 1.4,
+                color: palette.mutedText,
+              ),
+              children: <InlineSpan>[
+                const TextSpan(
+                  text: 'Browser Same-Origin: serve from the Host origin or reverse-proxy ',
+                ),
+                TextSpan(
+                  text: '/\u2060api\u2060/\u2060experimental\u2060/\u2060v0',
+                  style: instrumentMonoStyle(
+                    context,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: palette.subtleText,
+                  ),
+                ),
+                const TextSpan(text: ' (Host omits wildcard CORS).'),
+              ],
             ),
           ),
         ],

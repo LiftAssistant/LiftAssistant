@@ -7,6 +7,8 @@ import 'package:liftassistant_client/src/state/client_controller.dart';
 import 'package:liftassistant_client/src/transport/host_transport.dart';
 import 'package:liftassistant_client/src/ui/app.dart';
 import 'package:liftassistant_client/src/ui/widgets/car_card.dart';
+import 'package:liftassistant_client/src/ui/widgets/diagnostic_panel.dart';
+import 'package:liftassistant_client/src/ui/widgets/host_connection_dialog.dart';
 import 'package:liftassistant_client/src/ui/widgets/semantic_badge.dart';
 import 'package:liftassistant_client/src/ui/widgets/source_card.dart';
 
@@ -159,6 +161,13 @@ void main() {
       await tester.pumpWidget(LiftAssistantClientApp(controller: controller));
       await tester.pumpAndSettle();
 
+      // Onboarding panel sits above mathematical viewport midpoint (optical center).
+      final Rect onboardingFormRect = tester.getRect(
+        find.byType(HostConnectionForm),
+      );
+      expect(onboardingFormRect.top, greaterThan(120.0));
+      expect(onboardingFormRect.center.dy, lessThan(430.0));
+
       // Rejects https:// URL in onboarding form.
       await tester.enterText(
         find.byKey(const Key('host-url-input')),
@@ -193,16 +202,81 @@ void main() {
       );
       expect((diagHeaderRect.right - diagNoteRect.right).abs(), lessThan(2.0));
 
-      // Side-by-side car cards and side-by-side source cards share exact row height on 1366x900.
+      // Side-by-side car cards and side-by-side source cards share exact row height on 1366x900,
+      // AND trailing header readouts (mode badge & bound count) align flush-right within 12px card padding.
       final Rect car0 = tester.getRect(find.byType(OperationalCarCard).at(0));
       final Rect car1 = tester.getRect(find.byType(OperationalCarCard).at(1));
       expect(car0.top, equals(car1.top));
       expect(car0.height, equals(car1.height));
 
+      final Rect car0ModeRect = tester.getRect(
+        find.descendant(
+          of: find.byType(OperationalCarCard).at(0),
+          matching: find.text('Normal'),
+        ),
+      );
+      final Rect car1ModeRect = tester.getRect(
+        find.descendant(
+          of: find.byType(OperationalCarCard).at(1),
+          matching: find.widgetWithText(SemanticBadge, 'Inspection'),
+        ),
+      );
+      expect((car0.right - 12.0 - car0ModeRect.right).abs(), lessThan(2.0));
+      expect((car1.right - 12.0 - car1ModeRect.right).abs(), lessThan(2.0));
+
       final Rect src0 = tester.getRect(find.byType(SourceHealthCard).at(0));
       final Rect src1 = tester.getRect(find.byType(SourceHealthCard).at(1));
       expect(src0.top, equals(src1.top));
       expect(src0.height, equals(src1.height));
+
+      final Rect src0BoundRect = tester.getRect(
+        find.descendant(
+          of: find.byType(SourceHealthCard).at(0),
+          matching: find.text('2 bound'),
+        ),
+      );
+      final Rect src1BoundRect = tester.getRect(
+        find.descendant(
+          of: find.byType(SourceHealthCard).at(1),
+          matching: find.text('1 bound'),
+        ),
+      );
+      expect((src0.right - 12.0 - src0BoundRect.right).abs(), lessThan(2.0));
+      expect((src1.right - 12.0 - src1BoundRect.right).abs(), lessThan(2.0));
+
+      // DiagnosticsFilterToolbar: #seq button is flush-right, Role segmented control sits paired
+      // on Row 1, and all 6 Layer pills sit on a single non-wrapping row (no orphan Auxiliary wrap).
+      final Rect toolbarRect = tester.getRect(
+        find.byType(DiagnosticsFilterToolbar),
+      );
+      final Rect sortButtonRect = tester.getRect(
+        find.byKey(const Key('diagnostics-sort-button')),
+      );
+      expect((toolbarRect.right - sortButtonRect.right).abs(), lessThan(2.0));
+
+      final Rect roleOpRect = tester.getRect(
+        find.byKey(const Key('diag-filter-role-operational')),
+      );
+      final Rect roleAuxRect = tester.getRect(
+        find.byKey(const Key('diag-filter-role-auxiliary')),
+      );
+      expect(roleOpRect.top, equals(roleAuxRect.top));
+
+      final double allPillTop = tester
+          .getRect(find.byKey(const Key('diag-filter-all')))
+          .top;
+      for (final String layerKey in <String>[
+        'diag-filter-layer-transport',
+        'diag-filter-layer-source',
+        'diag-filter-layer-mapping',
+        'diag-filter-layer-observation',
+        'diag-filter-layer-readiness',
+      ]) {
+        expect(
+          tester.getRect(find.byKey(Key(layerKey))).top,
+          equals(allPillTop),
+        );
+      }
 
       // Location precision distinction: Floor ref vs Continuous position.
       expect(find.text('Floor ref'), findsOneWidget);
@@ -331,9 +405,23 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Mobile uses slim 3-tab strip (Cars / Sources / Diagnostics) and renders BOTH cars above the fold!
+      // Mobile uses slim 3-tab strip (Cars / Sources / Diagnostics) and renders BOTH cars above the fold
+      // with flush-right mode readouts!
       expect(find.byKey(const Key('compact-section-strip')), findsOneWidget);
       expect(find.byType(OperationalCarCard), findsNWidgets(2));
+      final Rect mobileCar0 = tester.getRect(
+        find.byType(OperationalCarCard).at(0),
+      );
+      final Rect mobileCar0Mode = tester.getRect(
+        find.descendant(
+          of: find.byType(OperationalCarCard).at(0),
+          matching: find.text('Normal'),
+        ),
+      );
+      expect(
+        (mobileCar0.right - 12.0 - mobileCar0Mode.right).abs(),
+        lessThan(2.0),
+      );
       final Rect secondCarRect = tester.getRect(
         find.byType(OperationalCarCard).at(1),
       );
@@ -344,12 +432,44 @@ void main() {
       await tester.tap(find.byKey(const Key('compact-tab-sources')));
       await tester.pumpAndSettle();
       expect(find.text('rmf/site-main'), findsOneWidget);
+      final Rect mobileSrc0 = tester.getRect(
+        find.byType(SourceHealthCard).at(0),
+      );
+      final Rect mobileSrc0Bound = tester.getRect(
+        find.descendant(
+          of: find.byType(SourceHealthCard).at(0),
+          matching: find.text('2 bound'),
+        ),
+      );
+      expect(
+        (mobileSrc0.right - 12.0 - mobileSrc0Bound.right).abs(),
+        lessThan(2.0),
+      );
       expect(tester.takeException(), isNull);
 
       await tester.tap(find.byKey(const Key('compact-tab-diagnostics')));
       await tester.pumpAndSettle();
       expect(find.text('mapping.rejected'), findsOneWidget);
       expect(find.text('readiness.changed'), findsOneWidget);
+
+      // On mobile Diagnostics, #seq button is flush-right and Role buttons stay paired together on their own row.
+      final Rect mobileToolbarRect = tester.getRect(
+        find.byType(DiagnosticsFilterToolbar),
+      );
+      final Rect mobileSortRect = tester.getRect(
+        find.byKey(const Key('diagnostics-sort-button')),
+      );
+      expect(
+        (mobileToolbarRect.right - mobileSortRect.right).abs(),
+        lessThan(2.0),
+      );
+      final Rect mobileRoleOp = tester.getRect(
+        find.byKey(const Key('diag-filter-role-operational')),
+      );
+      final Rect mobileRoleAux = tester.getRect(
+        find.byKey(const Key('diag-filter-role-auxiliary')),
+      );
+      expect(mobileRoleOp.top, equals(mobileRoleAux.top));
 
       await tester.tap(find.byKey(const Key('diag-filter-layer-mapping')));
       await tester.enterText(
@@ -623,7 +743,8 @@ void main() {
         ''');
       }
 
-      final String largeFleetJson = '''
+      final String largeFleetJson =
+          '''
       {
         "api_version": "experimental/v0",
         "revision": 42,
@@ -703,6 +824,148 @@ void main() {
       );
       expect(find.text('observation.updated.200'), findsOneWidget);
       expect(find.text('observation.updated.1'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'bounds single-car and single-source cards on wide desktop stages and aligns single source under column 0 when 2 cars resolve',
+    (WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1366, 900);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      const String singleCarFixtureJson = '''
+      {
+        "api_version": "experimental/v0",
+        "revision": 2,
+        "lifecycle": "ready_read_only",
+        "readiness": "read_only",
+        "operational_cars": [
+          {
+            "id": "lift-A",
+            "location": {"kind": "continuous", "floor_position": 4.0, "nearest_floor": 4},
+            "motion": {"state": "stopped"},
+            "door": "open",
+            "operating_mode": "fire_service",
+            "reported_destination": {"kind": "none"}
+          }
+        ],
+        "sources": [
+          {
+            "source": "fixture/headless-recorded",
+            "session": {"state": "active", "session": "headless-fixture-session-A"},
+            "transport": "unknown",
+            "payload": "active",
+            "observations": [
+              {"car": "lift-A", "role": "operational", "availability": "resolved"}
+            ]
+          }
+        ],
+        "recent_diagnostics": []
+      }
+      ''';
+
+      const String twoCarSingleSourceJson = '''
+      {
+        "api_version": "experimental/v0",
+        "revision": 3,
+        "lifecycle": "ready_read_only",
+        "readiness": "read_only",
+        "operational_cars": [
+          {
+            "id": "lift-A",
+            "location": {"kind": "floor", "floor": 1},
+            "motion": {"state": "stopped"},
+            "door": "closed",
+            "operating_mode": "normal",
+            "reported_destination": {"kind": "none"}
+          },
+          {
+            "id": "lift-B",
+            "location": {"kind": "floor", "floor": 3},
+            "motion": {"state": "moving", "direction": "up"},
+            "door": "closed",
+            "operating_mode": "normal",
+            "reported_destination": {"kind": "known", "floor": 5}
+          }
+        ],
+        "sources": [
+          {
+            "source": "rmf/site-main",
+            "session": {"state": "active", "session": "session-1"},
+            "transport": "discovery_observed",
+            "payload": "active",
+            "observations": [
+              {"car": "lift-A", "role": "operational", "availability": "resolved"},
+              {"car": "lift-B", "role": "operational", "availability": "resolved"}
+            ]
+          }
+        ],
+        "recent_diagnostics": []
+      }
+      ''';
+
+      final _WidgetTestTransport transport = _WidgetTestTransport()
+        ..currentSnapshot = singleCarFixtureJson;
+      final ClientController controller = ClientController(
+        transport: transport,
+        initialUrlInput: 'http://127.0.0.1:8080',
+      );
+      addTearDown(() {
+        controller.dispose();
+        transport.dispose();
+      });
+
+      await tester.pumpWidget(
+        LiftAssistantClientApp(
+          controller: controller,
+          initialHostUrl: 'http://127.0.0.1:8080',
+          autoConnect: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Single car and single source share identical bounded width (<= 540px) rather than stretching across ~873px.
+      final Rect singleCarRect = tester.getRect(
+        find.byType(OperationalCarCard),
+      );
+      final Rect singleSrcRect = tester.getRect(find.byType(SourceHealthCard));
+      expect(singleCarRect.left, equals(singleSrcRect.left));
+      expect(singleCarRect.width, equals(singleSrcRect.width));
+      expect(singleCarRect.width, lessThanOrEqualTo(540.0));
+      expect(singleCarRect.width, greaterThanOrEqualTo(500.0));
+
+      final Rect fireBadgeRect = tester.getRect(
+        find.widgetWithText(SemanticBadge, 'FireService'),
+      );
+      final Rect singleBoundRect = tester.getRect(find.text('1 bound'));
+      expect(
+        (singleCarRect.right - 12.0 - fireBadgeRect.right).abs(),
+        lessThan(2.0),
+      );
+      expect(
+        (singleSrcRect.right - 12.0 - singleBoundRect.right).abs(),
+        lessThan(2.0),
+      );
+
+      // Push a 2-car, 1-source SSE snapshot (real Hotel RMF topology): Source 0 snaps to match Car 0's column width!
+      transport.sseController.add(twoCarSingleSourceJson);
+      await tester.pumpAndSettle();
+
+      final Rect twoCar0Rect = tester.getRect(
+        find.byType(OperationalCarCard).at(0),
+      );
+      final Rect pairedSrcRect = tester.getRect(find.byType(SourceHealthCard));
+      expect((twoCar0Rect.right - pairedSrcRect.right).abs(), lessThan(1.0));
+
+      // Ultra-wide 1920x1080 bounds multi-column rows cleanly without 700px+ card bloat.
+      tester.view.physicalSize = const Size(1920, 1080);
+      await tester.pumpAndSettle();
+      final Rect ultraWideCar0 = tester.getRect(
+        find.byType(OperationalCarCard).at(0),
+      );
+      expect(ultraWideCar0.width, lessThanOrEqualTo(500.0));
     },
   );
 }

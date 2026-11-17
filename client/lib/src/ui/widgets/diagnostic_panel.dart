@@ -247,8 +247,7 @@ List<Widget> buildDiagnosticSlivers({
             Align(
               alignment: Alignment.centerRight,
               child: Tooltip(
-                message:
-                    'Diagnostic entries are machine-readable Host evidence only — NOT confirmed elevator equipment faults, root causes, or repair instructions.',
+                message: 'Diagnostic entries are machine-readable Host evidence only — NOT confirmed elevator equipment faults, root causes, or repair instructions.',
                 child: Text(
                   'Host evidence · non-fault',
                   style: TextStyle(fontSize: 11, color: palette.mutedText),
@@ -337,154 +336,344 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final bool inlineRoleOnTopRow =
+            constraints.maxWidth >= 412 && textScale <= 1.2;
+
+        final Widget sortButton = ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 108),
+          child: Tooltip(
+            message: controller.newestFirst
+                ? 'Sorted newest sequence first (tap to reverse)'
+                : 'Sorted oldest sequence first (tap to reverse)',
+            child: InkWell(
+              key: const Key('diagnostics-sort-button'),
+              borderRadius: BorderRadius.circular(5),
+              onTap: controller.toggleSortOrder,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(minHeight: 32),
-                child: TextField(
-                  key: const Key('diagnostics-search-input'),
-                  controller: controller.searchController,
-                  style: const TextStyle(fontSize: 12.5),
-                  decoration: InputDecoration(
-                    hintText: 'Filter id, source, car, entity...',
-                    hintStyle: TextStyle(
-                      fontSize: 12,
-                      color: palette.mutedText,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: palette.elevatedSurface,
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: palette.border),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 5,
                     ),
-                    prefixIcon: Icon(
-                      Icons.search,
-                      size: 15,
-                      color: palette.mutedText,
-                    ),
-                    prefixIconConstraints: const BoxConstraints(
-                      minWidth: 32,
-                      minHeight: 30,
-                    ),
-                    suffixIcon: controller.searchQuery.isEmpty
-                        ? null
-                        : IconButton(
-                            key: const Key('diagnostics-search-clear'),
-                            tooltip: 'Clear filter query',
-                            onPressed: controller.clearSearch,
-                            padding: EdgeInsets.zero,
-                            visualDensity: VisualDensity.compact,
-                            icon: Icon(
-                              Icons.close_rounded,
-                              size: 14,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Icon(
+                          controller.newestFirst ? Icons.south : Icons.north,
+                          size: 13,
+                          color: palette.subtleText,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            '#seq',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: instrumentMonoStyle(
+                              context,
+                              fontSize: 11,
                               color: palette.subtleText,
                             ),
                           ),
-                    suffixIconConstraints: const BoxConstraints(
-                      minWidth: 28,
-                      minHeight: 28,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 6,
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
             ),
-            const SizedBox(width: 6),
-            Flexible(
-              child: Tooltip(
-                message: controller.newestFirst
-                    ? 'Sorted newest sequence first (tap to reverse)'
-                    : 'Sorted oldest sequence first (tap to reverse)',
-                child: InkWell(
-                  key: const Key('diagnostics-sort-button'),
-                  borderRadius: BorderRadius.circular(5),
-                  onTap: controller.toggleSortOrder,
+          ),
+        );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Expanded(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(minHeight: 32),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: palette.elevatedSurface,
-                        borderRadius: BorderRadius.circular(5),
-                        border: Border.all(color: palette.border),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 9,
-                          vertical: 5,
+                    child: TextField(
+                      key: const Key('diagnostics-search-input'),
+                      controller: controller.searchController,
+                      style: const TextStyle(fontSize: 12.5),
+                      decoration: InputDecoration(
+                        hintText: inlineRoleOnTopRow
+                            ? 'Filter id, source, car...'
+                            : 'Filter id, source, car, entity...',
+                        hintStyle: TextStyle(
+                          fontSize: 12,
+                          color: palette.mutedText,
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: <Widget>[
-                            Icon(
-                              controller.newestFirst
-                                  ? Icons.south
-                                  : Icons.north,
-                              size: 13,
-                              color: palette.subtleText,
-                            ),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                '#seq',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: instrumentMonoStyle(
-                                  context,
-                                  fontSize: 11,
+                        prefixIcon: Icon(
+                          Icons.search,
+                          size: 15,
+                          color: palette.mutedText,
+                        ),
+                        prefixIconConstraints: const BoxConstraints(
+                          minWidth: 30,
+                          minHeight: 30,
+                        ),
+                        suffixIcon: controller.searchQuery.isEmpty
+                            ? null
+                            : IconButton(
+                                key: const Key('diagnostics-search-clear'),
+                                tooltip: 'Clear filter query',
+                                onPressed: controller.clearSearch,
+                                padding: EdgeInsets.zero,
+                                visualDensity: VisualDensity.compact,
+                                icon: Icon(
+                                  Icons.close_rounded,
+                                  size: 14,
                                   color: palette.subtleText,
                                 ),
                               ),
-                            ),
-                          ],
+                        suffixIconConstraints: const BoxConstraints(
+                          minWidth: 26,
+                          minHeight: 28,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
                         ),
                       ),
                     ),
                   ),
                 ),
+                if (inlineRoleOnTopRow) ...<Widget>[
+                  const SizedBox(width: 6),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 168),
+                    child: _RoleSegmentedControl(
+                      controller: controller,
+                      minHeight: 32,
+                    ),
+                  ),
+                ],
+                const SizedBox(width: 6),
+                sortButton,
+              ],
+            ),
+            const SizedBox(height: 6),
+            if (textScale <= 1.35)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    _FilterPill(
+                      key: const Key('diag-filter-all'),
+                      label: 'All',
+                      selected:
+                          controller.selectedLayer == null &&
+                          controller.selectedRole == null,
+                      onTap: controller.clearCategoryFilters,
+                    ),
+                    Container(
+                      width: 1,
+                      height: 12,
+                      margin: const EdgeInsets.symmetric(horizontal: 5.5),
+                      color: palette.border,
+                    ),
+                    for (
+                      int i = 0;
+                      i < DiagnosticLayer.values.length;
+                      i++
+                    ) ...<Widget>[
+                      if (i > 0) const SizedBox(width: 4),
+                      _FilterPill(
+                        key: Key(
+                          'diag-filter-layer-${DiagnosticLayer.values[i].wireValue}',
+                        ),
+                        label: DiagnosticLayer.values[i].wireValue,
+                        monospace: true,
+                        selected:
+                            controller.selectedLayer ==
+                            DiagnosticLayer.values[i],
+                        onTap: () =>
+                            controller.toggleLayer(DiagnosticLayer.values[i]),
+                      ),
+                    ],
+                  ],
+                ),
+              )
+            else
+              Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  _FilterPill(
+                    key: const Key('diag-filter-all'),
+                    label: 'All',
+                    selected:
+                        controller.selectedLayer == null &&
+                        controller.selectedRole == null,
+                    onTap: controller.clearCategoryFilters,
+                  ),
+                  Container(
+                    width: 1,
+                    height: 12,
+                    margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                    color: palette.border,
+                  ),
+                  for (final DiagnosticLayer layer in DiagnosticLayer.values)
+                    _FilterPill(
+                      key: Key('diag-filter-layer-${layer.wireValue}'),
+                      label: layer.wireValue,
+                      monospace: true,
+                      selected: controller.selectedLayer == layer,
+                      onTap: () => controller.toggleLayer(layer),
+                    ),
+                ],
+              ),
+            if (!inlineRoleOnTopRow) ...<Widget>[
+              const SizedBox(height: 5),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  Text(
+                    'Role',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: palette.mutedText,
+                    ),
+                  ),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                    child: _RoleSegmentedControl(
+                      controller: controller,
+                      minHeight: 24,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _RoleSegmentedControl extends StatelessWidget {
+  const _RoleSegmentedControl({
+    required this.controller,
+    required this.minHeight,
+  });
+
+  final DiagnosticsFilterController controller;
+  final double minHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final bool opSelected = controller.selectedRole == BindingRole.operational;
+    final bool auxSelected = controller.selectedRole == BindingRole.auxiliary;
+
+    return Tooltip(
+      message: 'Filter diagnostic entries by observation binding role',
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: palette.surface,
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: palette.border),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Flexible(
+                child: _RoleSegmentButton(
+                  key: const Key('diag-filter-role-operational'),
+                  label: 'Operational',
+                  selected: opSelected,
+                  minHeight: minHeight,
+                  onTap: () => controller.toggleRole(BindingRole.operational),
+                ),
+              ),
+              Container(
+                width: 1,
+                height: (minHeight - 10).clamp(10.0, 20.0),
+                color: palette.border,
+              ),
+              Flexible(
+                child: _RoleSegmentButton(
+                  key: const Key('diag-filter-role-auxiliary'),
+                  label: 'Auxiliary',
+                  selected: auxSelected,
+                  minHeight: minHeight,
+                  onTap: () => controller.toggleRole(BindingRole.auxiliary),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RoleSegmentButton extends StatelessWidget {
+  const _RoleSegmentButton({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.minHeight,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final double minHeight;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final Color fg = selected ? palette.info : palette.subtleText;
+    final Color bg = selected ? palette.infoContainer : Colors.transparent;
+
+    return InkWell(
+      onTap: onTap,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: minHeight),
+        child: ColoredBox(
+          color: bg,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            child: Center(
+              widthFactor: 1.0,
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: fg,
+                ),
               ),
             ),
-          ],
+          ),
         ),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 4.5,
-          runSpacing: 4.5,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: <Widget>[
-            _FilterPill(
-              key: const Key('diag-filter-all'),
-              label: 'All',
-              selected:
-                  controller.selectedLayer == null &&
-                  controller.selectedRole == null,
-              onTap: controller.clearCategoryFilters,
-            ),
-            for (final DiagnosticLayer layer in DiagnosticLayer.values)
-              _FilterPill(
-                key: Key('diag-filter-layer-${layer.wireValue}'),
-                label: layer.wireValue,
-                monospace: true,
-                selected: controller.selectedLayer == layer,
-                onTap: () => controller.toggleLayer(layer),
-              ),
-            _FilterPill(
-              key: const Key('diag-filter-role-operational'),
-              label: 'Operational',
-              selected: controller.selectedRole == BindingRole.operational,
-              onTap: () => controller.toggleRole(BindingRole.operational),
-            ),
-            _FilterPill(
-              key: const Key('diag-filter-role-auxiliary'),
-              label: 'Auxiliary',
-              selected: controller.selectedRole == BindingRole.auxiliary,
-              onTap: () => controller.toggleRole(BindingRole.auxiliary),
-            ),
-          ],
-        ),
-      ],
+      ),
     );
   }
 }

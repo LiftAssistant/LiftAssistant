@@ -85,7 +85,8 @@ class OperationalCarCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Flexible(
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 156),
                           child: _ModeReadout(mode: car.operatingMode),
                         ),
                       ],
@@ -96,10 +97,7 @@ class OperationalCarCard extends StatelessWidget {
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
                       children: <Widget>[
-                        _CarApertureGraphic(
-                          door: car.door,
-                          motion: car.motion,
-                        ),
+                        _CarApertureGraphic(door: car.door, motion: car.motion),
                         const SizedBox(width: 11),
                         Expanded(
                           child: _LocationReadout(location: car.location),
@@ -224,8 +222,7 @@ class _LocationReadout extends StatelessWidget {
               foreground: palette.subtleText,
               background: palette.neutralContainer,
               outlined: true,
-              tooltip:
-                  'Discrete floor association only (kind: floor). Host holds no continuous coordinate for this car.',
+              tooltip: 'Discrete floor association only (kind: floor). Host holds no continuous coordinate for this car.',
             ),
           ],
         );
@@ -262,8 +259,7 @@ class _LocationReadout extends StatelessWidget {
                   label: 'Continuous',
                   foreground: palette.info,
                   background: palette.infoContainer,
-                  tooltip:
-                      'Genuine continuous position evidence held by Host (kind: continuous).',
+                  tooltip: 'Genuine continuous position evidence held by Host (kind: continuous).',
                 ),
               ],
             ),
@@ -548,16 +544,19 @@ class _CarTelemetryFooter extends StatelessWidget {
       CarDoorState.fault => ('Fault', palette.danger, true),
     };
 
-    final (String destText, Color destColor, bool destEmph) =
-        switch (reportedDestination) {
-          KnownReportedDestination(:final floor) => (
-            'Floor $floor',
-            palette.info,
-            true,
-          ),
-          NoReportedDestination() => ('None', palette.subtleText, false),
-          UnknownReportedDestination() => ('Unknown', palette.caution, true),
-        };
+    final (
+      String destText,
+      Color destColor,
+      bool destEmph,
+    ) = switch (reportedDestination) {
+      KnownReportedDestination(:final floor) => (
+        'Floor $floor',
+        palette.info,
+        true,
+      ),
+      NoReportedDestination() => ('None', palette.subtleText, false),
+      UnknownReportedDestination() => ('Unknown', palette.caution, true),
+    };
 
     const String destTooltip =
         'External source reported destination evidence — NOT a LiftAssistant desired target, call assignment, or command.';
@@ -752,8 +751,8 @@ class _SafeInlineKv extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        Flexible(
-          flex: 2,
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 96),
           child: Text(
             '$label ',
             maxLines: 1,
@@ -766,7 +765,6 @@ class _SafeInlineKv extends StatelessWidget {
           const SizedBox(width: 2),
         ],
         Flexible(
-          flex: 3,
           child: Text(
             value,
             maxLines: 1,

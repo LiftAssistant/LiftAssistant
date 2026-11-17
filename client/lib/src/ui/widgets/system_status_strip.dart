@@ -160,8 +160,8 @@ class HostTelemetryBar extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
-                      Flexible(
-                        flex: 2,
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 64),
                         child: Text(
                           'Rev ',
                           maxLines: 1,
@@ -173,7 +173,6 @@ class HostTelemetryBar extends StatelessWidget {
                         ),
                       ),
                       Flexible(
-                        flex: 3,
                         child: Text(
                           '#${snapshot.revision}',
                           maxLines: 1,
@@ -188,7 +187,6 @@ class HostTelemetryBar extends StatelessWidget {
                       if (!isLive) ...<Widget>[
                         const SizedBox(width: 5),
                         Flexible(
-                          flex: 3,
                           child: Text(
                             '(retained)',
                             maxLines: 1,
@@ -264,8 +262,8 @@ class _TelemetryCell extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          Flexible(
-            flex: 2,
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 96),
             child: Text(
               '$label ',
               maxLines: 1,
@@ -276,7 +274,6 @@ class _TelemetryCell extends StatelessWidget {
           StatusDot(color: dotColor, hollow: hollowDot, size: 6.5),
           const SizedBox(width: 5),
           Flexible(
-            flex: 3,
             child: Text(
               value,
               maxLines: 1,

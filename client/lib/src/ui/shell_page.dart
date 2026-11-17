@@ -148,8 +148,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                         if (showReadOnlyTag) ...<Widget>[
                           const SizedBox(width: 8),
                           Tooltip(
-                            message:
-                                'Strictly read-only experimental/v0 client; zero elevator write controls.',
+                            message: 'Strictly read-only experimental/v0 client; zero elevator write controls.',
                             child: Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 6,
@@ -203,35 +202,69 @@ class _ClientShellPageState extends State<ClientShellPage> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: <Widget>[
-                                Flexible(
-                                  child: Row(
-                                    key: const Key(
-                                      'topbar-connection-phase-badge',
+                                if (showEndpointOriginInline)
+                                  ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 132,
                                     ),
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: <Widget>[
-                                      StatusDot(
-                                        color: phaseColor,
-                                        hollow: phaseHollow,
-                                        size: 6.5,
+                                    child: Row(
+                                      key: const Key(
+                                        'topbar-connection-phase-badge',
                                       ),
-                                      const SizedBox(width: 5),
-                                      Flexible(
-                                        child: Text(
-                                          phaseLabel,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: instrumentMonoStyle(
-                                            context,
-                                            fontSize: 10.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: phaseColor,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: <Widget>[
+                                        StatusDot(
+                                          color: phaseColor,
+                                          hollow: phaseHollow,
+                                          size: 6.5,
+                                        ),
+                                        const SizedBox(width: 5),
+                                        Flexible(
+                                          child: Text(
+                                            phaseLabel,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: instrumentMonoStyle(
+                                              context,
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: phaseColor,
+                                            ),
                                           ),
                                         ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  Flexible(
+                                    child: Row(
+                                      key: const Key(
+                                        'topbar-connection-phase-badge',
                                       ),
-                                    ],
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: <Widget>[
+                                        StatusDot(
+                                          color: phaseColor,
+                                          hollow: phaseHollow,
+                                          size: 6.5,
+                                        ),
+                                        const SizedBox(width: 5),
+                                        Flexible(
+                                          child: Text(
+                                            phaseLabel,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: instrumentMonoStyle(
+                                              context,
+                                              fontSize: 10.5,
+                                              fontWeight: FontWeight.w700,
+                                              color: phaseColor,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                ),
                                 Container(
                                   width: 1,
                                   height: 13,
@@ -311,7 +344,8 @@ class _ClientShellPageState extends State<ClientShellPage> {
           padding: const EdgeInsets.all(16),
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: minCenteredHeight),
-            child: Center(
+            child: Align(
+              alignment: const Alignment(0.0, -0.36),
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 460),
                 child: Column(
@@ -496,8 +530,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: <Widget>[
                                 Tooltip(
-                                  message:
-                                      'Diagnostic entries are machine-readable Host evidence only — NOT confirmed elevator equipment faults, root causes, or repair instructions.',
+                                  message: 'Diagnostic entries are machine-readable Host evidence only — NOT confirmed elevator equipment faults, root causes, or repair instructions.',
                                   child: SectionHeader(
                                     title: 'Host Diagnostics',
                                     count: snapshot.recentDiagnostics.length,
@@ -689,66 +722,139 @@ class _ClientShellPageState extends State<ClientShellPage> {
     );
   }
 
+  double _singleStageCardWidth({
+    required double stageWidth,
+    required double spacing,
+    required double maxTrackWidth,
+    required bool alignWithTwoColumnSibling,
+  }) {
+    if (alignWithTwoColumnSibling) {
+      return ((stageWidth - spacing) / 2)
+          .clamp(400.0, maxTrackWidth)
+          .clamp(0.0, stageWidth);
+    }
+    return (stageWidth * 0.64).clamp(508.0, 540.0).clamp(0.0, stageWidth);
+  }
+
   Widget _buildCarsSliver(
     BuildContext context,
     ReadModelSnapshot snapshot, {
     required double textScale,
   }) {
+    const double spacing = 10;
+    const double maxTrackWidth = 500;
     final List<OperationalCar> cars = snapshot.operationalCars;
     if (cars.isEmpty) {
-      return SliverToBoxAdapter(
-        child: _EmptyOperationalCarsPanel(sources: snapshot.sources),
+      return SliverLayoutBuilder(
+        builder: (BuildContext context, SliverConstraints sliverConstraints) {
+          final double width = sliverConstraints.crossAxisExtent;
+          final Widget panel = _EmptyOperationalCarsPanel(
+            sources: snapshot.sources,
+          );
+          if (width < 540 || textScale > 1.45) {
+            return SliverToBoxAdapter(child: panel);
+          }
+          return SliverToBoxAdapter(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 540),
+                child: panel,
+              ),
+            ),
+          );
+        },
       );
     }
 
     return SliverLayoutBuilder(
       builder: (BuildContext context, SliverConstraints sliverConstraints) {
         final double width = sliverConstraints.crossAxisExtent;
-        final int columns;
-        if (cars.length == 1 || width < 520 || textScale > 1.45) {
-          columns = 1;
-        } else if (cars.length >= 3 && width >= 860 && textScale <= 1.2) {
-          columns = 3;
-        } else {
-          columns = 2;
+        if (width < 520 || textScale > 1.45) {
+          final bool useTabularFooter = width >= 250 && textScale <= 1.35;
+          return SliverList.builder(
+            itemCount: cars.length,
+            itemBuilder: (BuildContext context, int index) {
+              final Widget card = OperationalCarCard(
+                car: cars[index],
+                useTabularFooter: useTabularFooter,
+              );
+              if (index == 0) {
+                return card;
+              }
+              return Padding(
+                padding: const EdgeInsets.only(top: spacing),
+                child: card,
+              );
+            },
+          );
         }
 
-        const double spacing = 10;
-        final double cardWidth = (width - spacing * (columns - 1)) / columns;
+        if (cars.length == 1) {
+          final bool sourcesUseTwoCols =
+              snapshot.sources.length >= 2 && width >= 720 && textScale <= 1.25;
+          final double singleWidth = _singleStageCardWidth(
+            stageWidth: width,
+            spacing: spacing,
+            maxTrackWidth: maxTrackWidth,
+            alignWithTwoColumnSibling: sourcesUseTwoCols,
+          );
+          final bool useTabularFooter = singleWidth >= 250 && textScale <= 1.35;
+          return SliverToBoxAdapter(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: singleWidth,
+                child: OperationalCarCard(
+                  car: cars.first,
+                  useTabularFooter: useTabularFooter,
+                ),
+              ),
+            ),
+          );
+        }
+
+        final int columns =
+            (cars.length >= 3 && width >= 860 && textScale <= 1.2) ? 3 : 2;
+        final double maxRowWidth =
+            columns * maxTrackWidth + (columns - 1) * spacing;
+        final double effectiveRowWidth = width < maxRowWidth
+            ? width
+            : maxRowWidth;
+        final double cardWidth =
+            (effectiveRowWidth - spacing * (columns - 1)) / columns;
         final bool useTabularFooter = cardWidth >= 250 && textScale <= 1.35;
         final int rowCount = (cars.length + columns - 1) ~/ columns;
 
         return SliverList.builder(
           itemCount: rowCount,
           itemBuilder: (BuildContext context, int rowIndex) {
-            final Widget rowWidget;
-            if (columns == 1) {
-              rowWidget = OperationalCarCard(
-                car: cars[rowIndex],
-                useTabularFooter: useTabularFooter,
-              );
-            } else {
-              final int start = rowIndex * columns;
-              rowWidget = IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    for (int col = 0; col < columns; col++) ...<Widget>[
-                      if (col > 0) const SizedBox(width: spacing),
-                      Expanded(
-                        child: (start + col < cars.length)
-                            ? OperationalCarCard(
-                                car: cars[start + col],
-                                stretchToRowHeight: true,
-                                useTabularFooter: useTabularFooter,
-                              )
-                            : const SizedBox.shrink(),
-                      ),
+            final int start = rowIndex * columns;
+            final Widget rowWidget = Align(
+              alignment: Alignment.topLeft,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxRowWidth),
+                child: IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      for (int col = 0; col < columns; col++) ...<Widget>[
+                        if (col > 0) const SizedBox(width: spacing),
+                        Expanded(
+                          child: (start + col < cars.length)
+                              ? OperationalCarCard(
+                                  car: cars[start + col],
+                                  stretchToRowHeight: true,
+                                  useTabularFooter: useTabularFooter,
+                                )
+                              : const SizedBox.shrink(),
+                        ),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
-              );
-            }
+              ),
+            );
 
             if (rowIndex == 0) {
               return rowWidget;
@@ -768,33 +874,88 @@ class _ClientShellPageState extends State<ClientShellPage> {
     ReadModelSnapshot snapshot, {
     required double textScale,
   }) {
+    const double spacing = 10;
+    const double maxTrackWidth = 500;
     final InstrumentPalette palette = context.palette;
     final List<SourceHealth> sources = snapshot.sources;
     if (sources.isEmpty) {
-      return SliverToBoxAdapter(
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: palette.surface,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: palette.border),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Text(
-              'No observation sources configured on this Host.',
-              style: TextStyle(fontSize: 12, color: palette.mutedText),
+      return SliverLayoutBuilder(
+        builder: (BuildContext context, SliverConstraints sliverConstraints) {
+          final double width = sliverConstraints.crossAxisExtent;
+          final Widget emptyBox = DecoratedBox(
+            decoration: BoxDecoration(
+              color: palette.surface,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: palette.border),
             ),
-          ),
-        ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Text(
+                'No observation sources configured on this Host.',
+                style: TextStyle(fontSize: 12, color: palette.mutedText),
+              ),
+            ),
+          );
+          if (width < 540 || textScale > 1.45) {
+            return SliverToBoxAdapter(child: emptyBox);
+          }
+          return SliverToBoxAdapter(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 540),
+                child: emptyBox,
+              ),
+            ),
+          );
+        },
       );
     }
 
     return SliverLayoutBuilder(
       builder: (BuildContext context, SliverConstraints sliverConstraints) {
         final double width = sliverConstraints.crossAxisExtent;
-        final int columns =
-            (sources.length >= 2 && width >= 720 && textScale <= 1.25) ? 2 : 1;
-        const double spacing = 8;
+        if (width < 520 || textScale > 1.45) {
+          return SliverList.builder(
+            itemCount: sources.length,
+            itemBuilder: (BuildContext context, int index) {
+              final Widget card = SourceHealthCard(source: sources[index]);
+              if (index == 0) {
+                return card;
+              }
+              return Padding(
+                padding: const EdgeInsets.only(top: spacing),
+                child: card,
+              );
+            },
+          );
+        }
+
+        if (sources.length == 1) {
+          final bool carsUseTwoCols =
+              snapshot.operationalCars.length == 2 ||
+              (snapshot.operationalCars.length >= 3 &&
+                  !(width >= 860 && textScale <= 1.2));
+          final double singleWidth = _singleStageCardWidth(
+            stageWidth: width,
+            spacing: spacing,
+            maxTrackWidth: maxTrackWidth,
+            alignWithTwoColumnSibling: carsUseTwoCols,
+          );
+          return SliverToBoxAdapter(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: singleWidth,
+                child: SourceHealthCard(source: sources.first),
+              ),
+            ),
+          );
+        }
+
+        final int columns = (width >= 720 && textScale <= 1.25) ? 2 : 1;
+        final double maxRowWidth =
+            columns * maxTrackWidth + (columns - 1) * spacing;
         final int rowCount = (sources.length + columns - 1) ~/ columns;
 
         return SliverList.builder(
@@ -802,25 +963,37 @@ class _ClientShellPageState extends State<ClientShellPage> {
           itemBuilder: (BuildContext context, int rowIndex) {
             final Widget rowWidget;
             if (columns == 1) {
-              rowWidget = SourceHealthCard(source: sources[rowIndex]);
+              rowWidget = Align(
+                alignment: Alignment.topLeft,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: maxTrackWidth),
+                  child: SourceHealthCard(source: sources[rowIndex]),
+                ),
+              );
             } else {
               final int start = rowIndex * columns;
-              rowWidget = IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: <Widget>[
-                    for (int col = 0; col < columns; col++) ...<Widget>[
-                      if (col > 0) const SizedBox(width: spacing),
-                      Expanded(
-                        child: (start + col < sources.length)
-                            ? SourceHealthCard(
-                                source: sources[start + col],
-                                fillRowHeight: true,
-                              )
-                            : const SizedBox.shrink(),
-                      ),
-                    ],
-                  ],
+              rowWidget = Align(
+                alignment: Alignment.topLeft,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxRowWidth),
+                  child: IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        for (int col = 0; col < columns; col++) ...<Widget>[
+                          if (col > 0) const SizedBox(width: spacing),
+                          Expanded(
+                            child: (start + col < sources.length)
+                                ? SourceHealthCard(
+                                    source: sources[start + col],
+                                    fillRowHeight: true,
+                                  )
+                                : const SizedBox.shrink(),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               );
             }
@@ -932,7 +1105,6 @@ class _CompactTabButton extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Flexible(
-                    flex: 3,
                     child: Text(
                       label,
                       maxLines: 1,
@@ -947,7 +1119,8 @@ class _CompactTabButton extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  Flexible(
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 42),
                     child: Text(
                       '$count',
                       maxLines: 1,
