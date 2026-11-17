@@ -20,7 +20,8 @@ pub use bacnet_recorded::{
 };
 pub use recorded::{ObservationCoverage, RecordedFrame, RecordedRuntime};
 pub use rmf_recorded::{
-    MappedRmfObservation, RmfLiftState, RmfMappingError, RmfSourceContext, map_rmf_lift_state,
+    MappedRmfObservation, RmfInteractionModeProjection, RmfLiftState, RmfMappingError,
+    RmfSourceContext, map_rmf_lift_state, map_rmf_lift_state_with_projection,
 };
 
 #[derive(Debug)]

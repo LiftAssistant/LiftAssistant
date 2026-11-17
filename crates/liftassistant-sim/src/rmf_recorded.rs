@@ -40,6 +40,41 @@ impl RmfLiftState {
     pub const MODE_EMERGENCY: u8 = 5;
 }
 
+/// Explicit source-local interpretation of Open-RMF interaction modes.
+///
+/// Open-RMF `MODE_AGV` and `MODE_HUMAN` remain source-specific evidence unless the
+/// configured source opts into one of these projections. This is intentionally not an
+/// arbitrary mode mapping table or a global default.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RmfInteractionModeProjection {
+    agv_as_normal: bool,
+    human_as_normal: bool,
+}
+
+impl RmfInteractionModeProjection {
+    pub const fn conservative() -> Self {
+        Self {
+            agv_as_normal: false,
+            human_as_normal: false,
+        }
+    }
+
+    pub const fn with_agv_as_normal(mut self) -> Self {
+        self.agv_as_normal = true;
+        self
+    }
+
+    pub const fn with_human_as_normal(mut self) -> Self {
+        self.human_as_normal = true;
+        self
+    }
+
+    const fn projects_normal(self, source_mode: u8) -> bool {
+        (source_mode == RmfLiftState::MODE_AGV && self.agv_as_normal)
+            || (source_mode == RmfLiftState::MODE_HUMAN && self.human_as_normal)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RmfSourceContext {
     pub lift_name: String,
@@ -104,6 +139,22 @@ pub fn map_rmf_lift_state(
     floor_labels: &BTreeMap<String, Floor>,
     provenance: ObservationProvenance,
 ) -> Result<MappedRmfObservation, RmfMappingError> {
+    map_rmf_lift_state_with_projection(
+        source,
+        car,
+        floor_labels,
+        RmfInteractionModeProjection::conservative(),
+        provenance,
+    )
+}
+
+pub fn map_rmf_lift_state_with_projection(
+    source: &RmfLiftState,
+    car: CarId,
+    floor_labels: &BTreeMap<String, Floor>,
+    interaction_mode_projection: RmfInteractionModeProjection,
+    provenance: ObservationProvenance,
+) -> Result<MappedRmfObservation, RmfMappingError> {
     if source.lift_name.is_empty() {
         return Err(RmfMappingError::EmptyLiftName);
     }
@@ -158,6 +209,9 @@ pub fn map_rmf_lift_state(
         other => return Err(RmfMappingError::UnknownMotionState(other)),
     };
     let mode = match source.current_mode {
+        source_mode if interaction_mode_projection.projects_normal(source_mode) => {
+            OperatingModeEvidence::Known(OperatingMode::Normal)
+        }
         RmfLiftState::MODE_FIRE => OperatingModeEvidence::Known(OperatingMode::FireService),
         RmfLiftState::MODE_OFFLINE => OperatingModeEvidence::Known(OperatingMode::OutOfService),
         RmfLiftState::MODE_UNKNOWN => OperatingModeEvidence::Unknown,
@@ -323,6 +377,130 @@ mod tests {
                 reasons: vec![UnresolvedCarStateReason::OperatingModeSourceSpecific],
             }
         );
+    }
+
+    #[test]
+    fn explicit_interaction_mode_projection_is_narrow_source_local_and_preserves_raw_context() {
+        let mut source = fire_service_state();
+        source.current_floor = "L4".into();
+        source.destination_floor = "L4".into();
+        source.current_mode = RmfLiftState::MODE_AGV;
+        source.available_modes = vec![RmfLiftState::MODE_HUMAN, RmfLiftState::MODE_AGV];
+
+        let default = map_rmf_lift_state(&source, logical_car(), &floor_labels(), provenance(1))
+            .expect("AGV remains valid source-specific evidence by default");
+        assert_eq!(
+            default.observation.mode,
+            OperatingModeEvidence::SourceSpecific
+        );
+        assert_eq!(
+            resolve_car_observation(&default.observation),
+            CarStateResolution::Unresolved {
+                car: logical_car(),
+                reasons: vec![UnresolvedCarStateReason::OperatingModeSourceSpecific],
+            }
+        );
+
+        let projected = map_rmf_lift_state_with_projection(
+            &source,
+            logical_car(),
+            &floor_labels(),
+            RmfInteractionModeProjection::conservative().with_agv_as_normal(),
+            provenance(2),
+        )
+        .expect("the configured source explicitly projects AGV to Normal");
+        assert_eq!(
+            projected.observation.mode,
+            OperatingModeEvidence::Known(OperatingMode::Normal)
+        );
+        let CarStateResolution::Resolved(state) = resolve_car_observation(&projected.observation)
+        else {
+            panic!("otherwise complete explicitly projected AGV evidence should resolve");
+        };
+        assert_eq!(state.mode, OperatingMode::Normal);
+        assert_eq!(projected.source_context.source_mode, RmfLiftState::MODE_AGV);
+        assert_eq!(
+            projected.source_context.available_source_modes,
+            vec![RmfLiftState::MODE_HUMAN, RmfLiftState::MODE_AGV]
+        );
+
+        let other_source = map_rmf_lift_state_with_projection(
+            &source,
+            CarId::new("logical-car-B"),
+            &floor_labels(),
+            RmfInteractionModeProjection::conservative(),
+            ObservationProvenance {
+                source: ObservationSourceId::new("fixture/open-rmf-other"),
+                session: ObservationSessionId::new("rmf-other-session-A"),
+                sequence: ObservationSequence::new(1),
+            },
+        )
+        .expect("another source retains its own conservative policy");
+        assert_eq!(
+            other_source.observation.mode,
+            OperatingModeEvidence::SourceSpecific
+        );
+    }
+
+    #[test]
+    fn human_projection_and_exception_modes_keep_the_approved_mapping() {
+        let mut source = fire_service_state();
+        source.current_mode = RmfLiftState::MODE_HUMAN;
+
+        let default = map_rmf_lift_state(&source, logical_car(), &floor_labels(), provenance(1))
+            .expect("HUMAN remains source-specific by default");
+        assert_eq!(
+            default.observation.mode,
+            OperatingModeEvidence::SourceSpecific
+        );
+
+        let human_projected = map_rmf_lift_state_with_projection(
+            &source,
+            logical_car(),
+            &floor_labels(),
+            RmfInteractionModeProjection::conservative().with_human_as_normal(),
+            provenance(2),
+        )
+        .expect("configured HUMAN projection is accepted");
+        assert_eq!(
+            human_projected.observation.mode,
+            OperatingModeEvidence::Known(OperatingMode::Normal)
+        );
+        assert_eq!(
+            human_projected.source_context.source_mode,
+            RmfLiftState::MODE_HUMAN
+        );
+
+        let projection = RmfInteractionModeProjection::conservative()
+            .with_agv_as_normal()
+            .with_human_as_normal();
+        for (source_mode, expected) in [
+            (
+                RmfLiftState::MODE_FIRE,
+                OperatingModeEvidence::Known(OperatingMode::FireService),
+            ),
+            (
+                RmfLiftState::MODE_OFFLINE,
+                OperatingModeEvidence::Known(OperatingMode::OutOfService),
+            ),
+            (RmfLiftState::MODE_UNKNOWN, OperatingModeEvidence::Unknown),
+            (
+                RmfLiftState::MODE_EMERGENCY,
+                OperatingModeEvidence::SourceSpecific,
+            ),
+        ] {
+            source.current_mode = source_mode;
+            let mapped = map_rmf_lift_state_with_projection(
+                &source,
+                logical_car(),
+                &floor_labels(),
+                projection,
+                provenance(3),
+            )
+            .expect("approved exceptional mode mapping remains valid");
+            assert_eq!(mapped.observation.mode, expected);
+            assert_eq!(mapped.source_context.source_mode, source_mode);
+        }
     }
 
     #[test]

@@ -667,7 +667,7 @@ The proof used the official rootless Kilted image at digest `sha256:601a6bb7c04d
 
 ### M5.1b — RMF-owned live subscription and canonical ingestion
 
-**READY — HUMAN decision: explicit source-local interaction-mode projection.**
+**IN PROGRESS — explicit mode projection implemented; live ownership READY.**
 
 The M5.1a payload proof reproduced the official Hotel source's steady-state `current_mode=MODE_AGV`. Open-RMF defines `MODE_AGV` and `MODE_HUMAN` as RMF interaction/control modes, while the same field may also report exceptional lift states such as fire or offline. They therefore remain source-specific evidence by default and are not globally redefined as LiftAssistant operating modes.
 
@@ -684,5 +684,23 @@ Required boundaries:
 - do not weaken Resolver completeness, bypass canonical `CarObservationUpdate`, or add a generic mode-mapping framework.
 
 M5.1b implementation should introduce only the smallest RMF-owned configuration/type required by this policy, share the existing RMF semantic mapper between recorded and live paths, keep ROS/RMF dependencies out of model/Core/Engine, use explicit native `lift_name` to logical `CarId` mapping and existing binding/session semantics, and prove the configured/default mode paths with focused regressions.
+
+#### M5.1b-1 — Explicit RMF interaction-mode projection
+
+**IMPLEMENTED.**
+
+- the RMF-specific mapper owns a deliberately narrow `RmfInteractionModeProjection` with independent explicit opt-ins for AGV-as-Normal and HUMAN-as-Normal;
+- the existing `map_rmf_lift_state` entry point remains conservative, while the explicit projection entry point shares the same floor, motion, door, destination, exceptional-mode, and source-context mapping logic;
+- default AGV/HUMAN evidence remains source-specific and unresolved, while an otherwise complete explicitly projected observation resolves with `OperatingMode::Normal`;
+- FIRE, OFFLINE, UNKNOWN, and EMERGENCY retain their approved mappings regardless of interaction projection;
+- raw current mode and available source modes remain preserved, and applying a projection for one configured source does not change another source's conservative policy.
+
+Focused RMF regressions and the complete workspace gate pass: formatting, warning-free all-target clippy, and all 86 workspace tests. The slice changes no canonical type, Resolver completeness, source/session/authority semantics, or write boundary.
+
+#### M5.1b-2 — RMF-owned live subscription and Engine ingestion
+
+**READY.**
+
+Extract the existing RMF mapper only after the demonstrated live ownership pressure, keep recorded and live callers on that one implementation, and prove the official two-lift read-only flow through explicit identity mapping, adapter-owned session/sequence, canonical updates, and Engine-owned operational state.
 
 M5.2 and later dependent slices remain not READY until M5.1b completes its live canonical-ingestion exit evidence. The Rust-native transport proof remains valid and read-only; this HUMAN decision grants no write authority and changes no canonical model type.
