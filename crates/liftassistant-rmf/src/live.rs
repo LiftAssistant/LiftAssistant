@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::RmfLiftState;
 
+const MAX_DDS_DOMAIN_ID: u16 = 232;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct RmfLiftStateMessage {
     lift_time: ros2_client::builtin_interfaces::Time,
@@ -134,6 +136,11 @@ pub struct RmfLiveSubscriber {
 
 impl RmfLiveSubscriber {
     pub fn connect(domain_id: u16, node_name: &str) -> Result<Self, RmfTransportError> {
+        if domain_id > MAX_DDS_DOMAIN_ID {
+            return Err(RmfTransportError::Create(format!(
+                "ROS 2 DDS domain ID {domain_id} exceeds the maximum {MAX_DDS_DOMAIN_ID}"
+            )));
+        }
         let context = Context::with_options(ContextOptions::new().domain_id(domain_id))
             .map_err(|error| RmfTransportError::Create(error.to_string()))?;
         let mut node = context
@@ -303,5 +310,16 @@ mod tests {
         let policy = RmfFreshnessPolicy::new(Duration::from_secs(3))
             .expect("a source-specific nonzero silence limit is valid");
         assert_eq!(policy.max_payload_silence(), Duration::from_secs(3));
+    }
+
+    #[test]
+    fn invalid_dds_domain_is_rejected_before_transport_creation() {
+        let error = RmfLiveSubscriber::connect(233, "invalid_domain_fixture")
+            .err()
+            .expect("DDS domains above 232 must not reach RustDDS port arithmetic");
+        assert_eq!(
+            error,
+            RmfTransportError::Create("ROS 2 DDS domain ID 233 exceeds the maximum 232".into())
+        );
     }
 }

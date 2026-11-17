@@ -105,6 +105,14 @@ then replay that evidence through the same detector. Diagnostic anomalies remain
 distinct from equipment faults, alarms, root causes, and maintenance actions. No
 durable store, telemetry service, or stable public diagnostic schema is implied.
 
+The production read-only composition adds a separate bounded host diagnostic stream around
+that Engine evidence. Private machine identities partition transport, source/session,
+mapping, observation/resolution, and readiness events; applicable entries retain source,
+session, logical car, binding role, and source-native entity context. Transport or mapping
+failure can revoke current operational truth but does not become an elevator equipment
+fault, inferred root cause, or maintenance action. This line-oriented operator/developer
+view remains internal and experimental; it is not a public registry or persistence format.
+
 The headless host keeps lifecycle and readiness separate: a live process begins
 `Starting/NotReady`, incomplete Operational evidence remains `Synchronizing/NotReady`,
 and sufficient Operational evidence permits `ReadyReadOnly/ReadOnly`. Restart or an

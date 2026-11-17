@@ -129,6 +129,8 @@ cargo run -p liftassistant-headless -- --run-rmf-read-only \
 
 The host creates an adapter-owned source session, reports lifecycle/readiness changes, revokes stale operational truth, reconnects for same-session recovery, and handles SIGINT/SIGTERM cooperatively even before the first payload arrives. Every floor, native-to-logical binding, binding role, interaction-mode projection, and freshness duration is explicit. This CLI is internal/experimental rather than a stable configuration or public API, and it remains subscription-only.
 
+Its line-oriented internal diagnostics use bounded monotonic host sequences and machine-readable IDs while keeping transport, source/session, mapping, observation/resolution, and readiness evidence distinct. Each applicable record carries source, session, logical car, binding role, and source-native entity context; the Engine Flight Recorder continues to retain bounded canonical observations and semantic events. These records are evidence for operators/developers, not elevator-fault, root-cause, repair, or stable public-schema claims. DDS-backed ROS domains are rejected above the ROS 2 maximum of 232 before transport creation.
+
 Controls:
 
 - Up/Down select a floor; U/D create an UP/DOWN hall call.

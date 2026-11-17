@@ -39,6 +39,8 @@ const RMF_LIVE_SCENARIO: &str = "headless-rmf-live-proof";
 const RMF_FRESHNESS_SCENARIO: &str = "headless-rmf-freshness-proof";
 const RMF_READ_ONLY_HOST_COMMAND: &str = "--run-rmf-read-only";
 const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const HOST_DIAGNOSTIC_CAPACITY: usize = 256;
+const MAX_DDS_DOMAIN_ID: u16 = 232;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Readiness {
@@ -72,22 +74,343 @@ impl HostLifecycle {
 #[derive(Clone, Debug, PartialEq)]
 enum HostEvent {
     LifecycleChanged(HostLifecycle),
+    TransportSubscriberCreated {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+    },
+    TransportDiscoveryObserved {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+    },
+    TransportFailed {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        message: String,
+    },
+    SourceSessionActivated {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        previous_session: Option<ObservationSessionId>,
+        invalidated_cars: Vec<CarId>,
+    },
+    MappingRejected {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        native_entity: String,
+        message: String,
+    },
+    ObservationIncomplete {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        car: CarId,
+        role: ObservationBindingRole,
+    },
     ObservationUnresolved {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
         car: CarId,
         reasons: Vec<UnresolvedCarStateReason>,
+        role: ObservationBindingRole,
     },
-    StateUpdated(liftassistant_model::CarState),
-    ObservationRejected(DiagnosticAnomaly),
-    IngestionRejected(ObservationIngestError),
+    StateUpdated {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        state: liftassistant_model::CarState,
+    },
+    ObservationRejected {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        car: CarId,
+        role: Option<ObservationBindingRole>,
+        anomaly: DiagnosticAnomaly,
+    },
+    IngestionRejected {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        car: CarId,
+        role: Option<ObservationBindingRole>,
+        error: ObservationIngestError,
+    },
     AuxiliaryObservationAccepted {
         source: ObservationSourceId,
+        session: ObservationSessionId,
         car: CarId,
+        availability: ObservationAvailability,
     },
     SourcePayloadStale {
         source: ObservationSourceId,
         session: ObservationSessionId,
         invalidated_cars: Vec<CarId>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HostDiagnosticLayer {
+    Transport,
+    Source,
+    Mapping,
+    Observation,
+    Readiness,
+}
+
+impl HostDiagnosticLayer {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Transport => "transport",
+            Self::Source => "source",
+            Self::Mapping => "mapping",
+            Self::Observation => "observation",
+            Self::Readiness => "readiness",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HostDiagnosticId {
+    TransportSubscriberCreated,
+    TransportDiscoveryObserved,
+    TransportFailed,
+    SourceSessionActivated,
+    SourcePayloadStale,
+    MappingRejected,
+    ObservationIncomplete,
+    ObservationUnresolved,
+    ObservationResolved,
+    ObservationRejected,
+    AuxiliaryObservationAccepted,
+    ReadinessChanged,
+}
+
+impl HostDiagnosticId {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::TransportSubscriberCreated => "transport.subscriber-created",
+            Self::TransportDiscoveryObserved => "transport.discovery-observed",
+            Self::TransportFailed => "transport.receive-failed",
+            Self::SourceSessionActivated => "source.session-activated",
+            Self::SourcePayloadStale => "source.payload-stale",
+            Self::MappingRejected => "mapping.rejected",
+            Self::ObservationIncomplete => "observation.incomplete",
+            Self::ObservationUnresolved => "observation.unresolved",
+            Self::ObservationResolved => "observation.resolved",
+            Self::ObservationRejected => "observation.rejected",
+            Self::AuxiliaryObservationAccepted => "observation.auxiliary-accepted",
+            Self::ReadinessChanged => "readiness.changed",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct HostDiagnosticContext {
+    source: Option<ObservationSourceId>,
+    session: Option<ObservationSessionId>,
+    car: Option<CarId>,
+    role: Option<ObservationBindingRole>,
+    native_entity: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct HostDiagnosticEntry {
+    sequence: u64,
+    layer: HostDiagnosticLayer,
+    id: HostDiagnosticId,
+    context: HostDiagnosticContext,
+    event: HostEvent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct HostDiagnostics {
+    capacity: usize,
+    next_sequence: u64,
+    entries: VecDeque<HostDiagnosticEntry>,
+}
+
+impl HostDiagnostics {
+    fn new(capacity: usize) -> Self {
+        Self {
+            capacity: capacity.max(1),
+            next_sequence: 1,
+            entries: VecDeque::new(),
+        }
+    }
+
+    fn record(&mut self, event: HostEvent) {
+        let (layer, id, context) = classify_host_event(&event);
+        let entry = HostDiagnosticEntry {
+            sequence: self.next_sequence,
+            layer,
+            id,
+            context,
+            event,
+        };
+        self.next_sequence = self
+            .next_sequence
+            .checked_add(1)
+            .expect("host diagnostic sequence space exhausted");
+        if self.entries.len() == self.capacity {
+            self.entries.pop_front();
+        }
+        self.entries.push_back(entry);
+    }
+
+    fn entries(&self) -> impl Iterator<Item = &HostDiagnosticEntry> {
+        self.entries.iter()
+    }
+}
+
+fn classify_host_event(
+    event: &HostEvent,
+) -> (HostDiagnosticLayer, HostDiagnosticId, HostDiagnosticContext) {
+    let mut context = HostDiagnosticContext::default();
+    let (layer, id) = match event {
+        HostEvent::LifecycleChanged(_) => (
+            HostDiagnosticLayer::Readiness,
+            HostDiagnosticId::ReadinessChanged,
+        ),
+        HostEvent::TransportSubscriberCreated { source, session } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            (
+                HostDiagnosticLayer::Transport,
+                HostDiagnosticId::TransportSubscriberCreated,
+            )
+        }
+        HostEvent::TransportDiscoveryObserved { source, session } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            (
+                HostDiagnosticLayer::Transport,
+                HostDiagnosticId::TransportDiscoveryObserved,
+            )
+        }
+        HostEvent::TransportFailed {
+            source, session, ..
+        } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            (
+                HostDiagnosticLayer::Transport,
+                HostDiagnosticId::TransportFailed,
+            )
+        }
+        HostEvent::SourceSessionActivated {
+            source, session, ..
+        } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            (
+                HostDiagnosticLayer::Source,
+                HostDiagnosticId::SourceSessionActivated,
+            )
+        }
+        HostEvent::SourcePayloadStale {
+            source, session, ..
+        } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            (
+                HostDiagnosticLayer::Source,
+                HostDiagnosticId::SourcePayloadStale,
+            )
+        }
+        HostEvent::MappingRejected {
+            source,
+            session,
+            native_entity,
+            ..
+        } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            context.native_entity = Some(native_entity.clone());
+            (
+                HostDiagnosticLayer::Mapping,
+                HostDiagnosticId::MappingRejected,
+            )
+        }
+        HostEvent::ObservationIncomplete {
+            source,
+            session,
+            car,
+            ..
+        }
+        | HostEvent::ObservationUnresolved {
+            source,
+            session,
+            car,
+            ..
+        } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            context.car = Some(car.clone());
+            context.role = Some(match event {
+                HostEvent::ObservationIncomplete { role, .. }
+                | HostEvent::ObservationUnresolved { role, .. } => *role,
+                _ => unreachable!(),
+            });
+            (
+                HostDiagnosticLayer::Observation,
+                match event {
+                    HostEvent::ObservationIncomplete { .. } => {
+                        HostDiagnosticId::ObservationIncomplete
+                    }
+                    _ => HostDiagnosticId::ObservationUnresolved,
+                },
+            )
+        }
+        HostEvent::StateUpdated {
+            source,
+            session,
+            state,
+        } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            context.car = Some(state.id.clone());
+            context.role = Some(ObservationBindingRole::Operational);
+            (
+                HostDiagnosticLayer::Observation,
+                HostDiagnosticId::ObservationResolved,
+            )
+        }
+        HostEvent::ObservationRejected {
+            source,
+            session,
+            car,
+            role,
+            ..
+        }
+        | HostEvent::IngestionRejected {
+            source,
+            session,
+            car,
+            role,
+            ..
+        } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            context.car = Some(car.clone());
+            context.role = *role;
+            (
+                HostDiagnosticLayer::Observation,
+                HostDiagnosticId::ObservationRejected,
+            )
+        }
+        HostEvent::AuxiliaryObservationAccepted {
+            source,
+            session,
+            car,
+            ..
+        } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            context.car = Some(car.clone());
+            context.role = Some(ObservationBindingRole::Auxiliary);
+            (
+                HostDiagnosticLayer::Observation,
+                HostDiagnosticId::AuxiliaryObservationAccepted,
+            )
+        }
+    };
+    (layer, id, context)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -165,7 +488,7 @@ struct ReadOnlyHost {
     required_operational_cars: BTreeSet<CarId>,
     source_health: BTreeMap<ObservationSourceId, SourceHealth>,
     lifecycle: HostLifecycle,
-    events: Vec<HostEvent>,
+    diagnostics: HostDiagnostics,
 }
 
 impl ReadOnlyHost {
@@ -175,7 +498,11 @@ impl ReadOnlyHost {
             required_operational_cars: BTreeSet::new(),
             source_health: BTreeMap::new(),
             lifecycle: HostLifecycle::Starting,
-            events: vec![HostEvent::LifecycleChanged(HostLifecycle::Starting)],
+            diagnostics: {
+                let mut diagnostics = HostDiagnostics::new(HOST_DIAGNOSTIC_CAPACITY);
+                diagnostics.record(HostEvent::LifecycleChanged(HostLifecycle::Starting));
+                diagnostics
+            },
         }
     }
 
@@ -189,6 +516,10 @@ impl ReadOnlyHost {
 
     fn source_health(&self, source: &ObservationSourceId) -> Option<&SourceHealth> {
         self.source_health.get(source)
+    }
+
+    fn diagnostics(&self) -> &HostDiagnostics {
+        &self.diagnostics
     }
 
     fn bind_observation(
@@ -220,6 +551,7 @@ impl ReadOnlyHost {
 
     fn ingest_observation(&mut self, observation: CarObservationUpdate) {
         let observation_source = observation.provenance.source.clone();
+        let observation_session = observation.provenance.session.clone();
         let car = observation.car.clone();
         let role = self
             .engine
@@ -246,8 +578,13 @@ impl ReadOnlyHost {
                 .expect("a new incident was counted")
                 .trigger
                 .clone();
-            self.events
-                .push(HostEvent::ObservationRejected(anomaly.clone()));
+            self.diagnostics.record(HostEvent::ObservationRejected {
+                source: observation_source,
+                session: observation_session,
+                car,
+                role,
+                anomaly: anomaly.clone(),
+            });
             if is_operational {
                 self.transition(HostLifecycle::Degraded(DegradedReason::ObservationAnomaly(
                     anomaly,
@@ -256,33 +593,34 @@ impl ReadOnlyHost {
             return;
         }
 
-        if !matches!(&resolution, ObservationIngestResult::Rejected(_))
+        let accepted_availability = observation_availability(&resolution);
+        if let Some(availability) = accepted_availability
             && let Some(health) = self.source_health.get_mut(&observation_source)
         {
             health.payload = PayloadActivity::Active;
-            let availability = match &resolution {
-                ObservationIngestResult::Incomplete(_) => ObservationAvailability::Incomplete,
-                ObservationIngestResult::Resolution(CarStateResolution::Resolved(_)) => {
-                    ObservationAvailability::Resolved
-                }
-                ObservationIngestResult::Resolution(CarStateResolution::Unresolved { .. }) => {
-                    ObservationAvailability::Unresolved
-                }
-                ObservationIngestResult::Rejected(_) => unreachable!(),
-            };
             health.observations.insert(car.clone(), availability);
         }
 
         if !is_operational {
             match resolution {
                 ObservationIngestResult::Rejected(error) => {
-                    self.events.push(HostEvent::IngestionRejected(error));
+                    self.diagnostics.record(HostEvent::IngestionRejected {
+                        source: observation_source,
+                        session: observation_session,
+                        car,
+                        role,
+                        error,
+                    });
                 }
                 ObservationIngestResult::Incomplete(_) | ObservationIngestResult::Resolution(_) => {
-                    self.events.push(HostEvent::AuxiliaryObservationAccepted {
-                        source: observation_source,
-                        car,
-                    });
+                    self.diagnostics
+                        .record(HostEvent::AuxiliaryObservationAccepted {
+                            source: observation_source,
+                            session: observation_session,
+                            car,
+                            availability: accepted_availability
+                                .expect("accepted auxiliary observation has availability"),
+                        });
                 }
             }
             return;
@@ -290,7 +628,11 @@ impl ReadOnlyHost {
 
         match resolution {
             ObservationIngestResult::Resolution(CarStateResolution::Resolved(state)) => {
-                self.events.push(HostEvent::StateUpdated(state));
+                self.diagnostics.record(HostEvent::StateUpdated {
+                    source: observation_source,
+                    session: observation_session,
+                    state,
+                });
                 let all_operational_cars_resolved = self
                     .required_operational_cars
                     .iter()
@@ -305,21 +647,37 @@ impl ReadOnlyHost {
                 car,
                 reasons,
             }) => {
-                self.events
-                    .push(HostEvent::ObservationUnresolved { car, reasons });
+                self.diagnostics.record(HostEvent::ObservationUnresolved {
+                    source: observation_source,
+                    session: observation_session,
+                    car,
+                    reasons,
+                    role: ObservationBindingRole::Operational,
+                });
                 if !matches!(self.lifecycle, HostLifecycle::Synchronizing) {
                     self.transition(HostLifecycle::Synchronizing);
                 }
             }
             ObservationIngestResult::Incomplete(assembled) => {
+                self.diagnostics.record(HostEvent::ObservationIncomplete {
+                    source: observation_source,
+                    session: observation_session,
+                    car,
+                    role: ObservationBindingRole::Operational,
+                });
                 if !matches!(self.lifecycle, HostLifecycle::Synchronizing) {
                     self.transition(HostLifecycle::Synchronizing);
                 }
                 debug_assert!(assembled.snapshot().is_none());
             }
             ObservationIngestResult::Rejected(error) => {
-                self.events
-                    .push(HostEvent::IngestionRejected(error.clone()));
+                self.diagnostics.record(HostEvent::IngestionRejected {
+                    source: observation_source,
+                    session: observation_session,
+                    car,
+                    role,
+                    error: error.clone(),
+                });
                 self.transition(HostLifecycle::Degraded(
                     DegradedReason::ObservationRejected(error),
                 ));
@@ -347,6 +705,12 @@ impl ReadOnlyHost {
                 .observation_binding_role(&transition.source, car)
                 == Some(ObservationBindingRole::Operational)
         });
+        self.diagnostics.record(HostEvent::SourceSessionActivated {
+            source: transition.source.clone(),
+            session: transition.active_session.clone(),
+            previous_session: transition.previous_session.clone(),
+            invalidated_cars: transition.invalidated_cars.clone(),
+        });
         if invalidated_operational_state {
             self.transition(HostLifecycle::Synchronizing);
         }
@@ -356,13 +720,60 @@ impl ReadOnlyHost {
     fn note_transport_subscriber_created(&mut self, source: &ObservationSourceId) {
         if let Some(health) = self.source_health.get_mut(source) {
             health.transport_discovery = TransportDiscoveryState::SubscriberCreated;
+            let SourceSessionActivity::Active(session) = &health.session else {
+                return;
+            };
+            self.diagnostics
+                .record(HostEvent::TransportSubscriberCreated {
+                    source: source.clone(),
+                    session: session.clone(),
+                });
         }
     }
 
     fn note_transport_discovery(&mut self, source: &ObservationSourceId) {
         if let Some(health) = self.source_health.get_mut(source) {
+            if health.transport_discovery == TransportDiscoveryState::DiscoveryObserved {
+                return;
+            }
             health.transport_discovery = TransportDiscoveryState::DiscoveryObserved;
+            let SourceSessionActivity::Active(session) = &health.session else {
+                return;
+            };
+            self.diagnostics
+                .record(HostEvent::TransportDiscoveryObserved {
+                    source: source.clone(),
+                    session: session.clone(),
+                });
         }
+    }
+
+    fn record_transport_failure(
+        &mut self,
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        message: String,
+    ) {
+        self.diagnostics.record(HostEvent::TransportFailed {
+            source,
+            session,
+            message,
+        });
+    }
+
+    fn record_mapping_rejection(
+        &mut self,
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        native_entity: String,
+        message: String,
+    ) {
+        self.diagnostics.record(HostEvent::MappingRejected {
+            source,
+            session,
+            native_entity,
+            message,
+        });
     }
 
     fn mark_source_payload_stale(
@@ -381,7 +792,7 @@ impl ReadOnlyHost {
         for availability in health.observations.values_mut() {
             *availability = ObservationAvailability::Revoked;
         }
-        self.events.push(HostEvent::SourcePayloadStale {
+        self.diagnostics.record(HostEvent::SourcePayloadStale {
             source: source.clone(),
             session,
             invalidated_cars: invalidation.invalidated_cars.clone(),
@@ -399,8 +810,22 @@ impl ReadOnlyHost {
     fn transition(&mut self, lifecycle: HostLifecycle) {
         if self.lifecycle != lifecycle {
             self.lifecycle = lifecycle.clone();
-            self.events.push(HostEvent::LifecycleChanged(lifecycle));
+            self.diagnostics
+                .record(HostEvent::LifecycleChanged(lifecycle));
         }
+    }
+}
+
+fn observation_availability(result: &ObservationIngestResult) -> Option<ObservationAvailability> {
+    match result {
+        ObservationIngestResult::Incomplete(_) => Some(ObservationAvailability::Incomplete),
+        ObservationIngestResult::Resolution(CarStateResolution::Resolved(_)) => {
+            Some(ObservationAvailability::Resolved)
+        }
+        ObservationIngestResult::Resolution(CarStateResolution::Unresolved { .. }) => {
+            Some(ObservationAvailability::Unresolved)
+        }
+        ObservationIngestResult::Rejected(_) => None,
     }
 }
 
@@ -521,9 +946,7 @@ fn parse_rmf_host_config(mut args: impl Iterator<Item = String>) -> Result<RmfHo
             "--domain-id" => {
                 set_once(
                     &mut domain_id,
-                    parse_value(&mut args, "--domain-id")?
-                        .parse::<u16>()
-                        .map_err(|error| format!("--domain-id must fit in u16: {error}"))?,
+                    parse_rmf_domain_id(&parse_value(&mut args, "--domain-id")?, "--domain-id")?,
                     "--domain-id",
                 )?;
             }
@@ -623,6 +1046,18 @@ fn parse_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<St
         .ok_or_else(|| format!("{flag} requires a value"))
 }
 
+fn parse_rmf_domain_id(value: &str, origin: &str) -> Result<u16, String> {
+    let domain_id = value
+        .parse::<u16>()
+        .map_err(|error| format!("{origin} must be an integer from 0 through 232: {error}"))?;
+    if domain_id > MAX_DDS_DOMAIN_ID {
+        return Err(format!(
+            "{origin} {domain_id} exceeds the DDS/ROS 2 maximum domain ID {MAX_DDS_DOMAIN_ID}"
+        ));
+    }
+    Ok(domain_id)
+}
+
 fn set_once<T>(slot: &mut Option<T>, value: T, flag: &str) -> Result<(), String> {
     if slot.replace(value).is_some() {
         return Err(format!("duplicate {flag}"));
@@ -715,6 +1150,8 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
         host.lifecycle()
     );
     let mut reported_lifecycle = host.lifecycle().clone();
+    let mut reported_diagnostic_sequence = 0;
+    emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
     let mut connection_generation = 0_u64;
 
     while !shutdown.load(Ordering::Relaxed) {
@@ -726,9 +1163,22 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
             std::process::id(),
             connection_generation
         );
-        let subscriber = RmfLiveSubscriber::connect(config.domain_id, &node_name)
-            .map_err(|error| format!("failed to create RMF read-only subscriber: {error}"))?;
+        let subscriber = match RmfLiveSubscriber::connect(config.domain_id, &node_name) {
+            Ok(subscriber) => subscriber,
+            Err(error) => {
+                host.record_transport_failure(
+                    config.source.clone(),
+                    session.clone(),
+                    error.to_string(),
+                );
+                emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
+                return Err(format!(
+                    "failed to create RMF read-only subscriber: {error}"
+                ));
+            }
+        };
         host.note_transport_subscriber_created(adapter.source());
+        emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
         let mut ingestion_error = None;
         let outcome = subscriber.receive_until_stale_or_shutdown(
             freshness,
@@ -736,22 +1186,39 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
             || shutdown.load(Ordering::Relaxed),
             |payload| {
                 host.note_transport_discovery(adapter.source());
+                let native_entity = payload.state.lift_name.clone();
                 let mapped = match adapter.map(&payload.state) {
                     Ok(mapped) => mapped,
                     Err(error) => {
+                        host.record_mapping_rejection(
+                            adapter.source().clone(),
+                            adapter.session().clone(),
+                            native_entity,
+                            error.to_string(),
+                        );
+                        emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                         ingestion_error = Some(error.to_string());
                         return RmfReceiveControl::Stop;
                     }
                 };
                 if mapped.topology != topology {
-                    ingestion_error = Some(format!(
+                    let error = format!(
                         "source topology {:?} differs from configured host topology {:?}",
                         mapped.topology.served_floors(),
                         topology.served_floors()
-                    ));
+                    );
+                    host.record_mapping_rejection(
+                        adapter.source().clone(),
+                        adapter.session().clone(),
+                        native_entity,
+                        error.clone(),
+                    );
+                    emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
+                    ingestion_error = Some(error);
                     return RmfReceiveControl::Stop;
                 }
                 host.ingest_observation(mapped.update);
+                emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 if host.lifecycle() != &reported_lifecycle {
                     reported_lifecycle = host.lifecycle().clone();
                     println!(
@@ -767,12 +1234,18 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
         let outcome = match outcome {
             Ok(outcome) => outcome,
             Err(error) => {
+                host.record_transport_failure(
+                    config.source.clone(),
+                    session.clone(),
+                    error.to_string(),
+                );
                 host.mark_source_payload_stale(config.source.clone(), session.clone())
                     .map_err(|invalidation| {
                         format!(
                             "RMF transport failed ({error}) and source invalidation failed: {invalidation:?}"
                         )
                     })?;
+                emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 println!(
                     "readiness={:?} lifecycle={:?} reason=transport-error",
                     host.readiness(),
@@ -788,6 +1261,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     .map_err(|error| {
                         format!("failed to revoke stale RMF observations: {error:?}")
                     })?;
+                emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 reported_lifecycle = host.lifecycle().clone();
                 println!(
                     "readiness={:?} lifecycle={:?} reason=payload-stale silence_ms={}",
@@ -805,6 +1279,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                             "RMF ingestion failed ({error}) and source invalidation failed: {invalidation:?}"
                         )
                     })?;
+                emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 println!(
                     "readiness={:?} lifecycle={:?} reason=ingestion-error",
                     host.readiness(),
@@ -828,6 +1303,33 @@ fn new_host_source_session() -> Result<ObservationSessionId, String> {
         std::process::id(),
         since_epoch.as_nanos()
     )))
+}
+
+fn emit_new_host_diagnostics(host: &ReadOnlyHost, reported_sequence: &mut u64) {
+    let after_sequence = *reported_sequence;
+    for entry in host
+        .diagnostics()
+        .entries()
+        .filter(|entry| entry.sequence > after_sequence)
+    {
+        println!("{}", render_host_diagnostic(entry));
+        *reported_sequence = entry.sequence;
+    }
+}
+
+fn render_host_diagnostic(entry: &HostDiagnosticEntry) -> String {
+    format!(
+        "diagnostic sequence={} layer={} id={} source={:?} session={:?} car={:?} role={:?} native_entity={:?} evidence={:?}",
+        entry.sequence,
+        entry.layer.as_str(),
+        entry.id.as_str(),
+        entry.context.source,
+        entry.context.session,
+        entry.context.car,
+        entry.context.role,
+        entry.context.native_entity,
+        entry.event
+    )
 }
 
 fn run_scenario(name: &str) -> Result<String, String> {
@@ -860,10 +1362,10 @@ struct LiveRmfRound {
 }
 
 fn rmf_domain_id() -> Result<u16, String> {
-    env::var("ROS_DOMAIN_ID")
-        .unwrap_or_else(|_| "47".into())
-        .parse::<u16>()
-        .map_err(|error| format!("ROS_DOMAIN_ID must fit in u16: {error}"))
+    parse_rmf_domain_id(
+        &env::var("ROS_DOMAIN_ID").unwrap_or_else(|_| "47".into()),
+        "ROS_DOMAIN_ID",
+    )
 }
 
 fn hotel_host(source: &ObservationSourceId) -> Result<ReadOnlyHost, String> {
@@ -1330,7 +1832,11 @@ fn execute_proof() -> ProofRun {
 
     ProofRun {
         snapshots,
-        events: host.events.clone(),
+        events: host
+            .diagnostics()
+            .entries()
+            .map(|entry| entry.event.clone())
+            .collect(),
         latest_state: host.engine.car_states().into_iter().next(),
         diagnostic_entries: host.engine.diagnostics().entries().count(),
         incidents: host.engine.diagnostics().incidents().count(),
@@ -1455,9 +1961,12 @@ fn verify_proof(run: &ProofRun) -> Result<(), String> {
     if run.diagnostic_entries != 4 || run.incidents != 1 {
         return Err("headless host did not retain the expected diagnostic evidence".into());
     }
-    if !run.events.iter().any(
-        |event| matches!(event, HostEvent::ObservationRejected(observed) if observed == &anomaly),
-    ) {
+    if !run.events.iter().any(|event| {
+        matches!(
+            event,
+            HostEvent::ObservationRejected { anomaly: observed, .. } if observed == &anomaly
+        )
+    }) {
         return Err("headless host did not preserve the degradation trigger".into());
     }
     Ok(())
@@ -1471,7 +1980,7 @@ fn render_report(run: &ProofRun) -> String {
         .collect::<Vec<_>>()
         .join(" -> ");
     let anomaly = run.events.iter().find_map(|event| match event {
-        HostEvent::ObservationRejected(anomaly) => Some(anomaly),
+        HostEvent::ObservationRejected { anomaly, .. } => Some(anomaly),
         _ => None,
     });
     [
@@ -1599,6 +2108,139 @@ mod tests {
         ]))
         .expect_err("native identity mappings must be unique");
         assert!(duplicate_native.contains("duplicate --bind native lift name"));
+
+        let invalid_domain = parse_command(command_args(&[
+            RMF_READ_ONLY_HOST_COMMAND,
+            "--domain-id",
+            "233",
+            "--source-id",
+            "rmf/hotel-production",
+            "--max-silence-ms",
+            "3000",
+            "--floor",
+            "L1=1",
+            "--bind",
+            "Lift1=A:operational",
+        ]))
+        .expect_err("DDS port arithmetic limits ROS 2 domain IDs");
+        assert!(invalid_domain.contains("maximum domain ID 232"));
+    }
+
+    #[test]
+    fn production_diagnostics_distinguish_layers_and_preserve_context() {
+        let mut host = reference_host();
+        let source = reference_source_id();
+        let session = reference_session_id();
+
+        host.note_transport_subscriber_created(&source);
+        host.note_transport_discovery(&source);
+        host.record_mapping_rejection(
+            source.clone(),
+            session.clone(),
+            "Lift-native".into(),
+            "fixture mapping evidence".into(),
+        );
+        host.record_transport_failure(
+            source.clone(),
+            session.clone(),
+            "fixture transport evidence".into(),
+        );
+        host.ingest_observation(observation(1).into());
+        host.ingest_observation(
+            complete_observation(source.clone(), session.clone(), 2, Floor::new(4)).into(),
+        );
+
+        let entries = host.diagnostics().entries().collect::<Vec<_>>();
+        for (layer, id) in [
+            (
+                HostDiagnosticLayer::Transport,
+                HostDiagnosticId::TransportSubscriberCreated,
+            ),
+            (
+                HostDiagnosticLayer::Transport,
+                HostDiagnosticId::TransportDiscoveryObserved,
+            ),
+            (
+                HostDiagnosticLayer::Transport,
+                HostDiagnosticId::TransportFailed,
+            ),
+            (
+                HostDiagnosticLayer::Source,
+                HostDiagnosticId::SourceSessionActivated,
+            ),
+            (
+                HostDiagnosticLayer::Mapping,
+                HostDiagnosticId::MappingRejected,
+            ),
+            (
+                HostDiagnosticLayer::Observation,
+                HostDiagnosticId::ObservationUnresolved,
+            ),
+            (
+                HostDiagnosticLayer::Observation,
+                HostDiagnosticId::ObservationResolved,
+            ),
+            (
+                HostDiagnosticLayer::Readiness,
+                HostDiagnosticId::ReadinessChanged,
+            ),
+        ] {
+            assert!(
+                entries
+                    .iter()
+                    .any(|entry| entry.layer == layer && entry.id == id),
+                "missing diagnostic layer={layer:?} id={id:?}"
+            );
+            assert!(!id.as_str().contains(' '));
+        }
+        let mapping = entries
+            .iter()
+            .find(|entry| entry.id == HostDiagnosticId::MappingRejected)
+            .expect("mapping rejection remains inspectable");
+        assert_eq!(mapping.context.source.as_ref(), Some(&source));
+        assert_eq!(mapping.context.session.as_ref(), Some(&session));
+        assert_eq!(
+            mapping.context.native_entity.as_deref(),
+            Some("Lift-native")
+        );
+        let rendered = render_host_diagnostic(mapping);
+        assert!(rendered.contains("layer=mapping id=mapping.rejected"));
+        assert!(rendered.contains("native_entity=Some(\"Lift-native\")"));
+        let unresolved = entries
+            .iter()
+            .find(|entry| entry.id == HostDiagnosticId::ObservationUnresolved)
+            .expect("resolution loss has an explicit diagnostic");
+        assert_eq!(unresolved.context.car.as_ref(), Some(&reference_car_id()));
+        assert_eq!(
+            unresolved.context.role,
+            Some(ObservationBindingRole::Operational)
+        );
+        assert!(
+            host.engine
+                .diagnostics()
+                .entries()
+                .any(|entry| matches!(entry.event, DiagnosticEvent::Observation { .. }))
+        );
+    }
+
+    #[test]
+    fn host_diagnostics_are_bounded_without_reusing_machine_sequence() {
+        let mut diagnostics = HostDiagnostics::new(3);
+        for lifecycle in [
+            HostLifecycle::Starting,
+            HostLifecycle::Synchronizing,
+            HostLifecycle::ReadyReadOnly,
+            HostLifecycle::Starting,
+            HostLifecycle::Synchronizing,
+        ] {
+            diagnostics.record(HostEvent::LifecycleChanged(lifecycle));
+        }
+
+        let sequences = diagnostics
+            .entries()
+            .map(|entry| entry.sequence)
+            .collect::<Vec<_>>();
+        assert_eq!(sequences, vec![3, 4, 5]);
     }
 
     #[test]
@@ -1621,7 +2263,7 @@ mod tests {
         )));
         assert!(run.events.iter().any(|event| matches!(
             event,
-            HostEvent::StateUpdated(state)
+            HostEvent::StateUpdated { state, .. }
                 if state.location
                     == CarLocation::Continuous(Position::at_floor(Floor::new(4)))
         )));
@@ -1702,9 +2344,9 @@ mod tests {
 
         assert_eq!(host.engine.diagnostics().incidents().count(), 8);
         assert_eq!(
-            host.events
-                .iter()
-                .filter(|event| matches!(event, HostEvent::ObservationRejected(_)))
+            host.diagnostics()
+                .entries()
+                .filter(|entry| matches!(entry.event, HostEvent::ObservationRejected { .. }))
                 .count(),
             10
         );
@@ -1875,8 +2517,8 @@ mod tests {
                 .payload,
             PayloadActivity::Stale
         );
-        assert!(host.events.iter().any(|event| matches!(
-            event,
+        assert!(host.diagnostics().entries().any(|entry| matches!(
+            &entry.event,
             HostEvent::SourcePayloadStale { source, session, .. }
                 if source == &auxiliary_source && session == &auxiliary_session
         )));
@@ -1916,7 +2558,7 @@ mod tests {
         assert!(host.poll(&mut feed));
 
         let anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
-            source: auxiliary_source,
+            source: auxiliary_source.clone(),
             session: auxiliary_session,
             previous: ObservationSequence::new(1),
             received: ObservationSequence::new(1),
@@ -1924,10 +2566,16 @@ mod tests {
         assert!(host.engine.diagnostics().entries().any(|entry| {
             matches!(&entry.event, DiagnosticEvent::Anomaly(observed) if observed == &anomaly)
         }));
-        assert!(
-            host.events
-                .contains(&HostEvent::ObservationRejected(anomaly))
-        );
+        assert!(host.diagnostics().entries().any(|entry| matches!(
+            &entry.event,
+            HostEvent::ObservationRejected { anomaly: observed, .. } if observed == &anomaly
+        )));
+        assert!(host.diagnostics().entries().any(|entry| {
+            entry.id == HostDiagnosticId::ObservationRejected
+                && entry.context.source.as_ref() == Some(&auxiliary_source)
+                && entry.context.car.as_ref() == Some(&reference_car_id())
+                && entry.context.role == Some(ObservationBindingRole::Auxiliary)
+        }));
         assert_eq!(host.engine.car_states(), operational);
         assert_eq!(host.lifecycle(), &HostLifecycle::ReadyReadOnly);
         assert_eq!(host.readiness(), Readiness::ReadOnly);

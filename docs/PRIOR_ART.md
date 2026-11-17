@@ -215,6 +215,12 @@ Useful idea: freshness expectations, publisher liveliness and sample lifespan ar
 
 M5.2 applies that distinction without copying a DDS policy into Core. The official ROS 2 design defines Deadline as an allowed interval between messages, Liveliness as entity-aliveness reporting, and Lifespan as sample validity. LiftAssistant's first RMF supervision therefore uses an explicitly configured adapter/host payload-silence interval only after payload has actually flowed. Subscriber creation or discovery alone remains separate evidence, source timestamps are not the host clock, and a missed interval revokes live operational truth rather than asserting an elevator fault. This remains internal and source-specific rather than a universal deadline or stable health schema.
 
+### ROS 2 DDS domain bounds
+
+Official ROS 2 documentation derives DDS domain IDs from 16-bit UDP port allocation: the possible DDS-backed range is 0 through 232, while narrower ranges are recommended on each platform to avoid ephemeral-port conflicts. M5.4 runtime validation exposed that the current RustDDS version performs its default-port arithmetic in `u16` and panics above that possible maximum. LiftAssistant now rejects values above 232 both at its headless CLI and RMF transport boundary. This is transport input validation, not a new LiftAssistant domain semantic or a claim that every value through 232 is operationally conflict-free on every host.
+
+Official source: https://github.com/ros2/ros2_documentation/blob/rolling/source/ROS-Framework/nodes/About-Domain-ID.rst
+
 ### Kubernetes controllers/reconciliation
 
 Official documentation:

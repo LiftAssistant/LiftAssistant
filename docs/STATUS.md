@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.3 are implemented: the Rust-native Open-RMF adapter and long-running headless composition have passed official Hotel ingestion, stale/recovery, readiness, and graceful-shutdown validation. **M5.4 — Production Diagnostics is READY.** No later M5 slice is READY merely because it appears in the roadmap.
+M5.1 through M5.4 are implemented: the Rust-native Open-RMF adapter and long-running headless composition have passed official Hotel ingestion, stale/recovery, readiness, graceful-shutdown, and bounded production-diagnostic validation. **M5.5 — Incident Capsule / Deterministic Replay is READY.** No later M5 slice is READY merely because it appears in the roadmap.
 
 ## Validated baseline
 
@@ -753,8 +753,24 @@ Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clip
 
 ### M5.4 — Production Diagnostics
 
+**IMPLEMENTED.**
+
+Implemented behavior and evidence:
+
+- the headless composition now owns a fixed-capacity host diagnostic recorder with monotonic internal sequence numbers; eviction never reuses a sequence;
+- private machine-readable identities and explicit layers distinguish Transport subscriber/discovery/failure evidence, Source session/stale evidence, Mapping rejection, Observation incomplete/unresolved/resolved/rejected evidence, and Engine readiness transitions;
+- applicable entries preserve `ObservationSourceId`, `ObservationSessionId`, logical `CarId`, Operational/Auxiliary role, and source-native entity context. Auxiliary acceptance/rejection remains visible while a healthy Operational authority stays ready;
+- the production RMF host emits the retained typed entries as line-oriented operator/developer diagnostics while the existing Engine Flight Recorder continues to retain canonical observations, Engine events, invalidations, and invariant anomalies;
+- connect/receive errors, unconfigured or invalid RMF mapping, topology mismatch, payload stale, resolution loss, readiness change, and recovery are no longer collapsed into one health boolean or one generic fault. None is labelled an elevator fault, root cause, maintenance action, or public/stable diagnostic registry;
+- runtime validation exposed that DDS port arithmetic panics for domain 233. Targeted official ROS 2 review confirmed the possible DDS-backed range is 0 through 232; both CLI parsing and the RMF transport boundary now reject larger values before RustDDS construction. The original panic is retained as negative evidence rather than erased by the corrected run;
+- a no-publisher production run on domain 231 emitted distinct `readiness.changed`, `source.session-activated`, and `transport.subscriber-created` records, then exited cleanly on SIGINT. Focused tests exercise all five diagnostic layers, source/session/car/role/native context, bounded retention, Engine evidence coexistence, and Auxiliary isolation.
+
+Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 103 workspace tests, all six TUI scenarios, the headless lifecycle scenario, no-publisher typed-diagnostic/SIGINT runtime, invalid-domain regression, canonical dependency/wall-clock isolation, and read-only write-boundary checks pass. No Podman resources were created for this slice, and the prior RMF validation resources remain absent.
+
+### M5.5 — Incident Capsule / Deterministic Replay
+
 **READY.**
 
-Advance the existing bounded Flight Recorder and host health/lifecycle evidence into a coherent read-only operator/developer diagnostic view. Preserve distinct Transport, Source/session, Mapping, Observation/resolution, and Engine-readiness contexts with machine-readable internal identities and source/session/car context.
+Create the smallest bounded, internal/versioned incident artifact needed to replay deterministic source-session, sequence, freshness invalidation, resolution, and readiness conditions in a fresh Engine/host process. Preserve the bindings and ordered evidence required for reproduction, plus an explicit trigger.
 
-Do not turn transport/source/mapping failures into elevator faults, infer root causes or maintenance actions, freeze a public registry/schema, add a database/cloud telemetry service, or make every Auxiliary diagnostic revoke readiness. M5.5 and later remain not READY until production diagnostics can explain the M5.1-M5.3 failure paths without collapsing their meanings.
+Do not add a database, unbounded telemetry archive, cloud uploader, stable public schema, or non-deterministic wall-clock replay. M5.6 and later remain not READY until capture into a fresh composition reproduces the relevant deterministic condition.
