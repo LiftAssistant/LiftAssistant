@@ -667,12 +667,10 @@ The proof used the official rootless Kilted image at digest `sha256:601a6bb7c04d
 
 ### M5.1b — RMF-owned live subscription and canonical ingestion
 
-**READY.**
+**HUMAN-CHECK — frozen observation semantics block an operational live state.**
 
-Introduce only the concrete ownership demanded by the successful proof:
+The successful M5.1a payload proof also reproduced the official Hotel source's steady-state `current_mode=MODE_AGV`. The accepted RMF mapping intentionally preserves `MODE_AGV` and `MODE_HUMAN` as `OperatingModeEvidence::SourceSpecific`: they describe RMF control/session context and are not silently equivalent to a LiftAssistant `OperatingMode`. Resolver therefore keeps these otherwise complete live snapshots unresolved, so Engine cannot expose the operational `CarState` required by the M5.1 exit or reach a truthful ReadyReadOnly state.
 
-- keep ROS/RMF dependencies out of model, Core, and Engine;
-- share one RMF semantic mapper between recorded and live paths rather than copying it;
-- use explicit `lift_name` to logical `CarId` configuration, existing binding roles, an adapter-owned source session, and one source-global/session-local observation sequence;
-- deliver live messages only as canonical `CarObservationUpdate` values into Engine;
-- prove two cars, restart invalidation, and strict absence of a write interface against the official simulation.
+No adapter implementation was committed after discovering this boundary. Continuing requires an explicit HUMAN decision on how a configured RMF source can establish LiftAssistant operating-mode evidence. The narrow candidates are an RMF-specific explicit mapping policy, or a deliberate change to the completeness required for operational state; either changes a frozen semantic or its accepted use and cannot be selected by implementation convenience. Mapping `MODE_AGV` directly to `OperatingMode::Normal`, inventing a default mode, or bypassing Resolver is not authorized.
+
+M5.2 and later dependent slices are not READY while this gate remains unresolved. The Rust-native transport proof remains valid and read-only; no ROS/RMF dependency entered model, Core, Engine, or the workspace dependency graph.
