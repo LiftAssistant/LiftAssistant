@@ -97,11 +97,13 @@ class HostTelemetryBar extends StatelessWidget {
     required this.snapshot,
     required this.isLive,
     this.revisionReset,
+    this.maxContentWidth,
   });
 
   final ReadModelSnapshot snapshot;
   final bool isLive;
   final RevisionResetNotice? revisionReset;
+  final double? maxContentWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -125,104 +127,109 @@ class HostTelemetryBar extends StatelessWidget {
       palette,
     );
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: palette.elevatedSurface,
-        border: Border(bottom: BorderSide(color: palette.border)),
+    final bool compactViewport = MediaQuery.sizeOf(context).width < 600;
+    Widget content = Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: compactViewport ? 12 : 16,
+        vertical: 6.5,
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6.5),
-        child: LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            final bool showContractRight = constraints.maxWidth >= 680;
-            final Widget leftCluster = Wrap(
-              spacing: 16,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                _TelemetryCell(
-                  label: 'Lifecycle',
-                  value: lifecycleLabel,
-                  dotColor: lifecycleColor,
-                  hollowDot: lifecycleHollow,
-                  tooltip: lifecycleTip,
-                ),
-                _TelemetryCell(
-                  label: 'Readiness',
-                  value: readinessLabel,
-                  dotColor: readinessColor,
-                  hollowDot: readinessHollow,
-                  tooltip: readinessTip,
-                ),
-                Tooltip(
-                  message:
-                      'Host-local revision (${snapshot.apiVersion}); monotonic within one Host process lifetime and resets on Host restart.',
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 64),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool showContractRight = constraints.maxWidth >= 680;
+          final Widget leftCluster = Wrap(
+            spacing: constraints.maxWidth < 420 ? 11 : 16,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              _TelemetryCell(
+                label: 'Lifecycle',
+                value: lifecycleLabel,
+                dotColor: lifecycleColor,
+                hollowDot: lifecycleHollow,
+                tooltip: lifecycleTip,
+              ),
+              _TelemetryCell(
+                label: 'Readiness',
+                value: readinessLabel,
+                dotColor: readinessColor,
+                hollowDot: readinessHollow,
+                tooltip: readinessTip,
+              ),
+              Tooltip(
+                message:
+                    'Host-local revision (${snapshot.apiVersion}); monotonic within one Host process lifetime and resets on Host restart.',
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 64),
+                      child: Text(
+                        'Rev ',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: palette.mutedText,
+                        ),
+                      ),
+                    ),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 96),
+                      child: Text(
+                        '#${snapshot.revision}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: instrumentMonoStyle(
+                          context,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    if (!isLive) ...<Widget>[
+                      const SizedBox(width: 5),
+                      Flexible(
                         child: Text(
-                          'Rev ',
+                          '(retained)',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 11.5,
-                            color: palette.mutedText,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: palette.caution,
                           ),
                         ),
                       ),
-                      Flexible(
-                        child: Text(
-                          '#${snapshot.revision}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: instrumentMonoStyle(
-                            context,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      if (!isLive) ...<Widget>[
-                        const SizedBox(width: 5),
-                        Flexible(
-                          child: Text(
-                            '(retained)',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: palette.caution,
-                            ),
-                          ),
-                        ),
-                      ],
                     ],
-                  ),
+                  ],
                 ),
-                if (revisionReset != null)
-                  SemanticBadge(
-                    label:
-                        'New Host lifetime (#${revisionReset!.previousRevision} → #${revisionReset!.newRevision})',
-                    foreground: palette.info,
-                    background: palette.infoContainer,
-                    monospace: true,
-                  ),
-              ],
-            );
+              ),
+              if (revisionReset != null)
+                SemanticBadge(
+                  label:
+                      'New Host lifetime (#${revisionReset!.previousRevision} → #${revisionReset!.newRevision})',
+                  foreground: palette.info,
+                  background: palette.infoContainer,
+                  monospace: true,
+                ),
+            ],
+          );
 
-            if (!showContractRight) {
-              return leftCluster;
-            }
+          if (!showContractRight) {
+            return leftCluster;
+          }
 
-            return Row(
-              children: <Widget>[
-                Expanded(child: leftCluster),
-                const SizedBox(width: 12),
-                Text(
+          return Row(
+            children: <Widget>[
+              Expanded(child: leftCluster),
+              const SizedBox(width: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 180),
+                child: Text(
                   snapshot.apiVersion,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
                   style: instrumentMonoStyle(
                     context,
                     fontSize: 11,
@@ -230,11 +237,29 @@ class HostTelemetryBar extends StatelessWidget {
                     color: palette.mutedText,
                   ),
                 ),
-              ],
-            );
-          },
-        ),
+              ),
+            ],
+          );
+        },
       ),
+    );
+
+    if (maxContentWidth != null) {
+      content = Align(
+        alignment: Alignment.center,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxContentWidth!),
+          child: content,
+        ),
+      );
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.elevatedSurface,
+        border: Border(bottom: BorderSide(color: palette.border)),
+      ),
+      child: content,
     );
   }
 }
@@ -294,12 +319,12 @@ class ClientAlertBanners extends StatelessWidget {
     super.key,
     required this.state,
     required this.onReconnectNow,
-    required this.onConfigureHost,
+    this.onConfigureHost,
   });
 
   final ClientState state;
   final VoidCallback onReconnectNow;
-  final VoidCallback onConfigureHost;
+  final VoidCallback? onConfigureHost;
 
   bool _isHardError(ClientConnectionError? error) {
     if (error == null) {
@@ -373,7 +398,7 @@ class ClientAlertBanners extends StatelessWidget {
               ) = _describeRetainedStaleBanner(
                 snapshot!,
                 error,
-                hasHardErrorAbove: showHardErrorBanner,
+                hasHardErrorAbove: showHardErrorAbove(showHardErrorBanner),
               );
               return SemanticCalloutBanner(
                 key: const Key('stale-retained-snapshot-banner'),
@@ -397,11 +422,12 @@ class ClientAlertBanners extends StatelessWidget {
                                 : 'Reconnect',
                           ),
                         ),
-                        OutlinedButton.icon(
-                          onPressed: onConfigureHost,
-                          icon: const Icon(Icons.edit_outlined, size: 15),
-                          label: const Text('Host URL'),
-                        ),
+                        if (onConfigureHost != null)
+                          OutlinedButton.icon(
+                            onPressed: onConfigureHost,
+                            icon: const Icon(Icons.edit_outlined, size: 15),
+                            label: const Text('Host URL'),
+                          ),
                       ],
               );
             },
@@ -409,6 +435,8 @@ class ClientAlertBanners extends StatelessWidget {
       ],
     );
   }
+
+  bool showHardErrorAbove(bool flag) => flag;
 
   Widget _buildErrorBanner(
     BuildContext context,
@@ -461,12 +489,13 @@ class ClientAlertBanners extends StatelessWidget {
             icon: const Icon(Icons.refresh, size: 15),
             label: const Text('Retry'),
           ),
-        OutlinedButton.icon(
-          key: const Key('error-configure-host-button'),
-          onPressed: onConfigureHost,
-          icon: const Icon(Icons.dns_outlined, size: 15),
-          label: const Text('Host URL'),
-        ),
+        if (onConfigureHost != null)
+          OutlinedButton.icon(
+            key: const Key('error-configure-host-button'),
+            onPressed: onConfigureHost,
+            icon: const Icon(Icons.dns_outlined, size: 15),
+            label: const Text('Host URL'),
+          ),
       ],
     );
   }

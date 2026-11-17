@@ -398,7 +398,6 @@ class _ClientShellPageState extends State<ClientShellPage> {
                       ClientAlertBanners(
                         state: state,
                         onReconnectNow: widget.controller.reconnectNow,
-                        onConfigureHost: () => _openHostConfig(state),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -446,9 +445,168 @@ class _ClientShellPageState extends State<ClientShellPage> {
         state.hasRetainedStaleSnapshot || state.error != null;
 
     if (isSplitDesktop) {
-      final double inspectorWidth = (viewport.width * 0.36).clamp(340.0, 460.0);
+      final bool isSingleColumnStage =
+          textScale > 1.45 ||
+          (snapshot.operationalCars.length <= 1 &&
+              snapshot.sources.length <= 1);
+      final bool useThreeCarCols =
+          !isSingleColumnStage &&
+          snapshot.operationalCars.length >= 3 &&
+          viewport.width >= 1340 &&
+          textScale <= 1.2;
+
+      final double maxConsoleWidth = isSingleColumnStage
+          ? 1400.0
+          : (useThreeCarCols ? 1960.0 : 1645.0);
+      final bool isFramedUltraWide = viewport.width > maxConsoleWidth;
+      final double effectiveWidth = isFramedUltraWide
+          ? maxConsoleWidth
+          : viewport.width;
+      final double frameBorderWidth = isFramedUltraWide ? 2.0 : 0.0;
+
+      final double singleColumnLeftOuter = (effectiveWidth * 0.42)
+          .clamp(420.0, 572.0)
+          .roundToDouble();
+      final double maxMultiLeftOuter = useThreeCarCols
+          ? (3 * 460.0 + 20.0 + 32.0)
+          : (2 * 500.0 + 10.0 + 32.0);
+      final double baseInspectorWidth =
+          (effectiveWidth * (useThreeCarCols ? 0.31 : 0.355))
+              .clamp(368.0, 600.0)
+              .roundToDouble();
+      final double minInspectorForCap =
+          effectiveWidth - frameBorderWidth - 1.0 - maxMultiLeftOuter;
+      final double inspectorWidth = baseInspectorWidth < minInspectorForCap
+          ? minInspectorForCap
+          : baseInspectorWidth;
+
       final bool pinDiagnosticsToolbar =
           viewport.height >= 540 && textScale <= 1.4;
+
+      final Widget leftStageScroll = CustomScrollView(
+        slivers: <Widget>[
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            sliver: SliverToBoxAdapter(
+              child: SectionHeader(
+                title: 'Operational Cars',
+                count: snapshot.operationalCars.length,
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            sliver: _buildCarsSliver(context, snapshot, textScale: textScale),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
+            sliver: SliverToBoxAdapter(
+              child: SectionHeader(
+                title: 'Observation Sources',
+                count: snapshot.sources.length,
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            sliver: _buildSourcesSliver(
+              context,
+              snapshot,
+              textScale: textScale,
+            ),
+          ),
+        ],
+      );
+
+      final Widget diagnosticsPaneContent = pinDiagnosticsToolbar
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Tooltip(
+                    message: 'Diagnostic entries are machine-readable Host evidence only — NOT confirmed elevator equipment faults, root causes, or repair instructions.',
+                    child: SectionHeader(
+                      title: 'Host Diagnostics',
+                      count: snapshot.recentDiagnostics.length,
+                      trailingNote: 'Host evidence · non-fault',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Expanded(
+                    child: DiagnosticEvidencePanel(
+                      diagnostics: snapshot.recentDiagnostics,
+                      filterController: _diagnosticsFilter,
+                      expandList: true,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : ListenableBuilder(
+              listenable: _diagnosticsFilter,
+              builder: (BuildContext context, _) {
+                return CustomScrollView(
+                  slivers: <Widget>[
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+                      sliver: SliverToBoxAdapter(
+                        child: SectionHeader(
+                          title: 'Host Diagnostics',
+                          count: snapshot.recentDiagnostics.length,
+                          trailingNote: 'Host evidence · non-fault',
+                        ),
+                      ),
+                    ),
+                    for (final Widget s in buildDiagnosticSlivers(
+                      context: context,
+                      diagnostics: snapshot.recentDiagnostics,
+                      controller: _diagnosticsFilter,
+                    ))
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        sliver: s,
+                      ),
+                    const SliverToBoxAdapter(child: SizedBox(height: 16)),
+                  ],
+                );
+              },
+            );
+
+      Widget splitBody = Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          if (isSingleColumnStage)
+            SizedBox(width: singleColumnLeftOuter, child: leftStageScroll)
+          else
+            Expanded(child: leftStageScroll),
+          VerticalDivider(width: 1, thickness: 1, color: palette.border),
+          if (isSingleColumnStage)
+            Expanded(child: diagnosticsPaneContent)
+          else
+            SizedBox(width: inspectorWidth, child: diagnosticsPaneContent),
+        ],
+      );
+
+      if (isFramedUltraWide) {
+        splitBody = Align(
+          alignment: Alignment.topCenter,
+          child: SizedBox(
+            width: effectiveWidth,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.symmetric(
+                  vertical: BorderSide(color: palette.border),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 1),
+                child: splitBody,
+              ),
+            ),
+          ),
+        );
+      }
 
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -457,140 +615,28 @@ class _ClientShellPageState extends State<ClientShellPage> {
             snapshot: snapshot,
             isLive: state.isSnapshotLive,
             revisionReset: state.lastRevisionReset,
+            maxContentWidth: isFramedUltraWide ? effectiveWidth : null,
           ),
           if (hasAlerts)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-              child: ClientAlertBanners(
-                state: state,
-                onReconnectNow: widget.controller.reconnectNow,
-                onConfigureHost: () => _openHostConfig(state),
+            Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: effectiveWidth),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: ClientAlertBanners(
+                    state: state,
+                    onReconnectNow: widget.controller.reconnectNow,
+                    onConfigureHost: () => _openHostConfig(state),
+                  ),
+                ),
               ),
             ),
           Expanded(
             child: AnimatedOpacity(
               duration: const Duration(milliseconds: 150),
               opacity: state.isSnapshotLive ? 1.0 : 0.72,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  // Left primary stage: Sliver-virtualized Operational Cars + Observation Sources
-                  Expanded(
-                    child: CustomScrollView(
-                      slivers: <Widget>[
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                          sliver: SliverToBoxAdapter(
-                            child: SectionHeader(
-                              title: 'Operational Cars',
-                              count: snapshot.operationalCars.length,
-                            ),
-                          ),
-                        ),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-                          sliver: _buildCarsSliver(
-                            context,
-                            snapshot,
-                            textScale: textScale,
-                          ),
-                        ),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
-                          sliver: SliverToBoxAdapter(
-                            child: SectionHeader(
-                              title: 'Observation Sources',
-                              count: snapshot.sources.length,
-                            ),
-                          ),
-                        ),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-                          sliver: _buildSourcesSliver(
-                            context,
-                            snapshot,
-                            textScale: textScale,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  VerticalDivider(
-                    width: 1,
-                    thickness: 1,
-                    color: palette.border,
-                  ),
-                  // Right focused inspector pane: Pinned toolbar + ListView.builder Host Diagnostics
-                  SizedBox(
-                    width: inspectorWidth,
-                    child: pinDiagnosticsToolbar
-                        ? Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: <Widget>[
-                                Tooltip(
-                                  message: 'Diagnostic entries are machine-readable Host evidence only — NOT confirmed elevator equipment faults, root causes, or repair instructions.',
-                                  child: SectionHeader(
-                                    title: 'Host Diagnostics',
-                                    count: snapshot.recentDiagnostics.length,
-                                    trailingNote: 'Host evidence · non-fault',
-                                  ),
-                                ),
-                                const SizedBox(height: 10),
-                                Expanded(
-                                  child: DiagnosticEvidencePanel(
-                                    diagnostics: snapshot.recentDiagnostics,
-                                    filterController: _diagnosticsFilter,
-                                    expandList: true,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        : ListenableBuilder(
-                            listenable: _diagnosticsFilter,
-                            builder: (BuildContext context, _) {
-                              return CustomScrollView(
-                                slivers: <Widget>[
-                                  SliverPadding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      16,
-                                      14,
-                                      16,
-                                      10,
-                                    ),
-                                    sliver: SliverToBoxAdapter(
-                                      child: SectionHeader(
-                                        title: 'Host Diagnostics',
-                                        count:
-                                            snapshot.recentDiagnostics.length,
-                                        trailingNote:
-                                            'Host evidence · non-fault',
-                                      ),
-                                    ),
-                                  ),
-                                  for (final Widget s in buildDiagnosticSlivers(
-                                    context: context,
-                                    diagnostics: snapshot.recentDiagnostics,
-                                    controller: _diagnosticsFilter,
-                                  ))
-                                    SliverPadding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 16,
-                                      ),
-                                      sliver: s,
-                                    ),
-                                  const SliverToBoxAdapter(
-                                    child: SizedBox(height: 16),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
+              child: splitBody,
             ),
           ),
         ],
@@ -730,10 +776,10 @@ class _ClientShellPageState extends State<ClientShellPage> {
   }) {
     if (alignWithTwoColumnSibling) {
       return ((stageWidth - spacing) / 2)
-          .clamp(400.0, maxTrackWidth)
+          .clamp(0.0, maxTrackWidth)
           .clamp(0.0, stageWidth);
     }
-    return (stageWidth * 0.64).clamp(508.0, 540.0).clamp(0.0, stageWidth);
+    return stageWidth.clamp(0.0, 540.0);
   }
 
   Widget _buildCarsSliver(
@@ -751,7 +797,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
           final Widget panel = _EmptyOperationalCarsPanel(
             sources: snapshot.sources,
           );
-          if (width < 540 || textScale > 1.45) {
+          if (width <= 540 || textScale > 1.45) {
             return SliverToBoxAdapter(child: panel);
           }
           return SliverToBoxAdapter(
@@ -770,7 +816,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
     return SliverLayoutBuilder(
       builder: (BuildContext context, SliverConstraints sliverConstraints) {
         final double width = sliverConstraints.crossAxisExtent;
-        if (width < 520 || textScale > 1.45) {
+        if ((cars.length > 1 && width < 520) || textScale > 1.45) {
           final bool useTabularFooter = width >= 250 && textScale <= 1.35;
           return SliverList.builder(
             itemCount: cars.length,
@@ -792,7 +838,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
 
         if (cars.length == 1) {
           final bool sourcesUseTwoCols =
-              snapshot.sources.length >= 2 && width >= 720 && textScale <= 1.25;
+              snapshot.sources.length >= 2 && width >= 700 && textScale <= 1.25;
           final double singleWidth = _singleStageCardWidth(
             stageWidth: width,
             spacing: spacing,
@@ -815,9 +861,10 @@ class _ClientShellPageState extends State<ClientShellPage> {
         }
 
         final int columns =
-            (cars.length >= 3 && width >= 860 && textScale <= 1.2) ? 3 : 2;
+            (cars.length >= 3 && width >= 920 && textScale <= 1.2) ? 3 : 2;
+        final double columnCap = columns == 3 ? 460.0 : maxTrackWidth;
         final double maxRowWidth =
-            columns * maxTrackWidth + (columns - 1) * spacing;
+            columns * columnCap + (columns - 1) * spacing;
         final double effectiveRowWidth = width < maxRowWidth
             ? width
             : maxRowWidth;
@@ -896,7 +943,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
               ),
             ),
           );
-          if (width < 540 || textScale > 1.45) {
+          if (width <= 540 || textScale > 1.45) {
             return SliverToBoxAdapter(child: emptyBox);
           }
           return SliverToBoxAdapter(
@@ -915,7 +962,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
     return SliverLayoutBuilder(
       builder: (BuildContext context, SliverConstraints sliverConstraints) {
         final double width = sliverConstraints.crossAxisExtent;
-        if (width < 520 || textScale > 1.45) {
+        if ((sources.length > 1 && width < 520) || textScale > 1.45) {
           return SliverList.builder(
             itemCount: sources.length,
             itemBuilder: (BuildContext context, int index) {
@@ -933,9 +980,10 @@ class _ClientShellPageState extends State<ClientShellPage> {
 
         if (sources.length == 1) {
           final bool carsUseTwoCols =
-              snapshot.operationalCars.length == 2 ||
-              (snapshot.operationalCars.length >= 3 &&
-                  !(width >= 860 && textScale <= 1.2));
+              width >= 520 &&
+              (snapshot.operationalCars.length == 2 ||
+                  (snapshot.operationalCars.length >= 3 &&
+                      !(width >= 920 && textScale <= 1.2)));
           final double singleWidth = _singleStageCardWidth(
             stageWidth: width,
             spacing: spacing,
@@ -953,9 +1001,12 @@ class _ClientShellPageState extends State<ClientShellPage> {
           );
         }
 
-        final int columns = (width >= 720 && textScale <= 1.25) ? 2 : 1;
-        final double maxRowWidth =
-            columns * maxTrackWidth + (columns - 1) * spacing;
+        final int columns = (width >= 700 && textScale <= 1.25) ? 2 : 1;
+        final double maxRowWidth = columns == 1
+            ? (snapshot.operationalCars.length >= 2
+                  ? (2 * maxTrackWidth + spacing)
+                  : 540.0)
+            : (columns * maxTrackWidth + (columns - 1) * spacing);
         final int rowCount = (sources.length + columns - 1) ~/ columns;
 
         return SliverList.builder(
@@ -966,7 +1017,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
               rowWidget = Align(
                 alignment: Alignment.topLeft,
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: maxTrackWidth),
+                  constraints: BoxConstraints(maxWidth: maxRowWidth),
                   child: SourceHealthCard(source: sources[rowIndex]),
                 ),
               );

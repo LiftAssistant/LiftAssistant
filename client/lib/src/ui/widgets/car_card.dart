@@ -577,7 +577,7 @@ class _CarTelemetryFooter extends StatelessWidget {
               child: Row(
                 children: <Widget>[
                   Expanded(
-                    flex: 4,
+                    flex: 10,
                     child: _TabularField(
                       label: 'Motion',
                       value: motionText,
@@ -589,11 +589,11 @@ class _CarTelemetryFooter extends StatelessWidget {
                   Container(
                     width: 1,
                     height: 22,
-                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    margin: const EdgeInsets.symmetric(horizontal: 4.5),
                     color: palette.border,
                   ),
                   Expanded(
-                    flex: 3,
+                    flex: 7,
                     child: _TabularField(
                       label: 'Door',
                       value: doorText,
@@ -604,11 +604,11 @@ class _CarTelemetryFooter extends StatelessWidget {
                   Container(
                     width: 1,
                     height: 22,
-                    margin: const EdgeInsets.symmetric(horizontal: 8),
+                    margin: const EdgeInsets.symmetric(horizontal: 4.5),
                     color: palette.border,
                   ),
                   Expanded(
-                    flex: 4,
+                    flex: 7,
                     child: Tooltip(
                       message: destTooltip,
                       child: _TabularField(

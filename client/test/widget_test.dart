@@ -265,17 +265,17 @@ void main() {
       final double allPillTop = tester
           .getRect(find.byKey(const Key('diag-filter-all')))
           .top;
+      expect(roleOpRect.top, isNot(equals(allPillTop)));
       for (final String layerKey in <String>[
+        'diag-filter-all',
         'diag-filter-layer-transport',
         'diag-filter-layer-source',
         'diag-filter-layer-mapping',
         'diag-filter-layer-observation',
         'diag-filter-layer-readiness',
       ]) {
-        expect(
-          tester.getRect(find.byKey(Key(layerKey))).top,
-          equals(allPillTop),
-        );
+        final Rect pillRect = tester.getRect(find.byKey(Key(layerKey)));
+        expect(pillRect.right, lessThanOrEqualTo(toolbarRect.right + 0.5));
       }
 
       // Location precision distinction: Floor ref vs Continuous position.
@@ -311,17 +311,38 @@ void main() {
         findsOneWidget,
       );
 
-      // Even at 1040x800 laptop width, primary left stage keeps 2 equal-height car columns!
-      tester.view.physicalSize = const Size(1040, 800);
-      await tester.pumpAndSettle();
-      final Rect laptopCar0 = tester.getRect(
-        find.byType(OperationalCarCard).at(0),
-      );
-      final Rect laptopCar1 = tester.getRect(
-        find.byType(OperationalCarCard).at(1),
-      );
-      expect(laptopCar0.top, equals(laptopCar1.top));
-      expect(laptopCar0.height, equals(laptopCar1.height));
+      // At 1040x800 and 940x720 laptop/tiled widths, primary left stage keeps 2 equal-height car columns,
+      // stacked sources match the exact right edge of car column 1, and zero layer pills clip horizontally!
+      for (final Size compactDesktop in <Size>[
+        const Size(1040, 800),
+        const Size(940, 720),
+      ]) {
+        tester.view.physicalSize = compactDesktop;
+        await tester.pumpAndSettle();
+        final Rect laptopCar0 = tester.getRect(
+          find.byType(OperationalCarCard).at(0),
+        );
+        final Rect laptopCar1 = tester.getRect(
+          find.byType(OperationalCarCard).at(1),
+        );
+        final Rect laptopSrc0 = tester.getRect(
+          find.byType(SourceHealthCard).at(0),
+        );
+        expect(laptopCar0.top, equals(laptopCar1.top));
+        expect(laptopCar0.height, equals(laptopCar1.height));
+        expect((laptopCar1.right - laptopSrc0.right).abs(), lessThan(1.0));
+
+        final Rect compactToolbar = tester.getRect(
+          find.byType(DiagnosticsFilterToolbar),
+        );
+        final Rect readinessRect = tester.getRect(
+          find.byKey(const Key('diag-filter-layer-readiness')),
+        );
+        expect(
+          readinessRect.right,
+          lessThanOrEqualTo(compactToolbar.right + 0.5),
+        );
+      }
 
       tester.view.physicalSize = const Size(1366, 900);
       await tester.pumpAndSettle();
@@ -644,6 +665,11 @@ void main() {
         find.byKey(const Key('host-url-input')),
       );
       expect(inlineField.controller?.text, 'http://192.168.1.99:9090');
+      // Inline onboarding error banner does not render a duplicate Host URL modal button above the open form.
+      expect(
+        find.byKey(const Key('error-configure-host-button')),
+        findsNothing,
+      );
 
       // Now bring Host online and connect.
       failConnect = false;
@@ -926,15 +952,23 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Single car and single source share identical bounded width (<= 540px) rather than stretching across ~873px.
+      // Single car and single source share identical bounded width (<= 540px) AND sit immediately
+      // adjacent to Host Diagnostics (no 349px..903px central chasm between cards and VerticalDivider).
       final Rect singleCarRect = tester.getRect(
         find.byType(OperationalCarCard),
       );
       final Rect singleSrcRect = tester.getRect(find.byType(SourceHealthCard));
+      final Rect singleDiagHeaderRect = tester.getRect(
+        find.widgetWithText(SectionHeader, 'Host Diagnostics'),
+      );
       expect(singleCarRect.left, equals(singleSrcRect.left));
       expect(singleCarRect.width, equals(singleSrcRect.width));
       expect(singleCarRect.width, lessThanOrEqualTo(540.0));
       expect(singleCarRect.width, greaterThanOrEqualTo(500.0));
+      expect(
+        singleDiagHeaderRect.left - singleCarRect.right,
+        lessThanOrEqualTo(36.0),
+      );
 
       final Rect fireBadgeRect = tester.getRect(
         find.widgetWithText(SemanticBadge, 'FireService'),
@@ -949,6 +983,24 @@ void main() {
         lessThan(2.0),
       );
 
+      // Ultra-wide 1920x1080 single-car state also avoids a 900px central void!
+      tester.view.physicalSize = const Size(1920, 1080);
+      await tester.pumpAndSettle();
+      final Rect ultraSingleCarRect = tester.getRect(
+        find.byType(OperationalCarCard),
+      );
+      final Rect ultraSingleDiagHeader = tester.getRect(
+        find.widgetWithText(SectionHeader, 'Host Diagnostics'),
+      );
+      expect(ultraSingleCarRect.width, lessThanOrEqualTo(540.0));
+      expect(
+        ultraSingleDiagHeader.left - ultraSingleCarRect.right,
+        lessThanOrEqualTo(36.0),
+      );
+
+      tester.view.physicalSize = const Size(1366, 900);
+      await tester.pumpAndSettle();
+
       // Push a 2-car, 1-source SSE snapshot (real Hotel RMF topology): Source 0 snaps to match Car 0's column width!
       transport.sseController.add(twoCarSingleSourceJson);
       await tester.pumpAndSettle();
@@ -959,13 +1011,23 @@ void main() {
       final Rect pairedSrcRect = tester.getRect(find.byType(SourceHealthCard));
       expect((twoCar0Rect.right - pairedSrcRect.right).abs(), lessThan(1.0));
 
-      // Ultra-wide 1920x1080 bounds multi-column rows cleanly without 700px+ card bloat.
+      // Ultra-wide 1920x1080 bounds multi-column rows cleanly (<= 500px) AND keeps Car 1 adjacent to Host Diagnostics!
       tester.view.physicalSize = const Size(1920, 1080);
       await tester.pumpAndSettle();
       final Rect ultraWideCar0 = tester.getRect(
         find.byType(OperationalCarCard).at(0),
       );
+      final Rect ultraWideCar1 = tester.getRect(
+        find.byType(OperationalCarCard).at(1),
+      );
+      final Rect ultraWideDiagHeader = tester.getRect(
+        find.widgetWithText(SectionHeader, 'Host Diagnostics'),
+      );
       expect(ultraWideCar0.width, lessThanOrEqualTo(500.0));
+      expect(
+        ultraWideDiagHeader.left - ultraWideCar1.right,
+        lessThanOrEqualTo(36.0),
+      );
     },
   );
 }

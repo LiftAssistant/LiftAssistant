@@ -341,7 +341,7 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool inlineRoleOnTopRow =
-            constraints.maxWidth >= 412 && textScale <= 1.2;
+            constraints.maxWidth >= 420 && textScale <= 1.2;
 
         final Widget sortButton = ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 108),
@@ -411,8 +411,8 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
                       style: const TextStyle(fontSize: 12.5),
                       decoration: InputDecoration(
                         hintText: inlineRoleOnTopRow
-                            ? 'Filter id, source, car...'
-                            : 'Filter id, source, car, entity...',
+                            ? 'Filter diagnostics…'
+                            : 'Filter id, source, car, entity…',
                         hintStyle: TextStyle(
                           fontSize: 12,
                           color: palette.mutedText,
@@ -455,7 +455,7 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
                 if (inlineRoleOnTopRow) ...<Widget>[
                   const SizedBox(width: 6),
                   ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 168),
+                    constraints: const BoxConstraints(maxWidth: 164),
                     child: _RoleSegmentedControl(
                       controller: controller,
                       minHeight: 32,
@@ -467,78 +467,30 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
-            if (textScale <= 1.35)
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    _FilterPill(
-                      key: const Key('diag-filter-all'),
-                      label: 'All',
-                      selected:
-                          controller.selectedLayer == null &&
-                          controller.selectedRole == null,
-                      onTap: controller.clearCategoryFilters,
-                    ),
-                    Container(
-                      width: 1,
-                      height: 12,
-                      margin: const EdgeInsets.symmetric(horizontal: 5.5),
-                      color: palette.border,
-                    ),
-                    for (
-                      int i = 0;
-                      i < DiagnosticLayer.values.length;
-                      i++
-                    ) ...<Widget>[
-                      if (i > 0) const SizedBox(width: 4),
-                      _FilterPill(
-                        key: Key(
-                          'diag-filter-layer-${DiagnosticLayer.values[i].wireValue}',
-                        ),
-                        label: DiagnosticLayer.values[i].wireValue,
-                        monospace: true,
-                        selected:
-                            controller.selectedLayer ==
-                            DiagnosticLayer.values[i],
-                        onTap: () =>
-                            controller.toggleLayer(DiagnosticLayer.values[i]),
-                      ),
-                    ],
-                  ],
+            Wrap(
+              spacing: 3,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                _FilterPill(
+                  key: const Key('diag-filter-all'),
+                  label: 'All',
+                  selected:
+                      controller.selectedLayer == null &&
+                      controller.selectedRole == null,
+                  onTap: controller.clearCategoryFilters,
                 ),
-              )
-            else
-              Wrap(
-                spacing: 4,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: <Widget>[
+                Container(width: 1, height: 12, color: palette.border),
+                for (final DiagnosticLayer layer in DiagnosticLayer.values)
                   _FilterPill(
-                    key: const Key('diag-filter-all'),
-                    label: 'All',
-                    selected:
-                        controller.selectedLayer == null &&
-                        controller.selectedRole == null,
-                    onTap: controller.clearCategoryFilters,
+                    key: Key('diag-filter-layer-${layer.wireValue}'),
+                    label: layer.wireValue,
+                    monospace: true,
+                    selected: controller.selectedLayer == layer,
+                    onTap: () => controller.toggleLayer(layer),
                   ),
-                  Container(
-                    width: 1,
-                    height: 12,
-                    margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                    color: palette.border,
-                  ),
-                  for (final DiagnosticLayer layer in DiagnosticLayer.values)
-                    _FilterPill(
-                      key: Key('diag-filter-layer-${layer.wireValue}'),
-                      label: layer.wireValue,
-                      monospace: true,
-                      selected: controller.selectedLayer == layer,
-                      onTap: () => controller.toggleLayer(layer),
-                    ),
-                ],
-              ),
+              ],
+            ),
             if (!inlineRoleOnTopRow) ...<Widget>[
               const SizedBox(height: 5),
               Wrap(
@@ -600,6 +552,7 @@ class _RoleSegmentedControl extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
               Flexible(
+                flex: 11,
                 child: _RoleSegmentButton(
                   key: const Key('diag-filter-role-operational'),
                   label: 'Operational',
@@ -614,6 +567,7 @@ class _RoleSegmentedControl extends StatelessWidget {
                 color: palette.border,
               ),
               Flexible(
+                flex: 9,
                 child: _RoleSegmentButton(
                   key: const Key('diag-filter-role-auxiliary'),
                   label: 'Auxiliary',
@@ -657,7 +611,7 @@ class _RoleSegmentButton extends StatelessWidget {
         child: ColoredBox(
           color: bg,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
             child: Center(
               widthFactor: 1.0,
               child: Text(
@@ -705,7 +659,7 @@ class _FilterPill extends StatelessWidget {
       borderRadius: BorderRadius.circular(4),
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 5.0, vertical: 3),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(4),
@@ -718,7 +672,7 @@ class _FilterPill extends StatelessWidget {
           style: monospace
               ? instrumentMonoStyle(
                   context,
-                  fontSize: 10.5,
+                  fontSize: 10,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   color: fg,
                 )

@@ -163,37 +163,49 @@ class SectionHeader extends StatelessWidget {
       return Align(alignment: Alignment.centerLeft, child: titleCluster);
     }
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: <Widget>[
-        Flexible(flex: 5, child: titleCluster),
-        Flexible(
-          flex: 6,
-          child: Padding(
-            padding: const EdgeInsets.only(left: 10),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: <Widget>[
-                if (trailingNote != null)
-                  Flexible(
-                    child: Text(
-                      trailingNote!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.right,
-                      style: TextStyle(fontSize: 11, color: palette.mutedText),
-                    ),
-                  ),
-                if (trailing != null) ...<Widget>[
-                  if (trailingNote != null) const SizedBox(width: 8),
-                  trailing!,
-                ],
-              ],
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double maxTrailing = constraints.maxWidth.isFinite
+            ? constraints.maxWidth * 0.56
+            : 260.0;
+        return Row(
+          children: <Widget>[
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: titleCluster,
+              ),
             ),
-          ),
-        ),
-      ],
+            const SizedBox(width: 10),
+            ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxTrailing),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: <Widget>[
+                  if (trailingNote != null)
+                    Flexible(
+                      child: Text(
+                        trailingNote!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: palette.mutedText,
+                        ),
+                      ),
+                    ),
+                  if (trailing != null) ...<Widget>[
+                    if (trailingNote != null) const SizedBox(width: 8),
+                    trailing!,
+                  ],
+                ],
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -219,6 +231,44 @@ class SemanticCalloutBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+
+    final Widget copyRow = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(top: 1.5),
+          child: Icon(icon, size: 15, color: accent),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: accent,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                message,
+                style: TextStyle(
+                  fontSize: 12,
+                  height: 1.32,
+                  color: palette.subtleText,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
     return DecoratedBox(
       decoration: BoxDecoration(
         color: palette.surface,
@@ -234,49 +284,45 @@ class SemanticCalloutBanner extends StatelessWidget {
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Padding(
-                      padding: const EdgeInsets.only(top: 1.5),
-                      child: Icon(icon, size: 15, color: accent),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text(
-                            title,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: accent,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            message,
-                            style: TextStyle(
-                              fontSize: 12,
-                              height: 1.32,
-                              color: palette.subtleText,
-                            ),
-                          ),
-                        ],
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                final bool inlineActions =
+                    actions.isNotEmpty &&
+                    constraints.maxWidth >= 600 &&
+                    textScale <= 1.3;
+                if (inlineActions) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: <Widget>[
+                      Expanded(child: copyRow),
+                      const SizedBox(width: 12),
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: constraints.maxWidth * 0.44,
+                        ),
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          alignment: WrapAlignment.end,
+                          children: actions,
+                        ),
                       ),
-                    ),
+                    ],
+                  );
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    copyRow,
+                    if (actions.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 8),
+                      Wrap(spacing: 6, runSpacing: 6, children: actions),
+                    ],
                   ],
-                ),
-                if (actions.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 8),
-                  Wrap(spacing: 6, runSpacing: 6, children: actions),
-                ],
-              ],
+                );
+              },
             ),
           ),
         ),
