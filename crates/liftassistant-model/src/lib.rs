@@ -272,6 +272,29 @@ impl fmt::Display for ObservationSourceId {
     }
 }
 
+/// Identifies one explicitly activated lifetime of an observation source.
+///
+/// Session values are opaque and comparable only for identity. They carry no ordering,
+/// freshness, or wall-clock meaning.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ObservationSessionId(String);
+
+impl ObservationSessionId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for ObservationSessionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ObservationSequence(u64);
 
@@ -288,6 +311,7 @@ impl ObservationSequence {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ObservationProvenance {
     pub source: ObservationSourceId,
+    pub session: ObservationSessionId,
     pub sequence: ObservationSequence,
 }
 

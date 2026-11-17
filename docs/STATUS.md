@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-11-16
+Updated: 2026-11-17
 
 ## Current milestone
 
@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4.9 Observation Semantics Hardening is implemented through M4.9d. Its HUMAN-CHECK was accepted by the explicit M4.10 authorization on 2026-11-16.
 
-M4.10 Source / Entity Binding & Observation Authority is in progress. M4.10a explicit logical-car/source binding is implemented; M4.10b explicit source sessions is READY. The live read-only external-input blocker remains unchanged, so M5 is not READY.
+M4.10 Source / Entity Binding & Observation Authority is in progress. M4.10a explicit logical-car/source binding and M4.10b explicit source sessions are implemented; M4.10c Operational/Auxiliary state ownership is READY. The live read-only external-input blocker remains unchanged, so M5 is not READY.
 
 ## Validated baseline
 
@@ -552,7 +552,7 @@ Validation: formatting, warning-free workspace clippy, all 71 workspace tests, a
 
 ## M4.10 — Source / Entity Binding & Observation Authority
 
-**IN PROGRESS — M4.10a implemented; M4.10b READY. M5 is not READY.**
+**IN PROGRESS — M4.10a–M4.10b implemented; M4.10c READY. M5 is not READY.**
 
 Observation authority in this milestone selects the configured observation stream that may become Engine operational truth. It does not grant command/write authority, change `IntentSink`, or establish failover.
 
@@ -572,9 +572,24 @@ Validation: three focused binding regressions, focused Open-RMF mapper tests, al
 
 ### M4.10b — Explicit source sessions
 
+**IMPLEMENTED.**
+
+- canonical observation provenance includes an opaque `ObservationSessionId` separate from source identity and message sequence; the token has identity semantics only and no numeric ordering, freshness, or wall-clock meaning;
+- Engine requires `begin_source_session(source, session)` before accepting bound observations and rejects updates when no session is active or when their session is not the active one;
+- explicitly switching a source session removes that source's assembled evidence and resolved states and resets its sequence expectation; the transition reports the previous session and invalidated logical cars deterministically;
+- an activated session becomes retired when replaced. Delayed updates from it are rejected, and a later lifecycle call cannot reactivate the retired token;
+- ordering is source-global and session-local: `car A seq=1`, `car B seq=2`, `car A seq=3` is valid within one source session, and a new explicitly activated session may restart at `seq=1`;
+- diagnostic sequence tracking uses `(source, session)`, so an explicit new session does not create a false non-increasing anomaly; observation and anomaly records now retain the session identity;
+- Simulator, recorded runtime, Open-RMF, BACnet, diagnostics, and headless fixtures start deterministic internal sessions explicitly. Open-RMF `LiftState.session_id` remains source context and is not reused as the LiftAssistant adapter/session lifetime token;
+- no sequence reset is interpreted as a restart, and no heartbeat, freshness, deadline, liveliness, quality, or automatic failover semantics were added.
+
+Validation: focused session-restart and source-global ordering regressions, all 76 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass. The restart regression proves `session A seq=100 -> explicit session B -> seq=1`, old evidence/state invalidation, delayed `session A seq=101` rejection, retired-session non-reactivation, and continued same-session non-increasing rejection.
+
+### M4.10c — Operational vs Auxiliary state ownership
+
 **READY.**
 
-Next: add an explicit opaque source-session lifecycle, make sequence ordering source-global within a session, invalidate source evidence/state on an explicit session switch, and reject delayed updates from retired sessions. Do not infer a restart from a reset sequence and do not add freshness or heartbeat semantics.
+Next: make `car_states()`, dispatch, and readiness-relevant state unique by logical `CarId` and sourced only from its configured Operational binding. Preserve per-source Auxiliary evidence/state for inspection without field fusion, failover, or dispatch influence.
 
 ## M4 exit / M5 promotion rule after audit
 

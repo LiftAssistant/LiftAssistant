@@ -37,6 +37,7 @@ impl App {
         let mut runtime = SimRuntime::reference_two_car();
         let mut engine = Engine::new(topology);
         let source = ObservationSourceId::new(runtime.source_name());
+        let source_session = runtime.source_session().clone();
         for (car, capabilities) in runtime.all_capabilities() {
             engine
                 .bind_observation(
@@ -47,6 +48,9 @@ impl App {
                 .expect("simulator cars have unique operational observation bindings");
             engine.set_capabilities(car, capabilities);
         }
+        engine
+            .begin_source_session(source, source_session)
+            .expect("simulator starts one configured observation session");
         for update in runtime.take_observation_updates() {
             engine.ingest_observation_update(update);
         }

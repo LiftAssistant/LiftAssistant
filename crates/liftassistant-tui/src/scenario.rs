@@ -9,8 +9,9 @@ use liftassistant_engine::{
 use liftassistant_model::{
     BuildingTopology, CallId, CallState, Capabilities, CarId, CarLocation, CarObservation,
     CarObservationUpdate, CarState, Direction, DoorEvidence, DoorState, Floor, HallCall,
-    MotionEvidence, MotionState, ObservationProvenance, ObservationSequence, ObservationSourceId,
-    OperatingMode, OperatingModeEvidence, Position, PositionEvidence, ReportedDestination,
+    MotionEvidence, MotionState, ObservationProvenance, ObservationSequence, ObservationSessionId,
+    ObservationSourceId, OperatingMode, OperatingModeEvidence, Position, PositionEvidence,
+    ReportedDestination,
 };
 use liftassistant_runtime::{
     CarStateResolution, RuntimeEvent, SimulationDriver, UnresolvedCarStateReason,
@@ -213,6 +214,12 @@ fn play_recording() -> Result<RecordedPlayback, String> {
             ObservationBindingRole::Operational,
         )
         .map_err(|error| format!("recorded observation binding failed: {error:?}"))?;
+    engine
+        .begin_source_session(
+            ObservationSourceId::new(&source_name),
+            runtime.source_session().clone(),
+        )
+        .map_err(|error| format!("recorded source session failed: {error:?}"))?;
     engine.set_capabilities(CarId::new("A"), capabilities.clone());
     for update in runtime.take_observation_updates() {
         engine.ingest_observation_update(update);
@@ -308,6 +315,9 @@ fn run_rmf_experiment() -> Result<RmfRecordedExperiment, String> {
             ObservationBindingRole::Operational,
         )
         .map_err(|error| format!("Open-RMF observation binding failed: {error:?}"))?;
+    engine
+        .begin_source_session(rmf_provenance(1).source, rmf_provenance(1).session)
+        .map_err(|error| format!("Open-RMF source session failed: {error:?}"))?;
     let incomplete_resolution = ingest_resolution(&mut engine, &incomplete.observation)?;
 
     let mut final_source = incomplete_source.clone();
@@ -370,6 +380,9 @@ fn run_bacnet_experiment() -> Result<BacnetRecordedExperiment, String> {
             ObservationBindingRole::Operational,
         )
         .map_err(|error| format!("BACnet observation binding failed: {error:?}"))?;
+    engine
+        .begin_source_session(bacnet_provenance(1).source, bacnet_provenance(1).session)
+        .map_err(|error| format!("BACnet source session failed: {error:?}"))?;
     let partial_resolution = ingest_resolution(&mut engine, &partial.observation)?;
 
     let mut final_source = partial_source.clone();
@@ -453,6 +466,9 @@ fn run_diagnostic_experiment() -> Result<DiagnosticExperiment, String> {
             ObservationBindingRole::Auxiliary,
         )
         .map_err(|error| format!("diagnostic observation binding failed: {error:?}"))?;
+    engine
+        .begin_source_session(rmf_provenance(1).source, rmf_provenance(1).session)
+        .map_err(|error| format!("diagnostic source session failed: {error:?}"))?;
     engine.ingest_observation_update((&first.observation).into());
     engine.ingest_observation_update((&duplicate.observation).into());
     engine.ingest_observation_update((&next.observation).into());
@@ -491,6 +507,7 @@ fn ingest_resolution(
 fn recorded_provenance(sequence: u64) -> ObservationProvenance {
     ObservationProvenance {
         source: ObservationSourceId::new("recorded-read-only"),
+        session: ObservationSessionId::new("recorded-session-1"),
         sequence: ObservationSequence::new(sequence),
     }
 }
@@ -498,6 +515,7 @@ fn recorded_provenance(sequence: u64) -> ObservationProvenance {
 fn rmf_provenance(sequence: u64) -> ObservationProvenance {
     ObservationProvenance {
         source: ObservationSourceId::new("fixture/open-rmf"),
+        session: ObservationSessionId::new("rmf-adapter-session-A"),
         sequence: ObservationSequence::new(sequence),
     }
 }
@@ -505,6 +523,7 @@ fn rmf_provenance(sequence: u64) -> ObservationProvenance {
 fn bacnet_provenance(sequence: u64) -> ObservationProvenance {
     ObservationProvenance {
         source: ObservationSourceId::new("fixture/bacnet-lift"),
+        session: ObservationSessionId::new("bacnet-adapter-session-A"),
         sequence: ObservationSequence::new(sequence),
     }
 }
@@ -896,6 +915,7 @@ fn verify_bacnet_experiment(experiment: &BacnetRecordedExperiment) -> Result<(),
 fn verify_diagnostic_experiment(experiment: &DiagnosticExperiment) -> Result<(), String> {
     let anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
         source: ObservationSourceId::new("fixture/open-rmf"),
+        session: ObservationSessionId::new("rmf-adapter-session-A"),
         previous: ObservationSequence::new(1),
         received: ObservationSequence::new(1),
     };

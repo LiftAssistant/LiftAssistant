@@ -8,8 +8,8 @@ use liftassistant_engine::{
 use liftassistant_model::{
     BuildingTopology, CarId, CarLocation, CarObservation, CarObservationUpdate, DoorEvidence,
     DoorState, Floor, MotionEvidence, MotionState, ObservationProvenance, ObservationSequence,
-    ObservationSourceId, OperatingMode, OperatingModeEvidence, Position, PositionEvidence,
-    ReportedDestination,
+    ObservationSessionId, ObservationSourceId, OperatingMode, OperatingModeEvidence, Position,
+    PositionEvidence, ReportedDestination,
 };
 use liftassistant_runtime::{CarStateResolution, UnresolvedCarStateReason};
 
@@ -261,11 +261,18 @@ fn reference_host() -> ReadOnlyHost {
             ObservationBindingRole::Operational,
         )
         .expect("headless fixture has one operational observation binding");
+    host.engine
+        .begin_source_session(reference_source_id(), reference_session_id())
+        .expect("headless fixture starts one source session");
     host
 }
 
 fn reference_source_id() -> ObservationSourceId {
     ObservationSourceId::new("fixture/headless-recorded")
+}
+
+fn reference_session_id() -> ObservationSessionId {
+    ObservationSessionId::new("headless-fixture-session-A")
 }
 
 fn reference_car_id() -> CarId {
@@ -294,6 +301,7 @@ fn observation(sequence: u64) -> CarObservation {
     CarObservation {
         provenance: ObservationProvenance {
             source: reference_source_id(),
+            session: reference_session_id(),
             sequence: ObservationSequence::new(sequence),
         },
         car: reference_car_id(),
@@ -308,6 +316,7 @@ fn observation(sequence: u64) -> CarObservation {
 fn expected_anomaly() -> DiagnosticAnomaly {
     DiagnosticAnomaly::ObservationSequenceNotIncreasing {
         source: ObservationSourceId::new("fixture/headless-recorded"),
+        session: reference_session_id(),
         previous: ObservationSequence::new(2),
         received: ObservationSequence::new(2),
     }

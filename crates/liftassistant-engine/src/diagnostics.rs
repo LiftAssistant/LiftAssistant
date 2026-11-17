@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 
-use liftassistant_model::{CarObservationUpdate, Intent, ObservationSequence, ObservationSourceId};
+use liftassistant_model::{
+    CarObservationUpdate, Intent, ObservationSequence, ObservationSessionId, ObservationSourceId,
+};
 use liftassistant_runtime::RuntimeEvent;
 
 use crate::EngineEvent;
@@ -23,6 +25,7 @@ impl DiagnosticSequence {
 pub enum DiagnosticAnomaly {
     ObservationSequenceNotIncreasing {
         source: ObservationSourceId,
+        session: ObservationSessionId,
         previous: ObservationSequence,
         received: ObservationSequence,
     },
@@ -175,7 +178,8 @@ impl FlightRecorder {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct SequenceDetector {
-    last_observation_sequence: BTreeMap<ObservationSourceId, ObservationSequence>,
+    last_observation_sequence:
+        BTreeMap<(ObservationSourceId, ObservationSessionId), ObservationSequence>,
     generated_intents: Vec<Intent>,
 }
 
@@ -184,18 +188,20 @@ impl SequenceDetector {
         match event {
             DiagnosticEvent::Observation(observation) => {
                 let source = &observation.provenance.source;
+                let session = &observation.provenance.session;
                 let received = observation.provenance.sequence;
-                match self.last_observation_sequence.get(source).copied() {
+                let key = (source.clone(), session.clone());
+                match self.last_observation_sequence.get(&key).copied() {
                     Some(previous) if received <= previous => {
                         vec![DiagnosticAnomaly::ObservationSequenceNotIncreasing {
                             source: source.clone(),
+                            session: session.clone(),
                             previous,
                             received,
                         }]
                     }
                     _ => {
-                        self.last_observation_sequence
-                            .insert(source.clone(), received);
+                        self.last_observation_sequence.insert(key, received);
                         Vec::new()
                     }
                 }

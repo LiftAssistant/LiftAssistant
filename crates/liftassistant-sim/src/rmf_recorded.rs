@@ -202,7 +202,9 @@ fn mapped_floor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use liftassistant_model::{CarLocation, ObservationSequence, ObservationSourceId};
+    use liftassistant_model::{
+        CarLocation, ObservationSequence, ObservationSessionId, ObservationSourceId,
+    };
     use liftassistant_runtime::{
         CarStateResolution, UnresolvedCarStateReason, resolve_car_observation,
     };
@@ -217,6 +219,7 @@ mod tests {
     fn provenance(sequence: u64) -> ObservationProvenance {
         ObservationProvenance {
             source: ObservationSourceId::new("fixture/open-rmf"),
+            session: ObservationSessionId::new("rmf-fixture-session-A"),
             sequence: ObservationSequence::new(sequence),
         }
     }

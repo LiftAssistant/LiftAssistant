@@ -8,8 +8,8 @@ use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_model::{
     Capabilities, CarId, CarLocation, CarObservationUpdate, CarState, Direction, DoorState, Floor,
-    Intent, MotionState, ObservationProvenance, ObservationSequence, ObservationSourceId,
-    OperatingMode, Position, ReportedDestination,
+    Intent, MotionState, ObservationProvenance, ObservationSequence, ObservationSessionId,
+    ObservationSourceId, OperatingMode, Position, ReportedDestination,
 };
 use liftassistant_runtime::{IntentSink, RuntimeError, RuntimeEvent, SimulationDriver};
 
@@ -35,6 +35,7 @@ pub struct SimRuntime {
     cars: BTreeMap<CarId, SimCar>,
     speed_floors_per_second: f64,
     source: ObservationSourceId,
+    source_session: ObservationSessionId,
     next_sequence: u64,
     pending_observations: Vec<CarObservationUpdate>,
     pending_events: Vec<RuntimeEvent>,
@@ -64,6 +65,7 @@ impl SimRuntime {
             cars,
             speed_floors_per_second,
             source: ObservationSourceId::new("simulator"),
+            source_session: ObservationSessionId::new("simulator-session-1"),
             next_sequence: 1,
             pending_observations: Vec::new(),
             pending_events: Vec::new(),
@@ -107,6 +109,10 @@ impl SimRuntime {
 
     pub fn source_name(&self) -> &str {
         self.source.as_str()
+    }
+
+    pub fn source_session(&self) -> &ObservationSessionId {
+        &self.source_session
     }
 
     pub fn car_states(&self) -> Vec<CarState> {
@@ -192,6 +198,7 @@ impl SimRuntime {
     fn queue_observation(&mut self, state: CarState) {
         let provenance = ObservationProvenance {
             source: self.source.clone(),
+            session: self.source_session.clone(),
             sequence: ObservationSequence::new(self.next_sequence),
         };
         self.next_sequence = self
@@ -224,6 +231,7 @@ impl SimulationDriver for SimRuntime {
         );
         let step = self.speed_floors_per_second * elapsed.as_secs_f64();
         let source = self.source.clone();
+        let source_session = self.source_session.clone();
         let mut next_sequence = self.next_sequence;
 
         for sim_car in self.cars.values_mut() {
@@ -249,6 +257,7 @@ impl SimulationDriver for SimRuntime {
 
                 events.push(RuntimeEvent::Observation(observation_from_state(
                     &source,
+                    &source_session,
                     &mut next_sequence,
                     &sim_car.state,
                 )));
@@ -278,6 +287,7 @@ impl SimulationDriver for SimRuntime {
 
             events.push(RuntimeEvent::Observation(observation_from_state(
                 &source,
+                &source_session,
                 &mut next_sequence,
                 &sim_car.state,
             )));
@@ -290,11 +300,13 @@ impl SimulationDriver for SimRuntime {
 
 fn observation_from_state(
     source: &ObservationSourceId,
+    session: &ObservationSessionId,
     next_sequence: &mut u64,
     state: &CarState,
 ) -> CarObservationUpdate {
     let provenance = ObservationProvenance {
         source: source.clone(),
+        session: session.clone(),
         sequence: ObservationSequence::new(*next_sequence),
     };
     *next_sequence = next_sequence

@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, collections::VecDeque, time::Duration};
 
 use liftassistant_model::{
     Capabilities, CarId, CarObservationUpdate, CarState, Intent, ObservationProvenance,
-    ObservationSequence, ObservationSourceId,
+    ObservationSequence, ObservationSessionId, ObservationSourceId,
 };
 use liftassistant_runtime::{
     CarStateResolution, ObservationAssembler, RuntimeError, RuntimeEvent, SimulationDriver,
@@ -30,6 +30,7 @@ pub struct RecordedRuntime {
     states: BTreeMap<CarId, CarState>,
     capabilities: BTreeMap<CarId, Capabilities>,
     assembler: ObservationAssembler,
+    source_session: ObservationSessionId,
     initial_observations: Vec<CarObservationUpdate>,
     frames: VecDeque<RecordedFrame>,
     until_next_frame: Option<Duration>,
@@ -51,6 +52,7 @@ impl RecordedRuntime {
 
         let mut assembler = ObservationAssembler::new();
         let source = ObservationSourceId::new("recorded-read-only");
+        let source_session = ObservationSessionId::new("recorded-session-1");
         let mut next_sequence = 1_u64;
         let initial_observations = states
             .values()
@@ -58,6 +60,7 @@ impl RecordedRuntime {
                 let update = CarObservationUpdate::from_state(
                     ObservationProvenance {
                         source: source.clone(),
+                        session: source_session.clone(),
                         sequence: ObservationSequence::new(next_sequence),
                     },
                     state,
@@ -86,6 +89,12 @@ impl RecordedRuntime {
                         return Err(RuntimeError::new(format!(
                             "recorded observation source {} does not match feed source {source}",
                             update.provenance.source
+                        )));
+                    }
+                    if update.provenance.session != source_session {
+                        return Err(RuntimeError::new(format!(
+                            "recorded observation session {} does not match feed session {source_session}",
+                            update.provenance.session
                         )));
                     }
                     validation_assembler
@@ -119,6 +128,7 @@ impl RecordedRuntime {
             states,
             capabilities,
             assembler,
+            source_session,
             initial_observations,
             frames,
             until_next_frame,
@@ -131,6 +141,10 @@ impl RecordedRuntime {
 
     pub fn source_name(&self) -> &str {
         "recorded-read-only"
+    }
+
+    pub fn source_session(&self) -> &ObservationSessionId {
+        &self.source_session
     }
 
     pub fn car_states(&self) -> Vec<CarState> {
@@ -231,6 +245,7 @@ mod tests {
         RuntimeEvent::Observation(CarObservationUpdate::from_state(
             ObservationProvenance {
                 source: ObservationSourceId::new("recorded-read-only"),
+                session: ObservationSessionId::new("recorded-session-1"),
                 sequence: ObservationSequence::new(sequence),
             },
             state,

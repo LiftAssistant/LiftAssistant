@@ -4,8 +4,9 @@ use std::{collections::BTreeMap, error::Error, fmt, time::Duration};
 
 use liftassistant_model::{
     CarId, CarLocation, CarObservation, CarObservationUpdate, CarState, DoorEvidence, DoorState,
-    Floor, Intent, MotionEvidence, ObservationProvenance, ObservationSequence, ObservationSourceId,
-    OperatingModeEvidence, PositionEvidence, ReportedDestination,
+    Floor, Intent, MotionEvidence, ObservationProvenance, ObservationSequence,
+    ObservationSessionId, ObservationSourceId, OperatingModeEvidence, PositionEvidence,
+    ReportedDestination,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -92,6 +93,7 @@ impl AssembledCarObservation {
 pub enum ObservationAssemblyError {
     NonIncreasingSequence {
         source: ObservationSourceId,
+        session: ObservationSessionId,
         previous: ObservationSequence,
         received: ObservationSequence,
     },
@@ -103,8 +105,9 @@ pub enum ObservationAssemblyError {
 /// carries no wall-clock freshness meaning.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ObservationAssembler {
-    observations: BTreeMap<(ObservationSourceId, CarId), AssembledCarObservation>,
-    last_sequence: BTreeMap<ObservationSourceId, ObservationSequence>,
+    observations:
+        BTreeMap<(ObservationSourceId, ObservationSessionId, CarId), AssembledCarObservation>,
+    last_sequence: BTreeMap<(ObservationSourceId, ObservationSessionId), ObservationSequence>,
 }
 
 impl ObservationAssembler {
@@ -125,17 +128,23 @@ impl ObservationAssembler {
             mode,
             reported_destination,
         } = update;
-        if let Some(previous) = self.last_sequence.get(&provenance.source)
+        let stream = (provenance.source.clone(), provenance.session.clone());
+        if let Some(previous) = self.last_sequence.get(&stream)
             && provenance.sequence <= *previous
         {
             return Err(ObservationAssemblyError::NonIncreasingSequence {
                 source: provenance.source,
+                session: provenance.session,
                 previous: *previous,
                 received: provenance.sequence,
             });
         }
 
-        let key = (provenance.source.clone(), car.clone());
+        let key = (
+            provenance.source.clone(),
+            provenance.session.clone(),
+            car.clone(),
+        );
         let current = self
             .observations
             .entry(key)
@@ -158,17 +167,25 @@ impl ObservationAssembler {
             reported_destination,
             &provenance,
         );
-        self.last_sequence
-            .insert(provenance.source, provenance.sequence);
+        self.last_sequence.insert(stream, provenance.sequence);
         Ok(current.clone())
     }
 
     pub fn current(
         &self,
         source: &ObservationSourceId,
+        session: &ObservationSessionId,
         car: &CarId,
     ) -> Option<&AssembledCarObservation> {
-        self.observations.get(&(source.clone(), car.clone()))
+        self.observations
+            .get(&(source.clone(), session.clone(), car.clone()))
+    }
+
+    pub fn remove_source(&mut self, source: &ObservationSourceId) {
+        self.observations
+            .retain(|(candidate, _, _), _| candidate != source);
+        self.last_sequence
+            .retain(|(candidate, _), _| candidate != source);
     }
 }
 
@@ -262,14 +279,19 @@ pub trait SimulationDriver {
 mod tests {
     use super::*;
     use liftassistant_model::{
-        Direction, MotionState, ObservationProvenance, ObservationSequence, ObservationSourceId,
-        OperatingMode, Position, ReportedDestination,
+        Direction, MotionState, ObservationProvenance, ObservationSequence, ObservationSessionId,
+        ObservationSourceId, OperatingMode, Position, ReportedDestination,
     };
+
+    fn session() -> ObservationSessionId {
+        ObservationSessionId::new("fixture-session-A")
+    }
 
     fn observation() -> CarObservation {
         CarObservation {
             provenance: ObservationProvenance {
                 source: ObservationSourceId::new("fixture/open-rmf"),
+                session: session(),
                 sequence: ObservationSequence::new(1),
             },
             car: CarId::new("lift-A"),
@@ -359,6 +381,7 @@ mod tests {
         CarObservationUpdate {
             provenance: ObservationProvenance {
                 source: ObservationSourceId::new("fixture/incremental"),
+                session: session(),
                 sequence: ObservationSequence::new(sequence),
             },
             car: CarId::new("lift-A"),
@@ -388,6 +411,7 @@ mod tests {
                 value: PositionEvidence::FloorReference(Floor::new(3)),
                 provenance: ObservationProvenance {
                     source: ObservationSourceId::new("fixture/incremental"),
+                    session: session(),
                     sequence: ObservationSequence::new(1),
                 },
             })
@@ -403,6 +427,7 @@ mod tests {
                 value: PositionEvidence::Unknown,
                 provenance: ObservationProvenance {
                     source: ObservationSourceId::new("fixture/incremental"),
+                    session: session(),
                     sequence: ObservationSequence::new(3),
                 },
             })
@@ -447,6 +472,7 @@ mod tests {
             assembler.apply(duplicate),
             Err(ObservationAssemblyError::NonIncreasingSequence {
                 source: ObservationSourceId::new("fixture/incremental"),
+                session: session(),
                 previous: ObservationSequence::new(2),
                 received: ObservationSequence::new(2),
             })
@@ -455,6 +481,7 @@ mod tests {
             assembler
                 .current(
                     &ObservationSourceId::new("fixture/incremental"),
+                    &session(),
                     &CarId::new("lift-A"),
                 )
                 .and_then(|current| current.position.as_ref())
@@ -480,12 +507,14 @@ mod tests {
         let first = assembler
             .current(
                 &ObservationSourceId::new("fixture/incremental"),
+                &session(),
                 &CarId::new("lift-A"),
             )
             .expect("first source remains available");
         let second = assembler
             .current(
                 &ObservationSourceId::new("fixture/other"),
+                &session(),
                 &CarId::new("lift-A"),
             )
             .expect("second source remains available");
