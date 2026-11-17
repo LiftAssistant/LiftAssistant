@@ -69,7 +69,7 @@ Do not turn M3 into a certification claim.
 
 Generic multi-backend conformance machinery is deferred until a second backend exists. Protocol mappings are deferred until a concrete bridge supplies evidence.
 
-## M4 — Production boundary and real-world bridges — current
+## M4 — Production boundary and real-world bridges — complete
 
 Goal: make the prototype architecture honest about incomplete real-world observations, separable runtime responsibilities, shared orchestration, diagnostics, and headless operation before introducing real control.
 
@@ -81,11 +81,11 @@ Ordered direction:
 4. prove a minimal diagnostics/flight-recorder/replay substrate — implemented;
 5. prove a headless read-only host/lifecycle — implemented;
 6. validate the observation model with at least one additional independent source/protocol family — implemented with recorded BACnet evidence;
-7. harden observation semantics for reported-vs-desired state, location precision, incremental updates, and Engine-owned operational state — current;
-8. obtain live read-only evidence or a supplied sanitized real capture/test endpoint;
-9. expand recorded/virtual/live-read-only adapters only when they add new semantic or deployment evidence;
-10. controlled non-passenger HIL/bench observation work;
-11. only later consider any high-level write path under explicit HUMAN-REVIEW.
+7. harden observation semantics for reported-vs-desired state, location precision, incremental updates, and Engine-owned operational state — implemented;
+8. obtain live read-only evidence or a supplied sanitized real capture/test endpoint — acquired with the official Open-RMF Hotel simulation;
+9. expand recorded/virtual/live-read-only adapters only when they add new semantic or deployment evidence — deferred into M5;
+10. controlled non-passenger HIL/bench observation work — deferred beyond the M5 read-only scope;
+11. only later consider any high-level write path under explicit HUMAN-REVIEW — deferred to M6 or later.
 
 Candidate bridge work after the boundary is sound:
 
@@ -97,32 +97,32 @@ Candidate bridge work after the boundary is sound:
 - documented controller APIs;
 - sanitized recorded controller/protocol fixtures.
 
-Exit evidence for M4 includes more than one external observation source and a headless read-only path, but the 2026-11-16 semantic audit found additional internal hardening required before M5: reported destination must remain distinct from desired intent, floor references must not be promoted to fabricated continuous position, incremental updates must distinguish omission from explicit unknown, and Engine must own the resolved operational state used for decisions. Live read-only evidence is still externally blocked.
+M4 exit evidence includes two independent recorded source families, a headless read-only path, hardened observation semantics, explicit observation authority/session ownership, and official Open-RMF live read-only lifecycle evidence. M4.10 human review was accepted and the live idle destination evidence corrected the remaining overly broad dispatch Busy heuristic.
 
 Any passenger-elevator control, safety-authority change, normative public-schema freeze, or first real write path requires HUMAN-REVIEW.
 
-## M5 — Production Read-only Platform — gated by M4 semantic hardening + live evidence
+## M5 — Production Read-only Platform — current
 
 Goal: make LiftAssistant genuinely useful on real sites without requiring control authority.
 
-Entry is not automatic. M4.9 semantic hardening must be complete, and the first M5 implementation slice must have concrete live/read-only environment or sanitized real-capture evidence. Roadmap candidates alone do not make M5 READY.
+M4 semantic hardening and official live evidence satisfy the entry gate. The ordered M5 direction is:
 
-Candidate scope, only as demonstrated by M4:
+1. **M5.1 — Live Open-RMF Observation Adapter**;
+2. **M5.2 — Source Lifecycle / Freshness / Health**;
+3. **M5.3 — Production Read-only Host**;
+4. **M5.4 — Production Diagnostics**;
+5. **M5.5 — Incident Capsule / Replay**;
+6. **M5.6 — Sanitization / Community Fixtures**;
+7. **M5.7 — Adapter Validation Profiles**;
+8. **M5.8 — Second Production Source Family**;
+9. **M5.9 — Experimental Read-only API**;
+10. **M5.10 — TUI/CLI Client Separation**;
+11. **M5.11 — LiftAssistant Client / WebUI** — conditional;
+12. **M5.12 — HA/BMS observation integration** — conditional;
+13. **M5.13 — Failure / Soak Matrix**;
+14. **M5.14 — M5 Completion Audit**.
 
-- live read-only adapters for multiple source families;
-- production-style Engine host and supervision;
-- TUI as a client rather than the composition root;
-- read-only API for operational state/health/diagnostics;
-- WebUI where it materially improves field use;
-- diagnostics timeline and subsystem health aggregation;
-- bounded flight recorder and replayable incident capsules;
-- deterministic anomaly/invariant/sequence detection;
-- optional trend/baseline diagnostics after deterministic detectors work;
-- shadow Engine that mirrors live observations with no write authority;
-- sanitized shareable diagnostic bundles;
-- adapter validation profiles;
-- recorded fixture corpus for community adapter development;
-- Home Assistant/BMS observation integration where useful.
+This ordering is a future plan, not blanket implementation authorization. `docs/STATUS.md` promotes only the highest-priority evidence-backed slice to READY. M5.9 and later require separate authorization; WebUI, Flutter, and HA/BMS implementation are not part of the current backend run.
 
 M5 is allowed to become deployable read-only software, but must not claim passenger-elevator control capability or certification.
 

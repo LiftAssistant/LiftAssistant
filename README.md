@@ -6,7 +6,7 @@ The long-term goal is to make elevator controllers, protocols, capabilities, pol
 
 LiftAssistant is an early semantic-core and simulation project. **It is not approved for controlling passenger elevators or any safety-critical equipment.**
 
-## Current target: M4 — Real-world bridges (recorded/read-only first)
+## Current target: M5 — Production read-only platform
 
 M1 Interactive Simulator is implemented and human-accepted.
 
@@ -36,7 +36,7 @@ developer TUI
 
 M2 evolved this from one-shot dispatch into persistent call semantics: call identity/lifecycle, multiple pending calls, runtime-feedback-driven completion, explainable decisions, and explicit served-floor topology. That semantic vertical path is implemented and machine-reviewed.
 
-M3 turned the deterministic simulator and replay path into a small research laboratory with executable scenarios, trace inspection, expected-outcome checks, and one-shot integration-failure injection. M4 starts with native-semantic recorded/read-only inputs before any protocol or hardware writes. Canonical observation updates now enter Engine through one boundary, and Engine owns the assembled evidence and resolved operational state used by dispatch and read-side clients. None of this implies certification or conformance claims.
+M3 turned the deterministic simulator and replay path into a small research laboratory with executable scenarios, trace inspection, expected-outcome checks, and one-shot integration-failure injection. M4 established native-semantic recorded/read-only inputs, canonical incremental observations, explicit source bindings and sessions, observation authority isolation, Engine-owned operational state, diagnostics/replay, and a headless read-only lifecycle proof. External live evidence from the official Open-RMF Hotel simulation has now closed M4 and permits a bounded M5 live read-only adapter proof. No live adapter is implemented yet, and none of this implies passenger-elevator control, certification, or conformance claims.
 
 The TUI is a composition/debugging client, not the architecture.
 

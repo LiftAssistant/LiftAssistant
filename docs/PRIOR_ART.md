@@ -162,6 +162,16 @@ LiftAssistant therefore requires an explicit string-label-to-`Floor` configurati
 
 Official message source: https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg
 
+## M4 live Open-RMF destination/busy finding
+
+The official `LiftState` message reports `current_floor`, `destination_floor`, and motion independently, while the separate `LiftRequest` message uses `destination_floor` as a requested floor. Neither message defines the mere presence of a reported destination as proof that a lift is currently occupied or moving. Official Hotel simulation evidence additionally showed unchanged idle snapshots with current floor and destination both equal to `L1`, stopped motion, and a closed door.
+
+LiftAssistant therefore keeps reported destination separate from Engine call ownership and uses the smallest conservative dispatch rule supported by both sources: motion, Engine Assigned/Serving state, unknown destination, or a known different destination are Busy evidence; a stopped car reporting its current floor is not Busy from that field alone. This remains internal and reversible rather than a generalized activity model.
+
+Official sources:
+- https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg
+- https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftRequest.msg
+
 ## M4 recorded BACnet Lift-object mapping finding
 
 The official ASHRAE Addendum 135-2012aq defines a Lift object whose externally

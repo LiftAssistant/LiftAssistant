@@ -4,13 +4,13 @@ Updated: 2026-11-17
 
 ## Current milestone
 
-**M4 — Real-world bridges (recorded/read-only first)**
+**M5 — Production Read-only Platform**
 
 M1 Interactive Simulator is closed and human-accepted.
 
-M4.9 Observation Semantics Hardening is implemented through M4.9d. Its HUMAN-CHECK was accepted by the explicit M4.10 authorization on 2026-11-16.
+M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M4.10 Source / Entity Binding & Observation Authority is implemented through M4.10d and awaits HUMAN-CHECK. The live read-only external-input blocker remains unchanged, so M5 is not READY.
+Official Open-RMF Hotel live read-only evidence now satisfies the M5 entry gate. **M5.1a — Rust-native ROS 2 transport compatibility proof is READY.** No later M5 slice is READY merely because it appears in the roadmap.
 
 ## Validated baseline
 
@@ -433,18 +433,16 @@ Validation: formatting, all-target linting, 59 workspace tests, all six TUI scen
 
 ### Live read-only environment proof
 
-**BLOCKED BY EXTERNAL INPUT — not READY for implementation.**
+**ACQUIRED — official Open-RMF Hotel simulation, 2026-11-17.**
 
-Read-only host inspection on 2026-11-16 found:
+- the official ROS 2 Kilted demo published `rmf_lift_msgs/msg/LiftState` on `/lift_states` for `Lift1` and `Lift2` through one source/publisher;
+- unchanged complete snapshots arrived periodically at about 1 Hz per lift and interleaved at about 2 Hz overall;
+- late subscription and observer restart recovered complete snapshots, and explicit source restart recovered both lifts;
+- transport discovery alone did not prove payload delivery, and source process death did not immediately remove the DDS graph endpoint;
+- `lift_time` reset with the simulation/source lifetime while RMF `session_id` remained empty, so neither becomes LiftAssistant `ObservationSessionId`;
+- the test remained simulation-only and read-only: no LiftAssistant write path, request publication, real elevator, host ROS installation, or privileged interface was introduced.
 
-- no `ros2` executable or `/opt/ros` installation and no running ROS/Open-RMF process;
-- no BACnet read tools (`bacwi`/`bacrp`), no process exposing a known local BACnet source, and no listener on BACnet UDP port 47808;
-- no `candump`/`cansend`, no CAN or vcan network interface, and no running SocketCAN capture;
-- no external packet/bag/pcap/controller fixture in the repository; the only relevant inputs are the typed in-memory Open-RMF and BACnet recordings implemented above.
-
-No network scan, package installation, privileged interface creation, controller connection, or message send was attempted. A live proof needs an explicitly supplied read-only test endpoint/environment, sanitized real capture/fixture, or an already-available virtual interface. Until one exists, claiming a live adapter would require invented data or unauthorized environment mutation.
-
-M4 now has the roadmap's minimum exit evidence of two independent recorded external-source mappings plus a headless read-only path, but live transport, production freshness/health, supervision, and deployment evidence remain absent. No M5 slice is promoted to READY merely from the roadmap; the next implementation must be justified by concrete environment/caller pressure and recorded here first.
+This evidence removes the previous external-input gate for a bounded Open-RMF live adapter proof. It does not establish a production freshness timeout, deployment profile, write authority, or second live production source.
 
 ## Preserved production ideas
 
@@ -493,7 +491,7 @@ M4.9d replaces that split path with canonical update ingestion, Engine-owned ass
 
 ## M4.9 — Observation semantics hardening
 
-**IMPLEMENTED — M4.9a–M4.9d complete; HUMAN-CHECK accepted by the explicit M4.10 authorization on 2026-11-16. M5 is not READY.**
+**IMPLEMENTED — M4.9a–M4.9d complete; HUMAN-CHECK accepted by the explicit M4.10 authorization on 2026-11-16.**
 
 Work through these sub-slices in order. Keep all changes internal/reversible and run the prior-art gate before changing the model.
 
@@ -552,7 +550,7 @@ Validation: formatting, warning-free workspace clippy, all 71 workspace tests, a
 
 ## M4.10 — Source / Entity Binding & Observation Authority
 
-**IMPLEMENTED — M4.10a–M4.10d complete; awaiting HUMAN-CHECK. M5 is not READY.**
+**IMPLEMENTED — M4.10a–M4.10d complete; HUMAN-CHECK accepted on 2026-11-17.**
 
 Observation authority in this milestone selects the configured observation stream that may become Engine operational truth. It does not grant command/write authority, change `IntentSink`, or establish failover.
 
@@ -616,7 +614,7 @@ Validation: the dispatch capability regressions, per-intent Simulator capability
 
 ## M4.10 completion review
 
-**AUTO review complete; HUMAN-CHECK required.**
+**PASS — HUMAN-CHECK accepted on 2026-11-17.**
 
 - `CarId` remains LiftAssistant logical car identity; source-native identities remain adapter context and require explicit mapping;
 - every accepted observation requires explicit source/car binding and an explicitly active opaque source session;
@@ -628,15 +626,41 @@ Validation: the dispatch capability regressions, per-intent Simulator capability
 
 Final validation at this checkpoint: formatting, warning-free workspace clippy, all 81 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass after the durable architecture/memory documentation update.
 
-## M4 exit / M5 promotion rule after audit
+Accepted slice results:
 
-M4.3–M4.10 remain valid internal prototype evidence. M5 is **not READY** yet.
+- M4.10a explicit logical-car/source binding: PASS;
+- M4.10b explicit source sessions: PASS;
+- M4.10c Operational/Auxiliary authority isolation: PASS;
+- M4.10d execution-capability ownership: PASS.
 
-Before promoting a production read-only M5 slice, require:
+## M4 closeout and M5 entry
 
-1. M4.9 observation semantic hardening complete;
-2. M4.10 explicit binding, session, observation-authority isolation, and capability ownership complete;
-3. Open-RMF and BACnet mappings still pass through the same corrected observation/Engine path;
-4. live read-only evidence or an explicitly supplied sanitized real capture/test endpoint exists for the next live slice.
+**M4 COMPLETE; M5 READY.**
 
-M4.9 and M4.10 satisfy items 1–3. Item 4 remains blocked by the existing live environment: no ROS/Open-RMF runtime, BACnet read/listener path, CAN/vcan interface, or external fixture is available. No network scan, package installation, privileged interface creation, real-controller connection, or invented packet/capture is authorized. M4.10 has no remaining machine-actionable implementation work; HUMAN-CHECK and explicitly supplied live read-only evidence remain external gates. Do not invent a live source or install privileged system components merely to advance the milestone.
+All M4 exit gates are now satisfied:
+
+1. M4.9 observation semantic hardening is complete;
+2. M4.10 binding, session, authority isolation, and capability ownership are complete and human-accepted;
+3. recorded Open-RMF and BACnet mappings still pass through the corrected canonical Engine path;
+4. official Open-RMF live read-only evidence exists for the next bounded live slice;
+5. live idle evidence corrected Core's overly broad destination-based Busy policy.
+
+The Busy policy now treats a stopped car reporting its current floor as destination as idle unless Engine owns an Assigned/Serving call. A different known destination, motion, an unknown destination, or Engine call occupancy remains conservatively busy. The official `LiftState`/`LiftRequest` separation and live Hotel idle snapshots support this narrow correction without introducing an activity/occupancy framework.
+
+Closeout validation: formatting, warning-free all-target workspace clippy, all 84 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass. The recorded Open-RMF and BACnet mappings, M4.10 regressions, and live-evidence Busy regressions are included in that gate.
+
+## M5 execution queue
+
+### M5.1a — Rust-native ROS 2 transport compatibility proof
+
+**READY.**
+
+Bound the proof before adding an adapter ownership layer:
+
+- preserve workspace Rust 1.85 MSRV;
+- check a compatible `ros2-client`/RustDDS version and its transitive MSRV;
+- subscribe read-only to the official Kilted `/lift_states` source through rootless Podman;
+- validate real `rmf_lift_msgs/msg/LiftState` decoding and QoS interoperability;
+- add no system ROS installation, write publisher, generic adapter framework, sidecar protocol, or project-wide MSRV bump.
+
+If the proof requires a project-wide MSRV increase, experimental unvalidated message-generation hack, foundational IPC sidecar, or host ROS installation, stop the dependent slice at HUMAN-CHECK.

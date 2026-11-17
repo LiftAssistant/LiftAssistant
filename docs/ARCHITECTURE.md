@@ -40,6 +40,8 @@ M4 read-only experiments demonstrate that operational `CarState` is intentionall
 
 Observation authority and execution capability are independent. Core consumes `ExecutionCapabilities` for high-level `ServeFloor`/`ParkAt` decisions. Source-side observation coverage stays with the adapter when demonstrated, and neither Operational nor Auxiliary observation binding grants an `IntentSink` or write authority.
 
+Official Open-RMF Hotel live evidence confirms that one source/publisher may carry periodic complete snapshots for several source-native lift identities, including unchanged idle state. A live adapter must still map those identities explicitly to logical `CarId` values and create its own explicitly controlled `ObservationSessionId` for each ingestion lifetime. Transport discovery and DDS graph presence are diagnostic evidence, not proof that payloads are flowing and not the sole authority for session lifecycle. Source timestamps and Open-RMF control `session_id` remain payload context; neither is promoted to LiftAssistant source generation.
+
 Core must not own networking, field buses, wall-clock time, persistence, terminal/UI frameworks, or vendor SDKs.
 
 ## Core/runtime boundary
@@ -129,6 +131,8 @@ Multiple calls coexist without a complex group-control algorithm. Pending calls 
 Runtime intent acceptance advances Assigned to Serving. Arrival evidence followed by an open door completes the matching call and immediately reevaluates pending work. Arrival evidence is Core-owned so feedback may span runtime event batches. The developer UI observes this state; it does not own the lifecycle.
 
 Dispatch returns a structured deterministic decision. It evaluates every car's mode, semantic/runtime occupancy, serve-floor capability, and distance, records rejection reasons, and identifies whether selection used sole eligibility, nearest distance, or the car-ID tie-break. These are orchestration explanations, not equipment fault/alarm semantics and not a policy language.
+
+Current conservative Busy evidence treats Engine-owned Assigned/Serving calls, motion, an unknown reported destination, or a known destination different from the car's current floor reference as occupied. A stopped car reporting its current floor as destination is not busy from that field alone; official Open-RMF Hotel idle snapshots demonstrate that such a destination can persist while the lift is stationary. This remains a small dispatch policy, not a generalized activity, occupancy, confidence, or service-phase model.
 
 `BuildingTopology` is the current minimal configuration input: a canonical ordered set of served floors. Core derives hall-call membership and terminal-direction validity from it, and replay receives the same topology explicitly. It is not a universal building model; floor names, door/service mappings, spatial relationships, and protocol indexes remain outside the model until demonstrated by adapters or integrations.
 

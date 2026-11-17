@@ -105,6 +105,10 @@ Engine also owns a bounded in-memory diagnostic flight recorder over canonical o
 
 The internal `liftassistant-headless` binary is the first non-TUI composition. It depends on Engine/model/runtime but not the TUI, simulator, transport, or an `IntentSink` implementation. A recorded canonical-observation feed drives reversible internal `Starting`, `Synchronizing`, `ReadyReadOnly`, and `Degraded` states with separate `NotReady`/`ReadOnly` readiness. Insufficient Operational evidence cannot become ready, and an Operational session reset or sequence anomaly revokes readiness without turning the anomaly into a root-cause or equipment-fault claim. Auxiliary observations and anomalies remain visible but do not revoke healthy Operational readiness. These names and interfaces are not a stable public API or production-host claim.
 
+Official Open-RMF Hotel live evidence closed the M4 external-input gate. One `/lift_states` publisher carried periodic complete snapshots for two lifts at about one update per lift per second; late subscribers and observer/source restarts recovered complete state. The test also established that DDS discovery does not prove payload delivery and that process death does not immediately remove graph evidence. LiftAssistant source sessions therefore remain explicitly controlled by adapter lifecycle; DDS graph state is diagnostic evidence, and RMF `lift_time` or control `session_id` must not become `ObservationSessionId`.
+
+The same live idle snapshots repeatedly reported `current_floor == destination_floor` while motion was stopped. Core therefore does not treat a known reported destination equal to the current floor reference as Busy by itself. Motion, an unknown or different reported destination, and Engine-owned Assigned/Serving calls remain conservative Busy evidence. This is a bounded dispatch rule, not a new activity or occupancy domain model.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.
