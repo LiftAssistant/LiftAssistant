@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.8 and M5.9a are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING` but no longer blocks client-platform work. **M5.9b — Experimental HTTP Snapshot is READY.** The current authorization ends after M5.10 and does not include Flutter, WebUI, HA/BMS, or M6.
+M5.1 through M5.8 and M5.9a–b are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING` but no longer blocks client-platform work. **M5.9c — SSE Current-state Stream is READY.** The current authorization ends after M5.10 and does not include Flutter, WebUI, HA/BMS, or M6.
 
 ## Validated baseline
 
@@ -848,8 +848,23 @@ Validation: focused projection tests, warning-free headless all-target clippy, `
 
 ### M5.9b — Experimental HTTP Snapshot
 
+**IMPLEMENTED.**
+
+Implemented behavior and evidence:
+
+- axum 0.8 and Tokio 1 are dependencies only of `liftassistant-headless`; the workspace Rust 1.85 resolver selected compatible axum 0.8.9/Tokio 1.54.1 without changing MSRV or rewriting the synchronous RMF host;
+- `GET /api/experimental/v0/snapshot` returns one complete `ExperimentalReadModel` as JSON with `Cache-Control: no-store`; no canonical/internal structure is serialized directly;
+- the router defines only a GET route. POST is rejected with HTTP 405, unknown paths remain absent, and the response contains no wildcard or implicit CORS header;
+- the server is disabled unless the explicit developer fixture command is invoked. It accepts an explicit socket address, uses no implicit `0.0.0.0`, has no authentication/TLS/RBAC fiction, and exits cooperatively on SIGINT/SIGTERM;
+- a real child server process listened on `127.0.0.1`, an independent `curl` process fetched and parsed the response, verified version/readiness/revision/car state and `no-store`, observed POST 405 and no CORS, then terminated the server cleanly;
+- a real-loopback focused regression also exercises the listener and route without handler mocking. Client or HTTP failure cannot mutate Engine truth because the boundary owns only an immutable projected snapshot.
+
+Validation: real-listener focused test, process-level server plus independent `curl` JSON proof, `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 114 workspace tests, explicit read-only route and dependency/MSRV isolation checks, and diff/whitespace review pass.
+
+### M5.9c — SSE Current-state Stream
+
 **READY.**
 
-Serve `GET /api/experimental/v0/snapshot` from a real process with `Cache-Control: no-store`, returning the current complete `ExperimentalReadModel`. The HTTP boundary belongs only to headless/service composition, remains disabled by default, and must be validated by an independent HTTP request to a real listening server.
+Add `GET /api/experimental/v0/events` with `text/event-stream`. Send the current complete snapshot promptly on connection and then coalesced latest complete snapshots whenever read-model revision changes. Reconnection receives a fresh complete snapshot; no durable cursor/backlog/exactly-once contract is required.
 
-Expose no semantic mutation route, wildcard CORS, implicit `0.0.0.0` listener, authentication/TLS fiction, stable API claim, or HTTP dependency in model/Core/Engine/runtime/RMF. M5.9c is not READY until the snapshot path and API isolation pass process-level validation.
+Use a bounded latest-value mechanism rather than an unbounded per-client queue. SSE keepalive, connection state, or client failure must not affect source freshness, Engine readiness, forensic diagnostics, or Incident Capsule ownership. M5.9d is not READY until real streaming, change push without polling, slow-client coalescing, and reconnect behavior pass.

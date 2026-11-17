@@ -1,11 +1,13 @@
 #![forbid(unsafe_code)]
 
+mod http_api;
 mod incident;
 mod read_api;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     env, io,
+    net::{SocketAddr, TcpListener},
     path::PathBuf,
     process::{Command, ExitCode},
     sync::{
@@ -49,6 +51,7 @@ const READ_MODEL_SCENARIO: &str = "headless-experimental-read-model";
 const RMF_READ_ONLY_HOST_COMMAND: &str = "--run-rmf-read-only";
 const REPLAY_INCIDENT_CAPSULE_COMMAND: &str = "--replay-incident-capsule";
 const SANITIZE_INCIDENT_CAPSULE_COMMAND: &str = "--sanitize-incident-capsule";
+const SERVE_SNAPSHOT_FIXTURE_COMMAND: &str = "--serve-experimental-snapshot-fixture";
 const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const HOST_DIAGNOSTIC_CAPACITY: usize = 256;
 const INCIDENT_ACTION_CAPACITY: usize = 128;
@@ -945,6 +948,7 @@ enum HeadlessCommand {
     RunRmfReadOnly(RmfHostConfig),
     ReplayIncidentCapsule(PathBuf),
     SanitizeIncidentCapsule { input: PathBuf, output: PathBuf },
+    ServeSnapshotFixture(SocketAddr),
 }
 
 fn main() -> ExitCode {
@@ -990,6 +994,31 @@ fn run_command(command: HeadlessCommand) -> Result<(), String> {
             println!("shareable candidate path={output:?} manual_review=REQUIRED");
             Ok(())
         }
+        HeadlessCommand::ServeSnapshotFixture(listen) => {
+            let shutdown = Arc::new(AtomicBool::new(false));
+            flag::register(SIGINT, Arc::clone(&shutdown))
+                .map_err(|error| format!("failed to register SIGINT handler: {error}"))?;
+            flag::register(SIGTERM, Arc::clone(&shutdown))
+                .map_err(|error| format!("failed to register SIGTERM handler: {error}"))?;
+            let mut host = reference_host();
+            host.ingest_observation(
+                complete_observation(
+                    reference_source_id(),
+                    reference_session_id(),
+                    1,
+                    Floor::new(4),
+                )
+                .into(),
+            );
+            let listener = TcpListener::bind(listen).map_err(|error| {
+                format!("failed to bind experimental snapshot fixture: {error}")
+            })?;
+            let local_addr = listener
+                .local_addr()
+                .map_err(|error| format!("failed to inspect experimental API listener: {error}"))?;
+            println!("experimental read-only API fixture listening on http://{local_addr}");
+            http_api::serve(listener, host.read_model(), shutdown)
+        }
     }
 }
 
@@ -1009,13 +1038,17 @@ fn parse_command(args: impl Iterator<Item = String>) -> Result<HeadlessCommand, 
                 output: PathBuf::from(&args[2]),
             })
         }
+        Some(SERVE_SNAPSHOT_FIXTURE_COMMAND) if args.len() == 2 => args[1]
+            .parse::<SocketAddr>()
+            .map(HeadlessCommand::ServeSnapshotFixture)
+            .map_err(|error| format!("invalid experimental API listen address: {error}")),
         _ => Err(headless_usage()),
     }
 }
 
 fn headless_usage() -> String {
     format!(
-        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}|{INCIDENT_CAPSULE_SCENARIO}|{SANITIZED_CAPSULE_SCENARIO}|{READ_MODEL_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal] [--incident-capsule-out <path>]\n       liftassistant-headless {REPLAY_INCIDENT_CAPSULE_COMMAND} <internal-capsule.json>\n       liftassistant-headless {SANITIZE_INCIDENT_CAPSULE_COMMAND} <private-capsule.json> <candidate.json>"
+        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}|{INCIDENT_CAPSULE_SCENARIO}|{SANITIZED_CAPSULE_SCENARIO}|{READ_MODEL_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal] [--incident-capsule-out <path>]\n       liftassistant-headless {REPLAY_INCIDENT_CAPSULE_COMMAND} <internal-capsule.json>\n       liftassistant-headless {SANITIZE_INCIDENT_CAPSULE_COMMAND} <private-capsule.json> <candidate.json>\n       liftassistant-headless {SERVE_SNAPSHOT_FIXTURE_COMMAND} <ip:port>"
     )
 }
 
