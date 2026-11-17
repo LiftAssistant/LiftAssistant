@@ -5,10 +5,7 @@ import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
 
 class SourceHealthCard extends StatelessWidget {
-  const SourceHealthCard({
-    super.key,
-    required this.source,
-  });
+  const SourceHealthCard({super.key, required this.source});
 
   final SourceHealth source;
 
@@ -17,184 +14,163 @@ class SourceHealthCard extends StatelessWidget {
     final InstrumentPalette palette = context.palette;
 
     final (
-      String sessionLabel,
-      String? sessionId,
-      Color sessionFg,
-      Color sessionBg,
+      String sessionText,
+      Color sessionDot,
+      bool sessionHollow,
     ) = switch (source.session) {
-      InactiveSourceSession() => (
-        'Inactive',
-        null,
-        palette.neutral,
-        palette.neutralContainer,
-      ),
-      ActiveSourceSession(:final session) => (
-        'Active',
-        session,
-        palette.ok,
-        palette.okContainer,
-      ),
+      InactiveSourceSession() => ('inactive', palette.neutral, true),
+      ActiveSourceSession(:final session) => (session, palette.ok, false),
     };
 
-    final (String transportLabel, Color transportFg, Color transportBg) =
-        switch (source.transport) {
-          TransportState.unknown => (
-            'Unknown',
-            palette.neutral,
-            palette.neutralContainer,
-          ),
-          TransportState.subscriberCreated => (
-            'Subscriber Created',
-            palette.info,
-            palette.infoContainer,
-          ),
-          TransportState.discoveryObserved => (
-            'Discovery Observed',
-            palette.ok,
-            palette.okContainer,
-          ),
-        };
+    final (
+      Color transportColor,
+      bool transportHollow,
+    ) = switch (source.transport) {
+      TransportState.unknown => (palette.neutral, true),
+      TransportState.subscriberCreated => (palette.info, true),
+      TransportState.discoveryObserved => (palette.ok, false),
+    };
 
-    final (String payloadLabel, Color payloadFg, Color payloadBg) =
-        switch (source.payload) {
-          PayloadActivity.awaiting => (
-            'Awaiting Payload',
-            palette.caution,
-            palette.cautionContainer,
-          ),
-          PayloadActivity.active => (
-            'Active Payload',
-            palette.ok,
-            palette.okContainer,
-          ),
-          PayloadActivity.stale => (
-            'Stale Payload',
-            palette.danger,
-            palette.dangerContainer,
-          ),
-        };
+    final (Color payloadColor, bool payloadHollow) = switch (source.payload) {
+      PayloadActivity.awaiting => (palette.caution, true),
+      PayloadActivity.active => (palette.ok, false),
+      PayloadActivity.stale => (palette.danger, false),
+    };
 
     final bool discoveryWithoutActivePayload =
         source.transport == TransportState.discoveryObserved &&
         source.payload != PayloadActivity.active;
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.surface,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: palette.border),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(5),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            // Source Identity Header
-            Row(
-              children: <Widget>[
-                Icon(Icons.hub_outlined, size: 18, color: palette.info),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    source.source,
-                    style: instrumentMonoStyle(
-                      context,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                Text(
-                  '${source.observations.length} binding(s)',
-                  style: TextStyle(fontSize: 12, color: palette.subtleText),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-
-            // Separate Session / Transport / Payload Health Layers
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: <Widget>[
-                _SourceLayerBox(
-                  layerTitle: 'SOURCE SESSION',
-                  badgeLabel: sessionLabel,
-                  detail: sessionId ?? 'No active adapter session token',
-                  monospaceDetail: sessionId != null,
-                  foreground: sessionFg,
-                  background: sessionBg,
-                ),
-                _SourceLayerBox(
-                  layerTitle: 'TRANSPORT DISCOVERY',
-                  badgeLabel: transportLabel,
-                  detail: source.transport.wireValue,
-                  monospaceDetail: true,
-                  foreground: transportFg,
-                  background: transportBg,
-                ),
-                _SourceLayerBox(
-                  layerTitle: 'PAYLOAD ACTIVITY',
-                  badgeLabel: payloadLabel,
-                  detail: source.payload.wireValue,
-                  monospaceDetail: true,
-                  foreground: payloadFg,
-                  background: payloadBg,
-                ),
-              ],
-            ),
-
-            if (discoveryWithoutActivePayload) ...<Widget>[
-              const SizedBox(height: 10),
-              Container(
-                padding: const EdgeInsets.all(9),
-                decoration: BoxDecoration(
-                  color: palette.cautionContainer,
-                  borderRadius: BorderRadius.circular(7),
-                  border: Border.all(
-                    color: palette.caution.withValues(alpha: 0.4),
-                  ),
-                ),
-                child: Row(
-                  children: <Widget>[
-                    Icon(
-                      Icons.info_outline,
-                      size: 15,
-                      color: palette.caution,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Transport discovery observed does NOT imply usable payload (${source.payload.wireValue}).',
-                        style: const TextStyle(fontSize: 11.5),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 14),
-            Text(
-              'BOUND LOGICAL CARS & AUTHORITY ROLES',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.6,
-                color: palette.subtleText,
-              ),
-            ),
-            const SizedBox(height: 8),
-            if (source.observations.isEmpty)
-              Text(
-                'No bound logical cars reported for this source.',
-                style: TextStyle(fontSize: 12, color: palette.subtleText),
-              )
-            else
-              Column(
+            // Source header + 3 orthogonal health dimensions
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  for (final SourceObservation obs in source.observations)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: _ObservationBindingRow(observation: obs),
-                    ),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          source.source,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: instrumentMonoStyle(
+                            context,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${source.observations.length} bound',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: palette.mutedText,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 5,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[
+                      _SourceTelemetryItem(
+                        label: 'Session',
+                        value: sessionText,
+                        dotColor: sessionDot,
+                        hollowDot: sessionHollow,
+                      ),
+                      _SourceTelemetryItem(
+                        label: 'Transport',
+                        value: source.transport.wireValue,
+                        dotColor: transportColor,
+                        hollowDot: transportHollow,
+                      ),
+                      _SourceTelemetryItem(
+                        label: 'Payload',
+                        value: source.payload.wireValue,
+                        dotColor: payloadColor,
+                        hollowDot: payloadHollow,
+                      ),
+                    ],
+                  ),
                 ],
               ),
+            ),
+
+            // Discovery != usable payload contextual callout
+            if (discoveryWithoutActivePayload)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: palette.cautionContainer,
+                  border: Border(top: BorderSide(color: palette.border)),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  child: Row(
+                    children: <Widget>[
+                      Icon(
+                        Icons.info_outline_rounded,
+                        size: 13.5,
+                        color: palette.caution,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Discovery observed without active payload (${source.payload.wireValue}) — discovery alone is not usable data.',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+            // Bound logical cars & authority roles ledger
+            if (source.observations.isEmpty)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: palette.elevatedSurface,
+                  border: Border(top: BorderSide(color: palette.border)),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    'No bound logical cars on this source.',
+                    style: TextStyle(fontSize: 11.5, color: palette.mutedText),
+                  ),
+                ),
+              )
+            else
+              for (int i = 0; i < source.observations.length; i++)
+                _ObservationBindingRow(
+                  observation: source.observations[i],
+                  isFirst: i == 0,
+                ),
           ],
         ),
       ),
@@ -202,168 +178,160 @@ class SourceHealthCard extends StatelessWidget {
   }
 }
 
-class _SourceLayerBox extends StatelessWidget {
-  const _SourceLayerBox({
-    required this.layerTitle,
-    required this.badgeLabel,
-    required this.detail,
-    required this.foreground,
-    required this.background,
-    this.monospaceDetail = false,
+class _SourceTelemetryItem extends StatelessWidget {
+  const _SourceTelemetryItem({
+    required this.label,
+    required this.value,
+    required this.dotColor,
+    required this.hollowDot,
   });
 
-  final String layerTitle;
-  final String badgeLabel;
-  final String detail;
-  final Color foreground;
-  final Color background;
-  final bool monospaceDetail;
+  final String label;
+  final String value;
+  final Color dotColor;
+  final bool hollowDot;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
     return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 180, maxWidth: 280),
-      child: Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: palette.elevatedSurface,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: palette.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Text(
-              layerTitle,
-              style: TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.6,
-                color: palette.subtleText,
+      constraints: const BoxConstraints(maxWidth: 260),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(
+            '$label ',
+            style: TextStyle(fontSize: 11, color: palette.mutedText),
+          ),
+          StatusDot(color: dotColor, hollow: hollowDot, size: 6),
+          const SizedBox(width: 4.5),
+          Flexible(
+            child: Tooltip(
+              message: '$label: $value',
+              child: Text(
+                value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: instrumentMonoStyle(
+                  context,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w500,
+                  color: palette.subtleText,
+                ),
               ),
             ),
-            const SizedBox(height: 6),
-            SemanticBadge(
-              label: badgeLabel,
-              foreground: foreground,
-              background: background,
-            ),
-            const SizedBox(height: 5),
-            Text(
-              detail,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: monospaceDetail
-                  ? instrumentMonoStyle(
-                      context,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w500,
-                      color: palette.subtleText,
-                    )
-                  : TextStyle(fontSize: 11.5, color: palette.subtleText),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _ObservationBindingRow extends StatelessWidget {
-  const _ObservationBindingRow({required this.observation});
+  const _ObservationBindingRow({
+    required this.observation,
+    required this.isFirst,
+  });
 
   final SourceObservation observation;
+  final bool isFirst;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
     final bool isOperational = observation.role == BindingRole.operational;
 
-    final (String availLabel, Color availFg, Color availBg) =
-        switch (observation.availability) {
-          ObservationAvailability.resolved => (
-            'Resolved',
-            palette.ok,
-            palette.okContainer,
-          ),
-          ObservationAvailability.awaiting => (
-            'Awaiting',
-            palette.neutral,
-            palette.neutralContainer,
-          ),
-          ObservationAvailability.incomplete => (
-            'Incomplete',
-            palette.caution,
-            palette.cautionContainer,
-          ),
-          ObservationAvailability.unresolved => (
-            'Unresolved',
-            palette.caution,
-            palette.cautionContainer,
-          ),
-          ObservationAvailability.revoked => (
-            'Revoked',
-            palette.danger,
-            palette.dangerContainer,
-          ),
-        };
+    final (
+      Color availColor,
+      bool availHollow,
+    ) = switch (observation.availability) {
+      ObservationAvailability.resolved => (palette.ok, false),
+      ObservationAvailability.awaiting => (palette.neutral, true),
+      ObservationAvailability.incomplete => (palette.caution, true),
+      ObservationAvailability.unresolved => (palette.caution, true),
+      ObservationAvailability.revoked => (palette.danger, false),
+    };
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: palette.elevatedSurface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: palette.border),
+        color: isFirst
+            ? palette.elevatedSurface
+            : palette.elevatedSurface.withValues(alpha: 0.7),
+        border: Border(top: BorderSide(color: palette.border)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Wrap(
-            spacing: 8,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              Text(
-                'Car ${observation.car}',
-                style: instrumentMonoStyle(
-                  context,
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w700,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Flexible(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 150),
+                    child: Tooltip(
+                      message: observation.car,
+                      child: Text(
+                        observation.car,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: instrumentMonoStyle(
+                          context,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-              SemanticBadge(
-                label: isOperational ? 'OPERATIONAL' : 'AUXILIARY',
-                foreground: isOperational
-                    ? palette.operationalRole
-                    : palette.auxiliaryRole,
-                background: isOperational
-                    ? palette.operationalRoleContainer
-                    : palette.auxiliaryRoleContainer,
-                outlined: !isOperational,
-                icon: isOperational
-                    ? Icons.verified_user_outlined
-                    : Icons.visibility_outlined,
-              ),
-              SemanticBadge(
-                label: 'Availability: $availLabel',
-                foreground: availFg,
-                background: availBg,
-              ),
-            ],
-          ),
-          const SizedBox(height: 5),
-          Text(
-            isOperational
-                ? 'Operational authority: permitted to enter LiftAssistant operational truth when resolved.'
-                : 'Auxiliary role: inspectable and diagnostic only — excluded from operational truth (never automatic failover/backup).',
-            style: TextStyle(
-              fontSize: 11.5,
-              height: 1.3,
-              color: palette.subtleText,
+                const SizedBox(width: 8),
+                Flexible(
+                  child: SemanticBadge(
+                    label: isOperational ? 'Operational' : 'Auxiliary · diag',
+                    foreground: isOperational
+                        ? palette.operationalRole
+                        : palette.auxiliaryRole,
+                    background: isOperational
+                        ? palette.operationalRoleContainer
+                        : palette.auxiliaryRoleContainer,
+                    outlined: !isOperational,
+                    tooltip: isOperational
+                        ? 'Operational authority: permitted into LiftAssistant operational truth when resolved.'
+                        : 'Auxiliary role: inspectable and diagnostic only — excluded from operational truth and never used for automatic failover.',
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                StatusDot(color: availColor, hollow: availHollow, size: 6.5),
+                const SizedBox(width: 5),
+                Text(
+                  observation.availability.wireValue,
+                  style: instrumentMonoStyle(
+                    context,
+                    fontSize: 11.5,
+                    fontWeight:
+                        observation.availability ==
+                            ObservationAvailability.resolved
+                        ? FontWeight.w500
+                        : FontWeight.w700,
+                    color:
+                        observation.availability ==
+                            ObservationAvailability.resolved
+                        ? palette.subtleText
+                        : availColor,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

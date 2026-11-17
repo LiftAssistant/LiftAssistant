@@ -38,7 +38,11 @@ class _LiftAssistantClientAppState extends State<LiftAssistantClientApp> {
   @override
   void initState() {
     super.initState();
-    final (String resolvedUrl, bool shouldAutoConnect) = _resolveStartupTarget();
+    if (kIsWeb && Uri.base.queryParameters['theme'] == 'light') {
+      _themeMode = ThemeMode.light;
+    }
+    final (String resolvedUrl, bool shouldAutoConnect) =
+        _resolveStartupTarget();
     if (widget.controller != null) {
       _controller = widget.controller!;
       _ownsController = false;

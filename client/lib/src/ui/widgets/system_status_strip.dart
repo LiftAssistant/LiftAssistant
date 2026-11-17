@@ -5,64 +5,34 @@ import '../../state/client_state.dart';
 import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
 
-(String, Color, Color, IconData) describeConnectionPhase(
+(String, Color, Color, bool) describeConnectionPhase(
   ConnectionPhase phase,
   InstrumentPalette palette,
 ) {
   switch (phase) {
     case ConnectionPhase.live:
-      return (
-        'LIVE SSE',
-        palette.ok,
-        palette.okContainer,
-        Icons.sensors,
-      );
+      return ('LIVE SSE', palette.ok, palette.okContainer, false);
     case ConnectionPhase.attachingStream:
-      return (
-        'ATTACHING SSE',
-        palette.info,
-        palette.infoContainer,
-        Icons.sync,
-      );
+      return ('ATTACHING', palette.info, palette.infoContainer, true);
     case ConnectionPhase.connecting:
-      return (
-        'CONNECTING',
-        palette.info,
-        palette.infoContainer,
-        Icons.downloading_outlined,
-      );
+      return ('CONNECTING', palette.info, palette.infoContainer, true);
     case ConnectionPhase.reconnecting:
-      return (
-        'RECONNECTING',
-        palette.caution,
-        palette.cautionContainer,
-        Icons.wifi_find_outlined,
-      );
+      return ('RECONNECTING', palette.caution, palette.cautionContainer, true);
     case ConnectionPhase.incompatibleApi:
       return (
         'UNSUPPORTED API',
         palette.danger,
         palette.dangerContainer,
-        Icons.block_outlined,
+        false,
       );
     case ConnectionPhase.protocolError:
-      return (
-        'PROTOCOL ERROR',
-        palette.danger,
-        palette.dangerContainer,
-        Icons.warning_amber_rounded,
-      );
+      return ('PROTOCOL ERR', palette.danger, palette.dangerContainer, false);
     case ConnectionPhase.disconnected:
-      return (
-        'DISCONNECTED',
-        palette.neutral,
-        palette.neutralContainer,
-        Icons.link_off,
-      );
+      return ('OFFLINE', palette.neutral, palette.neutralContainer, true);
   }
 }
 
-(String, String, Color, Color) describeHostLifecycle(
+(String, String, Color, bool) describeHostLifecycle(
   HostLifecycle lifecycle,
   InstrumentPalette palette,
 ) {
@@ -70,35 +40,35 @@ import 'semantic_badge.dart';
     case HostLifecycle.starting:
       return (
         'Starting',
-        'Process started; awaiting initial observation activity',
+        'Host process started; awaiting initial observation activity.',
         palette.info,
-        palette.infoContainer,
+        true,
       );
     case HostLifecycle.synchronizing:
       return (
         'Synchronizing',
-        'Ingesting observations; operational state not yet complete',
+        'Ingesting observations; complete operational state not yet established.',
         palette.caution,
-        palette.cautionContainer,
+        true,
       );
     case HostLifecycle.readyReadOnly:
       return (
         'ReadyReadOnly',
-        'Complete operational state established for every Operational car',
+        'Complete operational state established for all configured Operational cars.',
         palette.ok,
-        palette.okContainer,
+        false,
       );
     case HostLifecycle.degraded:
       return (
         'Degraded',
-        'Operational invariant violation or rejection revoked readiness',
+        'Operational invariant violation or rejection revoked readiness.',
         palette.danger,
-        palette.dangerContainer,
+        false,
       );
   }
 }
 
-(String, String, Color, Color) describeHostReadiness(
+(String, String, Color, bool) describeHostReadiness(
   HostReadiness readiness,
   InstrumentPalette palette,
 ) {
@@ -106,22 +76,208 @@ import 'semantic_badge.dart';
     case HostReadiness.readOnly:
       return (
         'ReadOnly',
-        'Read-side operational projection is synchronized',
+        'Read-side operational projection is synchronized.',
         palette.ok,
-        palette.okContainer,
+        false,
       );
     case HostReadiness.notReady:
       return (
         'NotReady',
-        'Process reachable does NOT equal operational data ready',
+        'Process reachable does not mean operational data is ready.',
         palette.caution,
-        palette.cautionContainer,
+        true,
       );
   }
 }
 
-class SystemStatusStrip extends StatelessWidget {
-  const SystemStatusStrip({
+/// Compact pinned telemetry bar replacing the old 4-card KPI grid.
+class HostTelemetryBar extends StatelessWidget {
+  const HostTelemetryBar({
+    super.key,
+    required this.snapshot,
+    required this.isLive,
+    this.revisionReset,
+  });
+
+  final ReadModelSnapshot snapshot;
+  final bool isLive;
+  final RevisionResetNotice? revisionReset;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final (
+      String lifecycleLabel,
+      String lifecycleTip,
+      Color lifecycleColor,
+      bool lifecycleHollow,
+    ) = describeHostLifecycle(
+      snapshot.lifecycle,
+      palette,
+    );
+    final (
+      String readinessLabel,
+      String readinessTip,
+      Color readinessColor,
+      bool readinessHollow,
+    ) = describeHostReadiness(
+      snapshot.readiness,
+      palette,
+    );
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.elevatedSurface,
+        border: Border(bottom: BorderSide(color: palette.border)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+        child: LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            final bool showContractRight = constraints.maxWidth >= 680;
+            final Widget leftCluster = Wrap(
+              spacing: 18,
+              runSpacing: 5,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                _TelemetryCell(
+                  label: 'Lifecycle',
+                  value: lifecycleLabel,
+                  dotColor: lifecycleColor,
+                  hollowDot: lifecycleHollow,
+                  tooltip: lifecycleTip,
+                ),
+                _TelemetryCell(
+                  label: 'Readiness',
+                  value: readinessLabel,
+                  dotColor: readinessColor,
+                  hollowDot: readinessHollow,
+                  tooltip: readinessTip,
+                ),
+                Tooltip(
+                  message: 'Host-local revision; monotonic within one Host process lifetime and resets on Host restart.',
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text(
+                        'Rev ',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          color: palette.mutedText,
+                        ),
+                      ),
+                      Text(
+                        '#${snapshot.revision}',
+                        style: instrumentMonoStyle(
+                          context,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (!isLive) ...<Widget>[
+                        const SizedBox(width: 5),
+                        Text(
+                          '(retained)',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: palette.caution,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (revisionReset != null)
+                  SemanticBadge(
+                    label:
+                        'New Host lifetime (#${revisionReset!.previousRevision} → #${revisionReset!.newRevision})',
+                    foreground: palette.info,
+                    background: palette.infoContainer,
+                    monospace: true,
+                  ),
+                if (!showContractRight)
+                  Text(
+                    snapshot.apiVersion,
+                    style: instrumentMonoStyle(
+                      context,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: palette.mutedText,
+                    ),
+                  ),
+              ],
+            );
+
+            if (!showContractRight) {
+              return leftCluster;
+            }
+
+            return Row(
+              children: <Widget>[
+                Expanded(child: leftCluster),
+                const SizedBox(width: 12),
+                Text(
+                  snapshot.apiVersion,
+                  style: instrumentMonoStyle(
+                    context,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w500,
+                    color: palette.mutedText,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _TelemetryCell extends StatelessWidget {
+  const _TelemetryCell({
+    required this.label,
+    required this.value,
+    required this.dotColor,
+    required this.hollowDot,
+    required this.tooltip,
+  });
+
+  final String label;
+  final String value;
+  final Color dotColor;
+  final bool hollowDot;
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    return Tooltip(
+      message: tooltip,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Text(
+            '$label ',
+            style: TextStyle(fontSize: 11.5, color: palette.mutedText),
+          ),
+          StatusDot(color: dotColor, hollow: hollowDot, size: 6.5),
+          const SizedBox(width: 5),
+          Text(
+            value,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Renders connection / protocol / non-live-snapshot alert banners ONLY when
+/// needed. Occupies zero pixels when synchronized and healthy.
+class ClientAlertBanners extends StatelessWidget {
+  const ClientAlertBanners({
     super.key,
     required this.state,
     required this.onReconnectNow,
@@ -148,36 +304,29 @@ class SystemStatusStrip extends StatelessWidget {
   }) {
     if (hasHardErrorAbove) {
       return (
-        'RETAINED SNAPSHOT IS NOT LIVE',
-        'Displaying last valid snapshot received at Host revision #${snapshot.revision} '
-            'before the protocol/API error above. Retained values are historical client context, '
-            'NOT live operational truth.',
+        'Retained snapshot (#${snapshot.revision}) is NOT live',
+        'Showing last valid snapshot received before the error above; values below are historical context only.',
       );
     }
     if (state.phase == ConnectionPhase.connecting) {
       return (
-        'RECONNECTING TO HOST — RETAINED SNAPSHOT IS NOT LIVE',
-        'Requesting a fresh complete snapshot from ${state.endpoint?.origin ?? "Host"}. '
-            'Until synchronization completes, Host revision #${snapshot.revision} below '
-            'remains historical client context, NOT live operational truth.',
+        'Reconnecting — retained snapshot (#${snapshot.revision}) is NOT live',
+        'Fetching fresh snapshot from ${state.endpoint?.origin ?? "Host"}; values below are historical context until sync completes.',
       );
     }
     if (state.phase == ConnectionPhase.disconnected && error == null) {
       return (
-        'CLIENT DISCONNECTED — RETAINED SNAPSHOT IS NOT LIVE',
-        'Synchronization stopped. Displaying last complete snapshot received at Host revision '
-            '#${snapshot.revision} as historical client context, NOT live operational truth.',
+        'Client disconnected — retained snapshot (#${snapshot.revision}) is NOT live',
+        'Live stream stopped; values below are retained client context, not live Host state.',
       );
     }
     final String detail = error?.message ?? 'connection interrupted';
     final String retryDetail = state.reconnectAttempt > 0
-        ? ' (retry attempt #${state.reconnectAttempt})'
+        ? ' (attempt #${state.reconnectAttempt})'
         : '';
     return (
-      'CLIENT CONNECTION LOST — RETAINED SNAPSHOT IS NOT LIVE',
-      'Displaying last complete snapshot received at Host revision #${snapshot.revision} '
-          'before connection stopped$retryDetail: $detail '
-          'Retained values are historical client context, NOT live operational truth.',
+      'Connection lost — retained snapshot (#${snapshot.revision}) is NOT live',
+      'Last snapshot before disconnect$retryDetail: $detail',
     );
   }
 
@@ -187,24 +336,32 @@ class SystemStatusStrip extends StatelessWidget {
     final ReadModelSnapshot? snapshot = state.snapshot;
     final ClientConnectionError? error = state.error;
     final bool showHardErrorBanner = _isHardError(error);
+    final bool showError =
+        error != null &&
+        (showHardErrorBanner || !state.hasRetainedStaleSnapshot);
+    final bool showStale = state.hasRetainedStaleSnapshot;
+
+    if (!showError && !showStale) {
+      return const SizedBox.shrink();
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        if (error != null &&
-            (showHardErrorBanner || !state.hasRetainedStaleSnapshot)) ...<Widget>[
-          _buildErrorBanner(context, error, palette),
-          const SizedBox(height: 12),
-        ],
-        if (state.hasRetainedStaleSnapshot) ...<Widget>[
+        if (showError) _buildErrorBanner(context, error, palette),
+        if (showError && showStale) const SizedBox(height: 8),
+        if (showStale)
           Builder(
             builder: (BuildContext context) {
-              final (String staleTitle, String staleMessage) =
-                  _describeRetainedStaleBanner(
-                    snapshot!,
-                    error,
-                    hasHardErrorAbove: showHardErrorBanner,
-                  );
+              final (
+                String staleTitle,
+                String staleMessage,
+              ) = _describeRetainedStaleBanner(
+                snapshot!,
+                error,
+                hasHardErrorAbove: showHardErrorBanner,
+              );
               return SemanticCalloutBanner(
                 key: const Key('stale-retained-snapshot-banner'),
                 icon: Icons.cloud_off_outlined,
@@ -220,32 +377,21 @@ class SystemStatusStrip extends StatelessWidget {
                           onPressed: state.phase == ConnectionPhase.connecting
                               ? null
                               : onReconnectNow,
-                          icon: const Icon(Icons.refresh, size: 16),
+                          icon: const Icon(Icons.refresh, size: 15),
                           label: Text(
                             state.phase == ConnectionPhase.connecting
                                 ? 'Reconnecting...'
-                                : 'Reconnect Now',
+                                : 'Reconnect',
                           ),
                         ),
                         OutlinedButton.icon(
                           onPressed: onConfigureHost,
-                          icon: const Icon(Icons.edit_outlined, size: 16),
-                          label: const Text('Change Host'),
+                          icon: const Icon(Icons.edit_outlined, size: 15),
+                          label: const Text('Host URL'),
                         ),
                       ],
               );
             },
-          ),
-          const SizedBox(height: 12),
-        ],
-        if (snapshot != null)
-          Opacity(
-            opacity: state.isSnapshotLive ? 1.0 : 0.78,
-            child: _HostTruthMetricsGrid(
-              snapshot: snapshot,
-              isLive: state.isSnapshotLive,
-              revisionReset: state.lastRevisionReset,
-            ),
           ),
       ],
     );
@@ -265,22 +411,22 @@ class SystemStatusStrip extends StatelessWidget {
     final String title;
     switch (error.kind) {
       case ClientErrorKind.unsupportedApiVersion:
-        title = 'UNSUPPORTED HOST API VERSION ($versionLabel)';
+        title = 'Unsupported Host API version ($versionLabel)';
       case ClientErrorKind.malformedResponse:
-        title = 'MALFORMED HOST RESPONSE';
+        title = 'Malformed Host response';
       case ClientErrorKind.unexpectedContentType:
-        title = 'UNEXPECTED ENDPOINT CONTENT TYPE';
+        title = 'Unexpected endpoint Content-Type';
       case ClientErrorKind.httpStatusError:
-        title = 'HOST HTTP ERROR (${error.httpStatusCode ?? ""})';
+        title = 'Host HTTP ${error.httpStatusCode ?? "error"}';
       case ClientErrorKind.crossOriginBlockedOrUnreachable:
-        title = 'HOST UNREACHABLE OR BROWSER CROSS-ORIGIN BLOCKED';
+        title = 'Host unreachable or browser cross-origin blocked';
       case ClientErrorKind.invalidUrl:
-        title = 'INVALID HOST BASE URL';
+        title = 'Invalid Host URL';
       case ClientErrorKind.streamDisconnected:
       case ClientErrorKind.unreachable:
         title = state.phase == ConnectionPhase.reconnecting
-            ? 'HOST UNREACHABLE — AUTOMATICALLY RECONNECTING (ATTEMPT #${state.reconnectAttempt})'
-            : 'CONNECTION ERROR';
+            ? 'Host unreachable — reconnecting (attempt #${state.reconnectAttempt})'
+            : 'Connection error';
     }
 
     return SemanticCalloutBanner(
@@ -291,203 +437,24 @@ class SystemStatusStrip extends StatelessWidget {
       title: title,
       message: error.message,
       accent: isHardError ? palette.danger : palette.caution,
-      background:
-          isHardError ? palette.dangerContainer : palette.cautionContainer,
+      background: isHardError
+          ? palette.dangerContainer
+          : palette.cautionContainer,
       actions: <Widget>[
         if (state.endpoint != null)
           FilledButton.tonalIcon(
             key: const Key('error-retry-button'),
             onPressed: onReconnectNow,
-            icon: const Icon(Icons.refresh, size: 16),
-            label: const Text('Retry Now'),
+            icon: const Icon(Icons.refresh, size: 15),
+            label: const Text('Retry'),
           ),
         OutlinedButton.icon(
           key: const Key('error-configure-host-button'),
           onPressed: onConfigureHost,
-          icon: const Icon(Icons.settings_ethernet, size: 16),
-          label: const Text('Configure Host'),
+          icon: const Icon(Icons.dns_outlined, size: 15),
+          label: const Text('Host URL'),
         ),
       ],
-    );
-  }
-}
-
-class _HostTruthMetricsGrid extends StatelessWidget {
-  const _HostTruthMetricsGrid({
-    required this.snapshot,
-    required this.isLive,
-    required this.revisionReset,
-  });
-
-  final ReadModelSnapshot snapshot;
-  final bool isLive;
-  final RevisionResetNotice? revisionReset;
-
-  @override
-  Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-    final (
-      String lifecycleLabel,
-      String lifecycleNote,
-      Color lifecycleFg,
-      Color lifecycleBg,
-    ) = describeHostLifecycle(snapshot.lifecycle, palette);
-    final (
-      String readinessLabel,
-      String readinessNote,
-      Color readinessFg,
-      Color readinessBg,
-    ) = describeHostReadiness(snapshot.readiness, palette);
-
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final double width = constraints.maxWidth;
-        final int columns = width >= 980 ? 4 : (width >= 560 ? 2 : 1);
-        const double spacing = 10;
-        final double tileWidth =
-            (width - spacing * (columns - 1)) / columns;
-
-        return Wrap(
-          spacing: spacing,
-          runSpacing: spacing,
-          children: <Widget>[
-            SizedBox(
-              width: tileWidth,
-              child: _MetricTile(
-                label: 'HOST LIFECYCLE',
-                value: lifecycleLabel,
-                wireTag: snapshot.lifecycle.wireValue,
-                note: lifecycleNote,
-                accent: lifecycleFg,
-                accentBg: lifecycleBg,
-              ),
-            ),
-            SizedBox(
-              width: tileWidth,
-              child: _MetricTile(
-                label: 'READ READINESS',
-                value: readinessLabel,
-                wireTag: snapshot.readiness.wireValue,
-                note: readinessNote,
-                accent: readinessFg,
-                accentBg: readinessBg,
-              ),
-            ),
-            SizedBox(
-              width: tileWidth,
-              child: _MetricTile(
-                label: 'HOST REVISION',
-                value: '#${snapshot.revision}',
-                wireTag: isLive ? 'live-snapshot' : 'retained-non-live',
-                note: revisionReset != null
-                    ? 'New Host lifetime accepted (#${revisionReset!.previousRevision} → #${revisionReset!.newRevision})'
-                    : 'Monotonic within current Host process lifetime only',
-                accent: revisionReset != null ? palette.info : palette.neutral,
-                accentBg: revisionReset != null
-                    ? palette.infoContainer
-                    : palette.neutralContainer,
-                monospaceValue: true,
-              ),
-            ),
-            SizedBox(
-              width: tileWidth,
-              child: _MetricTile(
-                label: 'BOUNDARY CONTRACT',
-                value: snapshot.apiVersion,
-                wireTag: 'READ-ONLY',
-                note:
-                    '${snapshot.operationalCars.length} operational car(s) • ${snapshot.sources.length} source(s) • ${snapshot.recentDiagnostics.length} diagnostic(s)',
-                accent: palette.info,
-                accentBg: palette.infoContainer,
-                monospaceValue: true,
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _MetricTile extends StatelessWidget {
-  const _MetricTile({
-    required this.label,
-    required this.value,
-    required this.wireTag,
-    required this.note,
-    required this.accent,
-    required this.accentBg,
-    this.monospaceValue = false,
-  });
-
-  final String label;
-  final String value;
-  final String wireTag;
-  final String note;
-  final Color accent;
-  final Color accentBg;
-  final bool monospaceValue;
-
-  @override
-  Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: palette.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: palette.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.7,
-                    color: palette.subtleText,
-                  ),
-                ),
-              ),
-              SemanticBadge(
-                label: wireTag,
-                foreground: accent,
-                background: accentBg,
-                monospace: true,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: monospaceValue
-                ? instrumentMonoStyle(
-                    context,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                  )
-                : const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: -0.3,
-                  ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            note,
-            style: TextStyle(
-              fontSize: 11.5,
-              height: 1.3,
-              color: palette.subtleText,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

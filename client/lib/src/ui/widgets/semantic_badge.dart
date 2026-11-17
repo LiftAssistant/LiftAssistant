@@ -2,6 +2,32 @@ import 'package:flutter/material.dart';
 
 import '../theme/instrument_theme.dart';
 
+class StatusDot extends StatelessWidget {
+  const StatusDot({
+    super.key,
+    required this.color,
+    this.hollow = false,
+    this.size = 7,
+  });
+
+  final Color color;
+  final bool hollow;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: hollow ? Colors.transparent : color,
+        border: hollow ? Border.all(color: color, width: 1.5) : null,
+      ),
+    );
+  }
+}
+
 class SemanticBadge extends StatelessWidget {
   const SemanticBadge({
     super.key,
@@ -9,6 +35,8 @@ class SemanticBadge extends StatelessWidget {
     required this.foreground,
     required this.background,
     this.icon,
+    this.dotColor,
+    this.hollowDot = false,
     this.monospace = false,
     this.outlined = false,
     this.tooltip,
@@ -18,45 +46,49 @@ class SemanticBadge extends StatelessWidget {
   final Color foreground;
   final Color background;
   final IconData? icon;
+  final Color? dotColor;
+  final bool hollowDot;
   final bool monospace;
   final bool outlined;
   final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
-    final Widget chip = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    final InstrumentPalette palette = context.palette;
+    final Widget tag = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 2.5),
       decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(6),
+        color: outlined ? Colors.transparent : background,
+        borderRadius: BorderRadius.circular(4),
         border: Border.all(
-          color: outlined
-              ? foreground.withValues(alpha: 0.65)
-              : foreground.withValues(alpha: 0.28),
+          color: outlined ? palette.border : foreground.withValues(alpha: 0.24),
         ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          if (icon != null) ...<Widget>[
-            Icon(icon, size: 13, color: foreground),
+          if (dotColor != null) ...<Widget>[
+            StatusDot(color: dotColor!, hollow: hollowDot, size: 6.5),
             const SizedBox(width: 5),
+          ] else if (icon != null) ...<Widget>[
+            Icon(icon, size: 12, color: foreground),
+            const SizedBox(width: 4),
           ],
           Flexible(
             child: Text(
               label,
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: monospace
                   ? instrumentMonoStyle(
                       context,
-                      fontSize: 11.5,
+                      fontSize: 11,
                       fontWeight: FontWeight.w600,
                       color: foreground,
                     )
                   : TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.3,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
                       color: foreground,
                     ),
             ),
@@ -66,9 +98,9 @@ class SemanticBadge extends StatelessWidget {
     );
 
     if (tooltip != null && tooltip!.isNotEmpty) {
-      return Tooltip(message: tooltip!, child: chip);
+      return Tooltip(message: tooltip!, child: tag);
     }
-    return chip;
+    return tag;
   }
 }
 
@@ -76,46 +108,76 @@ class SectionHeader extends StatelessWidget {
   const SectionHeader({
     super.key,
     required this.title,
-    this.subtitle,
+    this.count,
+    this.trailingNote,
     this.trailing,
   });
 
   final String title;
-  final String? subtitle;
+  final int? count;
+  final String? trailingNote;
   final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: -0.2,
+              Flexible(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
-              if (subtitle != null) ...<Widget>[
-                const SizedBox(height: 2),
-                Text(
-                  subtitle!,
-                  style: TextStyle(fontSize: 12.5, color: palette.subtleText),
+              if (count != null) ...<Widget>[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: palette.elevatedSurface,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: palette.border),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: instrumentMonoStyle(
+                      context,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: palette.subtleText,
+                    ),
+                  ),
                 ),
               ],
             ],
           ),
         ),
-        if (trailing != null) ...<Widget>[
-          const SizedBox(width: 12),
-          trailing!,
-        ],
+        if (trailingNote != null) ...<Widget>[
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              trailingNote!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 11.5, color: palette.mutedText),
+            ),
+          ),
+        ] else
+          const Spacer(),
+        if (trailing != null) ...<Widget>[const SizedBox(width: 8), trailing!],
       ],
     );
   }
@@ -141,56 +203,68 @@ class SemanticCalloutBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
+    final InstrumentPalette palette = context.palette;
+    return DecoratedBox(
       decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: accent.withValues(alpha: 0.45)),
+        color: palette.surface,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: palette.border),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Icon(icon, size: 18, color: accent),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(5),
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            border: Border(left: BorderSide(color: accent, width: 3)),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: accent,
-                      ),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 1.5),
+                      child: Icon(icon, size: 15, color: accent),
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      message,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        height: 1.35,
-                        color: Theme.of(context).colorScheme.onSurface,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            title,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: accent,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            message,
+                            style: TextStyle(
+                              fontSize: 12,
+                              height: 1.32,
+                              color: palette.subtleText,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ),
-            ],
-          ),
-          if (actions.isNotEmpty) ...<Widget>[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: actions,
+                if (actions.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 8),
+                  Wrap(spacing: 6, runSpacing: 6, children: actions),
+                ],
+              ],
             ),
-          ],
-        ],
+          ),
+        ),
       ),
     );
   }

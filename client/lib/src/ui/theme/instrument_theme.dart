@@ -8,6 +8,7 @@ class InstrumentPalette extends ThemeExtension<InstrumentPalette> {
     required this.elevatedSurface,
     required this.border,
     required this.subtleText,
+    required this.mutedText,
     required this.ok,
     required this.okContainer,
     required this.caution,
@@ -29,6 +30,7 @@ class InstrumentPalette extends ThemeExtension<InstrumentPalette> {
   final Color elevatedSurface;
   final Color border;
   final Color subtleText;
+  final Color mutedText;
 
   final Color ok;
   final Color okContainer;
@@ -45,48 +47,52 @@ class InstrumentPalette extends ThemeExtension<InstrumentPalette> {
   final Color neutral;
   final Color neutralContainer;
 
+  /// Matte carbon / graphite console palette (ISA-101 restrained signal hierarchy).
   static const InstrumentPalette dark = InstrumentPalette(
-    canvas: Color(0xFF0B0F15),
-    surface: Color(0xFF121821),
-    elevatedSurface: Color(0xFF192230),
-    border: Color(0xFF273447),
-    subtleText: Color(0xFF94A3B8),
-    ok: Color(0xFF3FB950),
-    okContainer: Color(0xFF122D1F),
-    caution: Color(0xFFE3B341),
-    cautionContainer: Color(0xFF31250E),
-    danger: Color(0xFFF85149),
-    dangerContainer: Color(0xFF361619),
-    info: Color(0xFF58A6FF),
-    infoContainer: Color(0xFF12263F),
-    operationalRole: Color(0xFF388BFD),
-    operationalRoleContainer: Color(0xFF112645),
-    auxiliaryRole: Color(0xFFA371F7),
-    auxiliaryRoleContainer: Color(0xFF241A3B),
-    neutral: Color(0xFF8B949E),
-    neutralContainer: Color(0xFF1C232E),
+    canvas: Color(0xFF111214),
+    surface: Color(0xFF17191C),
+    elevatedSurface: Color(0xFF1E2025),
+    border: Color(0xFF2A2D34),
+    subtleText: Color(0xFF939AA6),
+    mutedText: Color(0xFF666D7A),
+    ok: Color(0xFF2FA36B),
+    okContainer: Color(0xFF14271F),
+    caution: Color(0xFFE59934),
+    cautionContainer: Color(0xFF2B2012),
+    danger: Color(0xFFE5484D),
+    dangerContainer: Color(0xFF2C1517),
+    info: Color(0xFF32B8C6),
+    infoContainer: Color(0xFF13262B),
+    operationalRole: Color(0xFFD6DCE5),
+    operationalRoleContainer: Color(0xFF23272F),
+    auxiliaryRole: Color(0xFF8B929E),
+    auxiliaryRoleContainer: Color(0xFF1A1C20),
+    neutral: Color(0xFF8B929E),
+    neutralContainer: Color(0xFF202329),
   );
 
+  /// Warm architectural paper / daylight field palette.
   static const InstrumentPalette light = InstrumentPalette(
-    canvas: Color(0xFFF3F6FA),
+    canvas: Color(0xFFF3F3F0),
     surface: Color(0xFFFFFFFF),
-    elevatedSurface: Color(0xFFEBF0F6),
-    border: Color(0xFFD0DAE5),
-    subtleText: Color(0xFF526275),
-    ok: Color(0xFF1A7F37),
-    okContainer: Color(0xFFE3F6E8),
-    caution: Color(0xFF9A6700),
-    cautionContainer: Color(0xFFFFF4D6),
-    danger: Color(0xFFCF222E),
-    dangerContainer: Color(0xFFFFE7E9),
-    info: Color(0xFF0969DA),
-    infoContainer: Color(0xFFE4F0FF),
-    operationalRole: Color(0xFF0550AE),
-    operationalRoleContainer: Color(0xFFDDF4FF),
-    auxiliaryRole: Color(0xFF6639BA),
-    auxiliaryRoleContainer: Color(0xFFF3ECFF),
-    neutral: Color(0xFF57606A),
-    neutralContainer: Color(0xFFEAEEF2),
+    elevatedSurface: Color(0xFFEBEBE6),
+    border: Color(0xFFD5D5CE),
+    subtleText: Color(0xFF555B66),
+    mutedText: Color(0xFF7A808C),
+    ok: Color(0xFF1B7F4B),
+    okContainer: Color(0xFFE4F4EB),
+    caution: Color(0xFFB45309),
+    cautionContainer: Color(0xFFFEF3C7),
+    danger: Color(0xFFC92A2A),
+    dangerContainer: Color(0xFFFEE2E2),
+    info: Color(0xFF0B7285),
+    infoContainer: Color(0xFFE3F5F8),
+    operationalRole: Color(0xFF1E232B),
+    operationalRoleContainer: Color(0xFFE6E7E2),
+    auxiliaryRole: Color(0xFF5E6470),
+    auxiliaryRoleContainer: Color(0xFFF5F5F2),
+    neutral: Color(0xFF5E6470),
+    neutralContainer: Color(0xFFEAEAE5),
   );
 
   @override
@@ -96,6 +102,7 @@ class InstrumentPalette extends ThemeExtension<InstrumentPalette> {
     Color? elevatedSurface,
     Color? border,
     Color? subtleText,
+    Color? mutedText,
     Color? ok,
     Color? okContainer,
     Color? caution,
@@ -117,6 +124,7 @@ class InstrumentPalette extends ThemeExtension<InstrumentPalette> {
       elevatedSurface: elevatedSurface ?? this.elevatedSurface,
       border: border ?? this.border,
       subtleText: subtleText ?? this.subtleText,
+      mutedText: mutedText ?? this.mutedText,
       ok: ok ?? this.ok,
       okContainer: okContainer ?? this.okContainer,
       caution: caution ?? this.caution,
@@ -147,6 +155,7 @@ class InstrumentPalette extends ThemeExtension<InstrumentPalette> {
       elevatedSurface: Color.lerp(elevatedSurface, other.elevatedSurface, t)!,
       border: Color.lerp(border, other.border, t)!,
       subtleText: Color.lerp(subtleText, other.subtleText, t)!,
+      mutedText: Color.lerp(mutedText, other.mutedText, t)!,
       ok: Color.lerp(ok, other.ok, t)!,
       okContainer: Color.lerp(okContainer, other.okContainer, t)!,
       caution: Color.lerp(caution, other.caution, t)!,
@@ -188,9 +197,10 @@ extension InstrumentThemeContext on BuildContext {
 
 TextStyle instrumentMonoStyle(
   BuildContext context, {
-  double fontSize = 13,
+  double fontSize = 12.5,
   FontWeight fontWeight = FontWeight.w600,
   Color? color,
+  double? height,
 }) {
   return TextStyle(
     fontFamily: 'monospace',
@@ -203,6 +213,7 @@ TextStyle instrumentMonoStyle(
     ],
     fontSize: fontSize,
     fontWeight: fontWeight,
+    height: height,
     color: color ?? Theme.of(context).colorScheme.onSurface,
     fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
   );
@@ -214,11 +225,22 @@ ThemeData buildInstrumentTheme(Brightness brightness) {
       ? InstrumentPalette.dark
       : InstrumentPalette.light;
 
-  final ColorScheme colorScheme = ColorScheme.fromSeed(
-    seedColor: const Color(0xFF2563EB),
-    brightness: brightness,
-    surface: palette.surface,
-  );
+  final Color onSurface = isDark
+      ? const Color(0xFFECEEF2)
+      : const Color(0xFF16181C);
+
+  final ColorScheme colorScheme =
+      ColorScheme.fromSeed(
+        seedColor: palette.info,
+        brightness: brightness,
+        surface: palette.surface,
+      ).copyWith(
+        primary: palette.info,
+        onPrimary: isDark ? const Color(0xFF07191C) : Colors.white,
+        surface: palette.surface,
+        onSurface: onSurface,
+        outline: palette.border,
+      );
 
   return ThemeData(
     useMaterial3: true,
@@ -228,28 +250,48 @@ ThemeData buildInstrumentTheme(Brightness brightness) {
     dividerColor: palette.border,
     cardTheme: CardThemeData(
       color: palette.surface,
+      surfaceTintColor: Colors.transparent,
       elevation: 0,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(6),
         side: BorderSide(color: palette.border),
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        minimumSize: const Size(0, 34),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        minimumSize: const Size(0, 34),
+        side: BorderSide(color: palette.border),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: palette.elevatedSurface,
       isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(5),
         borderSide: BorderSide(color: palette.border),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(5),
         borderSide: BorderSide(color: palette.border),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(8),
-        borderSide: BorderSide(color: palette.info, width: 1.5),
+        borderRadius: BorderRadius.circular(5),
+        borderSide: BorderSide(color: palette.info, width: 1.2),
       ),
     ),
     extensions: <ThemeExtension<dynamic>>[palette],

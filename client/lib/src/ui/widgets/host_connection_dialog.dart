@@ -24,7 +24,7 @@ List<HostPreset> buildPlatformHostPresets() {
     if (pageUri.scheme == 'http' && pageUri.host.isNotEmpty) {
       webPresets.add(
         HostPreset(
-          label: 'Same Origin (${pageUri.origin})',
+          label: 'Same origin (${pageUri.origin})',
           url: pageUri.origin,
           hint: 'Recommended when served via same-origin reverse proxy',
         ),
@@ -32,9 +32,9 @@ List<HostPreset> buildPlatformHostPresets() {
     }
     webPresets.add(
       const HostPreset(
-        label: 'Local Loopback (127.0.0.1:8080)',
+        label: '127.0.0.1:8080',
         url: 'http://127.0.0.1:8080',
-        hint: 'Direct loopback (requires same origin on browsers)',
+        hint: 'Local loopback (requires same origin in browsers)',
       ),
     );
     return webPresets;
@@ -43,12 +43,12 @@ List<HostPreset> buildPlatformHostPresets() {
   if (defaultTargetPlatform == TargetPlatform.android) {
     return const <HostPreset>[
       HostPreset(
-        label: 'Android Emulator Host (10.0.2.2:8080)',
+        label: '10.0.2.2:8080 (emulator)',
         url: 'http://10.0.2.2:8080',
-        hint: 'Connects from Android Emulator to development machine loopback',
+        hint: 'Android Emulator bridge to host loopback',
       ),
       HostPreset(
-        label: 'Loopback / ADB Reverse (127.0.0.1:8080)',
+        label: '127.0.0.1:8080 (adb reverse)',
         url: 'http://127.0.0.1:8080',
         hint: 'Use with `adb reverse tcp:8080 tcp:8080` or on-device Host',
       ),
@@ -57,14 +57,14 @@ List<HostPreset> buildPlatformHostPresets() {
 
   return const <HostPreset>[
     HostPreset(
-      label: 'Local Loopback (127.0.0.1:8080)',
+      label: '127.0.0.1:8080',
       url: 'http://127.0.0.1:8080',
-      hint: 'Default explicit loopback listener',
+      hint: 'Default loopback listener',
     ),
     HostPreset(
-      label: 'Localhost (localhost:8080)',
+      label: 'localhost:8080',
       url: 'http://localhost:8080',
-      hint: 'Local hostname listener',
+      hint: 'Localhost listener',
     ),
   ];
 }
@@ -153,105 +153,98 @@ class _HostConnectionFormState extends State<HostConnectionForm> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         const Text(
-          'Connect to LiftAssistant Host',
-          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Consumes the experimental/v0 read-only HTTP snapshot and SSE stream. '
-          'Plain http:// only (no built-in TLS, authentication, or write capability).',
+          'Host Endpoint',
           style: TextStyle(
-            fontSize: 12.5,
-            height: 1.4,
-            color: palette.subtleText,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.2,
           ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 3),
+        Text(
+          'Read-only experimental/v0 snapshot + SSE stream (plain http:// only).',
+          style: TextStyle(fontSize: 12, color: palette.subtleText),
+        ),
+        const SizedBox(height: 12),
         TextField(
           key: const Key('host-url-input'),
           controller: _controller,
           keyboardType: TextInputType.url,
           autocorrect: false,
-          style: instrumentMonoStyle(context, fontSize: 13.5),
+          style: instrumentMonoStyle(context, fontSize: 13),
           decoration: InputDecoration(
-            labelText: 'Host Base URL',
             hintText: 'http://127.0.0.1:8080',
             errorText: _validationError,
             errorMaxLines: 3,
-            prefixIcon: const Icon(Icons.dns_outlined, size: 18),
           ),
           onSubmitted: (_) => _submit(),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 8),
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: 6,
+          runSpacing: 6,
           children: <Widget>[
             for (final HostPreset preset in presets)
-              ActionChip(
-                avatar: const Icon(Icons.bolt_outlined, size: 15),
-                label: Text(
-                  preset.label,
-                  style: const TextStyle(fontSize: 12),
+              Tooltip(
+                message: preset.hint,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(4),
+                  onTap: () {
+                    setState(() {
+                      _controller.text = preset.url;
+                      _validationError = null;
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: palette.elevatedSurface,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: palette.border),
+                    ),
+                    child: Text(
+                      preset.label,
+                      style: instrumentMonoStyle(
+                        context,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                        color: palette.subtleText,
+                      ),
+                    ),
+                  ),
                 ),
-                tooltip: preset.hint,
-                onPressed: () {
-                  setState(() {
-                    _controller.text = preset.url;
-                    _validationError = null;
-                  });
-                },
               ),
           ],
         ),
         if (kIsWeb) ...<Widget>[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: palette.infoContainer,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: palette.info.withValues(alpha: 0.35)),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Icon(Icons.public, size: 16, color: palette.info),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Web deployment note: LiftAssistant Host intentionally omits wildcard CORS '
-                    'headers on unauthenticated HTTP. Serve the Web client on the same origin '
-                    '(or behind a controlled reverse proxy) so browser Same-Origin Policy permits '
-                    'snapshot and SSE requests.',
-                    style: TextStyle(
-                      fontSize: 12,
-                      height: 1.35,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                ),
-              ],
+          const SizedBox(height: 10),
+          Text(
+            'Web note: serve from the same origin (or reverse proxy /api/experimental/v0/*); Host omits wildcard CORS.',
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.35,
+              color: palette.mutedText,
             ),
           ),
         ],
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         Wrap(
-          spacing: 10,
-          runSpacing: 10,
+          spacing: 8,
+          runSpacing: 8,
           children: <Widget>[
-            FilledButton.icon(
+            FilledButton(
               key: const Key('connect-host-button'),
               onPressed: _submit,
-              icon: const Icon(Icons.link, size: 18),
-              label: const Text('Connect Read-Only'),
+              child: const Text('Connect'),
             ),
             if (widget.isConnectedOrConnecting && widget.onDisconnect != null)
-              OutlinedButton.icon(
+              OutlinedButton(
                 key: const Key('disconnect-host-button'),
                 onPressed: widget.onDisconnect,
-                icon: const Icon(Icons.link_off, size: 18),
-                label: const Text('Disconnect'),
+                child: const Text('Disconnect'),
               ),
           ],
         ),
@@ -267,7 +260,7 @@ Future<void> showHostConnectionModal({
   required Future<void> Function(String url) onConnect,
   required Future<void> Function() onDisconnect,
 }) async {
-  final bool isCompact = MediaQuery.sizeOf(context).width < 640;
+  final bool isCompact = MediaQuery.sizeOf(context).width < 600;
   if (isCompact) {
     await showModalBottomSheet<void>(
       context: context,
@@ -275,15 +268,15 @@ Future<void> showHostConnectionModal({
       useSafeArea: true,
       backgroundColor: context.palette.surface,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
       ),
       builder: (BuildContext sheetContext) {
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(
-            18,
-            18,
-            18,
-            18 + MediaQuery.viewInsetsOf(sheetContext).bottom,
+            16,
+            16,
+            16,
+            16 + MediaQuery.viewInsetsOf(sheetContext).bottom,
           ),
           child: HostConnectionForm(
             initialUrl: currentUrl,
@@ -310,13 +303,13 @@ Future<void> showHostConnectionModal({
       return Dialog(
         backgroundColor: dialogContext.palette.surface,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
           side: BorderSide(color: dialogContext.palette.border),
         ),
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 540),
+          constraints: const BoxConstraints(maxWidth: 460),
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(22),
+            padding: const EdgeInsets.all(18),
             child: HostConnectionForm(
               initialUrl: currentUrl,
               isConnectedOrConnecting: isConnectedOrConnecting,
@@ -334,4 +327,108 @@ Future<void> showHostConnectionModal({
       );
     },
   );
+}
+
+Future<void> showSemanticsReferenceModal(BuildContext context) async {
+  await showDialog<void>(
+    context: context,
+    builder: (BuildContext dialogContext) {
+      final InstrumentPalette palette = dialogContext.palette;
+      return Dialog(
+        backgroundColor: palette.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(color: palette.border),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    const Expanded(
+                      child: Text(
+                        'experimental/v0 Semantic Reference',
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: const Icon(Icons.close, size: 17),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const _RefRow(
+                  term: 'Read-only boundary',
+                  detail: 'Consumes complete snapshots and SSE updates only; exposes zero call, target, door, mode, or controller write actions.',
+                ),
+                const _RefRow(
+                  term: 'Floor ref vs Continuous',
+                  detail: 'Floor ref (kind: floor) indicates discrete floor association only. Continuous (kind: continuous) indicates genuine measured coordinate evidence.',
+                ),
+                const _RefRow(
+                  term: 'Source dest',
+                  detail: 'External source reported destination evidence (known / none / unknown) — never a LiftAssistant desired target, call assignment, or command.',
+                ),
+                const _RefRow(
+                  term: 'Operational vs Auxiliary',
+                  detail: 'Only Operational bindings enter operational_cars and readiness. Auxiliary bindings are inspectable/diagnostic only and never fail over automatically.',
+                ),
+                const _RefRow(
+                  term: 'Separate health layers',
+                  detail: 'Client link, Host lifecycle, Host readiness, source session, transport discovery, payload activity, and per-car availability are independent.',
+                ),
+                const _RefRow(
+                  term: 'Host diagnostics & revision',
+                  detail: 'Diagnostics are machine-readable Host evidence, not confirmed equipment faults or repair advice. Revision is monotonic per Host lifetime and resets on Host restart.',
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+class _RefRow extends StatelessWidget {
+  const _RefRow({required this.term, required this.detail});
+
+  final String term;
+  final String detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            term,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            detail,
+            style: TextStyle(
+              fontSize: 11.5,
+              height: 1.35,
+              color: palette.subtleText,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -5,16 +5,9 @@ import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
 
 class DiagnosticEvidencePanel extends StatefulWidget {
-  const DiagnosticEvidencePanel({
-    super.key,
-    required this.diagnostics,
-    this.maxPreviewEntries,
-    this.onViewAll,
-  });
+  const DiagnosticEvidencePanel({super.key, required this.diagnostics});
 
   final List<DiagnosticEntry> diagnostics;
-  final int? maxPreviewEntries;
-  final VoidCallback? onViewAll;
 
   @override
   State<DiagnosticEvidencePanel> createState() =>
@@ -30,30 +23,25 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
-    final bool isPreview = widget.maxPreviewEntries != null;
 
     Iterable<DiagnosticEntry> filtered = widget.diagnostics;
-    if (!isPreview) {
-      if (_selectedLayer != null) {
-        filtered = filtered.where(
-          (DiagnosticEntry d) => d.layer == _selectedLayer,
-        );
-      }
-      if (_selectedRole != null) {
-        filtered = filtered.where(
-          (DiagnosticEntry d) => d.role == _selectedRole,
-        );
-      }
-      final String q = _searchQuery.trim().toLowerCase();
-      if (q.isNotEmpty) {
-        filtered = filtered.where((DiagnosticEntry d) {
-          return d.id.toLowerCase().contains(q) ||
-              (d.source?.toLowerCase().contains(q) ?? false) ||
-              (d.car?.toLowerCase().contains(q) ?? false) ||
-              (d.nativeEntity?.toLowerCase().contains(q) ?? false) ||
-              (d.session?.toLowerCase().contains(q) ?? false);
-        });
-      }
+    if (_selectedLayer != null) {
+      filtered = filtered.where(
+        (DiagnosticEntry d) => d.layer == _selectedLayer,
+      );
+    }
+    if (_selectedRole != null) {
+      filtered = filtered.where((DiagnosticEntry d) => d.role == _selectedRole);
+    }
+    final String q = _searchQuery.trim().toLowerCase();
+    if (q.isNotEmpty) {
+      filtered = filtered.where((DiagnosticEntry d) {
+        return d.id.toLowerCase().contains(q) ||
+            (d.source?.toLowerCase().contains(q) ?? false) ||
+            (d.car?.toLowerCase().contains(q) ?? false) ||
+            (d.nativeEntity?.toLowerCase().contains(q) ?? false) ||
+            (d.session?.toLowerCase().contains(q) ?? false);
+      });
     }
 
     final List<DiagnosticEntry> ordered = filtered.toList()
@@ -63,162 +51,225 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
             : a.sequence.compareTo(b.sequence),
       );
 
-    final List<DiagnosticEntry> visible = isPreview
-        ? ordered.take(widget.maxPreviewEntries!).toList()
-        : ordered;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        // Non-fault Semantic Evidence Notice
-        Container(
-          padding: const EdgeInsets.all(11),
+        _buildToolbar(context, palette),
+        const SizedBox(height: 8),
+        DecoratedBox(
           decoration: BoxDecoration(
-            color: palette.elevatedSurface,
-            borderRadius: BorderRadius.circular(8),
+            color: palette.surface,
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(color: palette.border),
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Icon(
-                Icons.fact_check_outlined,
-                size: 17,
-                color: palette.info,
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  'Machine-readable Host evidence only: diagnostic entries (such as transport failure, '
-                  'mapping rejection, or observation rejection) are NOT confirmed elevator equipment faults, '
-                  'root causes, or repair instructions.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    height: 1.35,
-                    color: palette.subtleText,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                // Compact log table header + non-fault evidence boundary cue
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: palette.elevatedSurface,
+                    border: Border(bottom: BorderSide(color: palette.border)),
                   ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (!isPreview) ...<Widget>[
-          const SizedBox(height: 12),
-          _buildFilterControls(context, palette),
-        ],
-        const SizedBox(height: 12),
-        if (visible.isEmpty)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Text(
-                widget.diagnostics.isEmpty
-                    ? 'Host has recorded zero recent diagnostic entries.'
-                    : 'No diagnostic entries match the active filter.',
-                style: TextStyle(fontSize: 13, color: palette.subtleText),
-              ),
-            ),
-          )
-        else
-          Column(
-            children: <Widget>[
-              for (final DiagnosticEntry entry in visible)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: _DiagnosticEntryRow(entry: entry),
-                ),
-              if (isPreview &&
-                  widget.diagnostics.length > widget.maxPreviewEntries! &&
-                  widget.onViewAll != null)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton.icon(
-                    onPressed: widget.onViewAll,
-                    icon: const Icon(Icons.arrow_forward, size: 16),
-                    label: Text(
-                      'Inspect all ${widget.diagnostics.length} recent diagnostics',
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6.5,
+                    ),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 2,
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: <Widget>[
+                        Text(
+                          'SEQ · LAYER · EVENT ID',
+                          style: instrumentMonoStyle(
+                            context,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w600,
+                            color: palette.mutedText,
+                          ),
+                        ),
+                        Tooltip(
+                          message: 'Diagnostic entries are machine-readable Host evidence only — NOT confirmed elevator equipment faults, root causes, or repair instructions.',
+                          child: Text(
+                            'Host evidence · non-fault',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: palette.mutedText,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-            ],
+
+                if (ordered.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
+                    child: Text(
+                      widget.diagnostics.isEmpty
+                          ? 'Zero recent diagnostic entries recorded by Host.'
+                          : 'No entries match active filter.',
+                      style: TextStyle(fontSize: 12, color: palette.mutedText),
+                    ),
+                  )
+                else
+                  for (int i = 0; i < ordered.length; i++)
+                    _DiagnosticLogRow(entry: ordered[i], showTopDivider: i > 0),
+              ],
+            ),
           ),
+        ),
       ],
     );
   }
 
-  Widget _buildFilterControls(
-    BuildContext context,
-    InstrumentPalette palette,
-  ) {
+  Widget _buildToolbar(BuildContext context, InstrumentPalette palette) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Row(
           children: <Widget>[
             Expanded(
-              child: TextField(
-                decoration: const InputDecoration(
-                  hintText: 'Filter by id, source, car, session, or native entity...',
-                  prefixIcon: Icon(Icons.search, size: 18),
+              child: SizedBox(
+                height: 32,
+                child: TextField(
+                  key: const Key('diagnostics-search-input'),
+                  style: const TextStyle(fontSize: 12.5),
+                  decoration: InputDecoration(
+                    hintText: 'Filter id, source, car, entity...',
+                    hintStyle: TextStyle(
+                      fontSize: 12,
+                      color: palette.mutedText,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.search,
+                      size: 15,
+                      color: palette.mutedText,
+                    ),
+                    prefixIconConstraints: const BoxConstraints(
+                      minWidth: 32,
+                      minHeight: 32,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 0,
+                    ),
+                  ),
+                  onChanged: (String value) {
+                    setState(() {
+                      _searchQuery = value;
+                    });
+                  },
                 ),
-                onChanged: (String value) {
-                  setState(() {
-                    _searchQuery = value;
-                  });
-                },
               ),
             ),
-            const SizedBox(width: 10),
-            OutlinedButton.icon(
-              onPressed: () {
-                setState(() {
-                  _newestFirst = !_newestFirst;
-                });
-              },
-              icon: Icon(
-                _newestFirst ? Icons.south : Icons.north,
-                size: 16,
+            const SizedBox(width: 6),
+            Tooltip(
+              message: _newestFirst
+                  ? 'Sorted newest sequence first (tap to reverse)'
+                  : 'Sorted oldest sequence first (tap to reverse)',
+              child: InkWell(
+                key: const Key('diagnostics-sort-button'),
+                borderRadius: BorderRadius.circular(5),
+                onTap: () {
+                  setState(() {
+                    _newestFirst = !_newestFirst;
+                  });
+                },
+                child: Container(
+                  height: 32,
+                  padding: const EdgeInsets.symmetric(horizontal: 9),
+                  decoration: BoxDecoration(
+                    color: palette.elevatedSurface,
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: palette.border),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Icon(
+                        _newestFirst ? Icons.south : Icons.north,
+                        size: 13,
+                        color: palette.subtleText,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '#seq',
+                        style: instrumentMonoStyle(
+                          context,
+                          fontSize: 11,
+                          color: palette.subtleText,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              label: Text(_newestFirst ? 'Newest First' : 'Oldest First'),
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 6),
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: 5,
+          runSpacing: 5,
           children: <Widget>[
-            FilterChip(
-              label: const Text('All Layers'),
-              selected: _selectedLayer == null,
-              onSelected: (_) => setState(() => _selectedLayer = null),
-            ),
-            for (final DiagnosticLayer layer in DiagnosticLayer.values)
-              FilterChip(
-                label: Text(layer.wireValue),
-                selected: _selectedLayer == layer,
-                onSelected: (bool selected) {
-                  setState(() {
-                    _selectedLayer = selected ? layer : null;
-                  });
-                },
-              ),
-            const SizedBox(width: 6),
-            FilterChip(
-              label: const Text('Operational Role'),
-              selected: _selectedRole == BindingRole.operational,
-              onSelected: (bool selected) {
+            _FilterPill(
+              key: const Key('diag-filter-all'),
+              label: 'All',
+              selected: _selectedLayer == null && _selectedRole == null,
+              onTap: () {
                 setState(() {
-                  _selectedRole = selected ? BindingRole.operational : null;
+                  _selectedLayer = null;
+                  _selectedRole = null;
                 });
               },
             ),
-            FilterChip(
-              label: const Text('Auxiliary Role'),
-              selected: _selectedRole == BindingRole.auxiliary,
-              onSelected: (bool selected) {
+            for (final DiagnosticLayer layer in DiagnosticLayer.values)
+              _FilterPill(
+                key: Key('diag-filter-layer-${layer.wireValue}'),
+                label: layer.wireValue,
+                monospace: true,
+                selected: _selectedLayer == layer,
+                onTap: () {
+                  setState(() {
+                    _selectedLayer = _selectedLayer == layer ? null : layer;
+                  });
+                },
+              ),
+            _FilterPill(
+              key: const Key('diag-filter-role-operational'),
+              label: 'role:operational',
+              monospace: true,
+              selected: _selectedRole == BindingRole.operational,
+              onTap: () {
                 setState(() {
-                  _selectedRole = selected ? BindingRole.auxiliary : null;
+                  _selectedRole = _selectedRole == BindingRole.operational
+                      ? null
+                      : BindingRole.operational;
+                });
+              },
+            ),
+            _FilterPill(
+              key: const Key('diag-filter-role-auxiliary'),
+              label: 'role:auxiliary',
+              monospace: true,
+              selected: _selectedRole == BindingRole.auxiliary,
+              onTap: () {
+                setState(() {
+                  _selectedRole = _selectedRole == BindingRole.auxiliary
+                      ? null
+                      : BindingRole.auxiliary;
                 });
               },
             ),
@@ -229,47 +280,121 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
   }
 }
 
-class _DiagnosticEntryRow extends StatelessWidget {
-  const _DiagnosticEntryRow({required this.entry});
+class _FilterPill extends StatelessWidget {
+  const _FilterPill({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.monospace = false,
+  });
 
-  final DiagnosticEntry entry;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  final bool monospace;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
-    final (Color layerFg, Color layerBg) = _layerColors(entry.layer, palette);
+    final Color fg = selected ? palette.info : palette.subtleText;
+    final Color bg = selected ? palette.infoContainer : palette.surface;
+    final Color borderColor = selected
+        ? palette.info.withValues(alpha: 0.45)
+        : palette.border;
 
-    return Card(
+    return InkWell(
+      borderRadius: BorderRadius.circular(4),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: borderColor),
+        ),
+        child: Text(
+          label,
+          style: monospace
+              ? instrumentMonoStyle(
+                  context,
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: fg,
+                )
+              : TextStyle(
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: fg,
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DiagnosticLogRow extends StatelessWidget {
+  const _DiagnosticLogRow({required this.entry, required this.showTopDivider});
+
+  final DiagnosticEntry entry;
+  final bool showTopDivider;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final Color layerColor = _layerColor(entry.layer, palette);
+    final bool hasContext =
+        entry.source != null ||
+        entry.session != null ||
+        entry.car != null ||
+        entry.nativeEntity != null;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: showTopDivider
+            ? Border(top: BorderSide(color: palette.border))
+            : null,
+      ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Wrap(
               spacing: 8,
-              runSpacing: 6,
+              runSpacing: 4,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 Text(
                   '#${entry.sequence}',
                   style: instrumentMonoStyle(
                     context,
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                    color: palette.subtleText,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: palette.mutedText,
                   ),
                 ),
-                SemanticBadge(
-                  label: entry.layer.wireValue,
-                  foreground: layerFg,
-                  background: layerBg,
-                  monospace: true,
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    StatusDot(color: layerColor, size: 6),
+                    const SizedBox(width: 4.5),
+                    Text(
+                      entry.layer.wireValue,
+                      style: instrumentMonoStyle(
+                        context,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: layerColor,
+                      ),
+                    ),
+                  ],
                 ),
                 Text(
                   entry.id,
                   style: instrumentMonoStyle(
                     context,
-                    fontSize: 13.5,
+                    fontSize: 12.5,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -282,18 +407,16 @@ class _DiagnosticEntryRow extends StatelessWidget {
                     background: entry.role == BindingRole.operational
                         ? palette.operationalRoleContainer
                         : palette.auxiliaryRoleContainer,
+                    outlined: entry.role == BindingRole.auxiliary,
                     monospace: true,
                   ),
               ],
             ),
-            if (entry.source != null ||
-                entry.session != null ||
-                entry.car != null ||
-                entry.nativeEntity != null) ...<Widget>[
-              const SizedBox(height: 8),
+            if (hasContext) ...<Widget>[
+              const SizedBox(height: 4),
               Wrap(
-                spacing: 12,
-                runSpacing: 4,
+                spacing: 10,
+                runSpacing: 3,
                 children: <Widget>[
                   if (entry.source != null)
                     _ContextPair(label: 'source', value: entry.source!),
@@ -315,30 +438,24 @@ class _DiagnosticEntryRow extends StatelessWidget {
     );
   }
 
-  (Color, Color) _layerColors(
-    DiagnosticLayer layer,
-    InstrumentPalette palette,
-  ) {
+  Color _layerColor(DiagnosticLayer layer, InstrumentPalette palette) {
     switch (layer) {
       case DiagnosticLayer.transport:
-        return (palette.info, palette.infoContainer);
+        return palette.info;
       case DiagnosticLayer.source:
-        return (palette.operationalRole, palette.operationalRoleContainer);
+        return palette.subtleText;
       case DiagnosticLayer.mapping:
-        return (palette.caution, palette.cautionContainer);
+        return palette.caution;
       case DiagnosticLayer.observation:
-        return (palette.auxiliaryRole, palette.auxiliaryRoleContainer);
+        return palette.info;
       case DiagnosticLayer.readiness:
-        return (palette.ok, palette.okContainer);
+        return palette.ok;
     }
   }
 }
 
 class _ContextPair extends StatelessWidget {
-  const _ContextPair({
-    required this.label,
-    required this.value,
-  });
+  const _ContextPair({required this.label, required this.value});
 
   final String label;
   final String value;
@@ -353,17 +470,20 @@ class _ContextPair extends StatelessWidget {
         children: <InlineSpan>[
           TextSpan(
             text: '$label=',
-            style: TextStyle(
-              fontSize: 11.5,
-              color: palette.subtleText,
+            style: instrumentMonoStyle(
+              context,
+              fontSize: 11,
+              fontWeight: FontWeight.w400,
+              color: palette.mutedText,
             ),
           ),
           TextSpan(
             text: displayValue,
             style: instrumentMonoStyle(
               context,
-              fontSize: 11.5,
+              fontSize: 11,
               fontWeight: FontWeight.w600,
+              color: palette.subtleText,
             ),
           ),
         ],

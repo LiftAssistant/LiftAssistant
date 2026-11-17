@@ -6,6 +6,7 @@ import 'package:liftassistant_client/src/api/host_url.dart';
 import 'package:liftassistant_client/src/state/client_controller.dart';
 import 'package:liftassistant_client/src/transport/host_transport.dart';
 import 'package:liftassistant_client/src/ui/app.dart';
+import 'package:liftassistant_client/src/ui/widgets/car_card.dart';
 
 const String _richFixtureJson = '''
 {
@@ -136,7 +137,7 @@ final class _WidgetTestTransport implements HostTransport {
 
 void main() {
   testWidgets(
-    'desktop layout renders semantic distinctions, filters diagnostics, and exposes zero write controls',
+    'desktop split console renders cars, sources, and filterable diagnostics simultaneously without redundant tab chrome or write controls',
     (WidgetTester tester) async {
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(1366, 900);
@@ -173,44 +174,58 @@ void main() {
       await tester.tap(find.byKey(const Key('connect-host-button')));
       await tester.pumpAndSettle();
 
-      // Desktop NavigationRail is visible alongside LIVE SSE badge.
-      expect(find.byType(NavigationRail), findsOneWidget);
+      // Unified desktop split console: zero redundant NavigationRail / Overview tab.
+      expect(find.byType(NavigationRail), findsNothing);
+      expect(find.byKey(const Key('compact-section-strip')), findsNothing);
       expect(find.text('LIVE SSE'), findsOneWidget);
       expect(find.text('ReadyReadOnly'), findsOneWidget);
       expect(find.text('ReadOnly'), findsOneWidget);
       expect(find.text('#12'), findsOneWidget);
 
-      // Location precision distinction: Floor Association vs Continuous Position.
-      expect(find.text('FLOOR ASSOCIATION'), findsOneWidget);
+      // Location precision distinction: Floor ref vs Continuous position.
+      expect(find.text('Floor ref'), findsOneWidget);
       expect(find.text('Floor 3'), findsOneWidget);
-      expect(find.text('CONTINUOUS POSITION'), findsOneWidget);
+      expect(find.text('Continuous'), findsOneWidget);
       expect(find.text('2.25'), findsOneWidget);
       expect(find.text('Nearest Floor 2 (+0.25)'), findsOneWidget);
 
-      // Reported Destination evidence disclaimer is explicit.
-      expect(
-        find.text('REPORTED DESTINATION (SOURCE EVIDENCE)'),
-        findsNWidgets(2),
-      );
+      // Source-reported destination is labeled concisely without conflation.
+      expect(find.text('Floor 6'), findsOneWidget);
+      expect(find.text('Unknown'), findsOneWidget);
 
       // Source Operational vs Auxiliary distinction & discovery!=payload callout.
-      expect(find.text('OPERATIONAL'), findsNWidgets(2));
-      expect(find.text('AUXILIARY'), findsOneWidget);
+      expect(find.text('Operational'), findsNWidgets(2));
+      expect(find.text('Auxiliary · diag'), findsOneWidget);
       expect(
-        find.textContaining('Transport discovery observed does NOT imply usable payload'),
+        find.textContaining('Discovery observed without active payload'),
         findsOneWidget,
       );
 
-      // Navigate to Diagnostics tab and filter by mapping layer.
-      await tester.tap(find.text('Diagnostics'));
-      await tester.pumpAndSettle();
+      // Full filterable diagnostics stream is immediately available on desktop right pane.
       expect(find.text('readiness.changed'), findsOneWidget);
       expect(find.text('mapping.rejected'), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(FilterChip, 'mapping'));
+      await tester.tap(find.byKey(const Key('diag-filter-layer-mapping')));
       await tester.pumpAndSettle();
       expect(find.text('mapping.rejected'), findsOneWidget);
       expect(find.text('readiness.changed'), findsNothing);
+
+      // Reset filter, test role filter and search input.
+      await tester.tap(find.byKey(const Key('diag-filter-all')));
+      await tester.pumpAndSettle();
+      expect(find.text('readiness.changed'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('diag-filter-role-auxiliary')));
+      await tester.pumpAndSettle();
+      expect(find.text('mapping.rejected'), findsOneWidget);
+      expect(find.text('readiness.changed'), findsNothing);
+
+      // Open and close on-demand semantic reference modal.
+      await tester.tap(find.byKey(const Key('topbar-semantics-button')));
+      await tester.pumpAndSettle();
+      expect(find.text('experimental/v0 Semantic Reference'), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.close));
+      await tester.pumpAndSettle();
 
       // Verify strict read-only boundary: zero elevator command actions.
       for (final String forbiddenControl in <String>[
@@ -226,7 +241,7 @@ void main() {
   );
 
   testWidgets(
-    'mobile layout adapts cleanly without overflow and surfaces disconnect + Host revision reset',
+    'mobile layout shows operational cars above the fold, switches 3 non-overlapping tabs cleanly, and surfaces disconnect + Host revision reset',
     (WidgetTester tester) async {
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(360, 780);
@@ -253,19 +268,31 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Mobile uses bottom NavigationBar instead of NavigationRail.
-      expect(find.byType(NavigationBar), findsOneWidget);
-      expect(find.byType(NavigationRail), findsNothing);
+      // Mobile uses slim 3-tab strip (Cars / Sources / Diagnostics) and renders BOTH cars above the fold!
+      expect(find.byKey(const Key('compact-section-strip')), findsOneWidget);
+      expect(find.byType(OperationalCarCard), findsNWidgets(2));
+      final Rect secondCarRect = tester.getRect(
+        find.byType(OperationalCarCard).at(1),
+      );
+      expect(secondCarRect.bottom, lessThan(780));
       expect(tester.takeException(), isNull);
 
-      // Visit each mobile section and verify zero layout overflow.
-      for (final String tabLabel in <String>['Cars', 'Sources', 'Diagnostics', 'Overview']) {
-        await tester.tap(find.text(tabLabel).last);
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
-      }
+      // Visit Sources, Diagnostics, and back to Cars with zero layout overflow.
+      await tester.tap(find.byKey(const Key('compact-tab-sources')));
+      await tester.pumpAndSettle();
+      expect(find.text('rmf/site-main'), findsOneWidget);
+      expect(tester.takeException(), isNull);
 
-      // Toggle light mode on mobile and verify clean render.
+      await tester.tap(find.byKey(const Key('compact-tab-diagnostics')));
+      await tester.pumpAndSettle();
+      expect(find.text('mapping.rejected'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.byKey(const Key('compact-tab-cars')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      // Toggle daylight mode on mobile and verify clean render.
       await tester.tap(find.byKey(const Key('topbar-theme-toggle')));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
@@ -283,7 +310,7 @@ void main() {
       );
       expect(find.text('RECONNECTING'), findsOneWidget);
 
-      // Simulate Host restart (revision resets 12 -> 1, empty operational_cars) and tap Reconnect Now.
+      // Simulate Host restart (revision resets 12 -> 1, empty operational_cars) and tap Reconnect.
       transport.currentSnapshot = _restartedSynchronizingJson;
       await tester.tap(find.byKey(const Key('banner-reconnect-button')));
       await tester.pumpAndSettle();
@@ -293,18 +320,25 @@ void main() {
       expect(find.text('NotReady'), findsOneWidget);
       expect(find.text('#1'), findsOneWidget);
       expect(
-        find.textContaining('New Host lifetime accepted (#12 → #1)'),
+        find.textContaining('New Host lifetime (#12 → #1)'),
         findsOneWidget,
       );
       expect(
         find.byKey(const Key('empty-operational-cars-card')),
         findsOneWidget,
       );
+      // Pending Operational car binding from sources is surfaced directly in empty state!
+      expect(
+        find.textContaining(
+          'lift-A · awaiting (rmf/site-main, payload:awaiting)',
+        ),
+        findsOneWidget,
+      );
     },
   );
 
   testWidgets(
-    'surfaces hard API/protocol errors alongside retained snapshots, handles long CarIds and landscape viewports without overflow, and syncs inline URL form',
+    'surfaces hard API/protocol errors alongside retained snapshots, normalizes -0.00 continuous positions, handles long CarIds and landscape viewports, and syncs inline URL form',
     (WidgetTester tester) async {
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(1280, 800);
@@ -399,13 +433,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
 
-      // Verify -0.00 / +-0.00 never appear on near-integer or negative-zero continuous positions.
-      expect(find.textContaining('(-0.00)'), findsNothing);
+      // Verify -0.00 / +-0.00 NEVER appear anywhere (neither main position nor signed delta!).
+      expect(find.textContaining('-0.00'), findsNothing);
       expect(find.textContaining('+-0.00'), findsNothing);
+      expect(find.text('0.00'), findsOneWidget);
       expect(find.text('Nearest Floor 2 (+0.00)'), findsOneWidget);
       expect(find.text('Nearest Floor 0 (+0.00)'), findsOneWidget);
 
-      // Verify long CarId does not overflow on 360x780 mobile portrait or 800x300 landscape + modal.
+      // Verify long CarId does not overflow on 360x780 mobile portrait or 800x300 short landscape + modal.
       tester.view.physicalSize = const Size(360, 780);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
@@ -428,7 +463,7 @@ void main() {
 
       expect(find.byKey(const Key('connection-error-banner')), findsOneWidget);
       expect(
-        find.textContaining('UNSUPPORTED HOST API VERSION (experimental/v1)'),
+        find.textContaining('Unsupported Host API version (experimental/v1)'),
         findsOneWidget,
       );
       expect(
@@ -436,11 +471,11 @@ void main() {
         findsOneWidget,
       );
 
-      // Manual disconnect with retained snapshot shows CLIENT DISCONNECTED rather than CLIENT CONNECTION LOST.
+      // Manual disconnect with retained snapshot shows Client disconnected rather than Connection lost.
       await syncController.disconnect();
       await tester.pumpAndSettle();
       expect(
-        find.text('CLIENT DISCONNECTED — RETAINED SNAPSHOT IS NOT LIVE'),
+        find.text('Client disconnected — retained snapshot (#5) is NOT live'),
         findsOneWidget,
       );
     },
