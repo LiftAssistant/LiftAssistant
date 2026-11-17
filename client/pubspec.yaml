@@ -1,0 +1,19 @@
+name: liftassistant_client
+description: "Independent read-only Flutter graphical client for LiftAssistant Host (experimental/v0 HTTP + SSE)."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-11-17
+Updated: 2026-11-18
 
 ## Current milestone
 
@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.10 are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING`. **Completion mode: HUMAN-CHECK.** The current authorization ends here and does not include Flutter, WebUI, HA/BMS, M5.11+, or M6.
+M5.1 through M5.10 are implemented and accepted. HUMAN authorized **M5.11 — LiftAssistant Client** (independent read-only Flutter graphical client targeting Android, Linux, and Web over `experimental/v0` HTTP + SSE); second-family live production validation remains `EXTERNAL_VALIDATION_PENDING`. **Current slice: M5.11 IN PROGRESS.**
 
 ## Validated baseline
 
@@ -912,4 +912,13 @@ Implemented behavior and evidence:
 
 Validation: three focused CLI parser/renderer/SSE tests, `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 119 workspace tests, all seven TUI scenarios, all four non-live headless scenarios, process-level production Host plus independent CLI snapshot proof, process-level Host fixture plus independent CLI multi-snapshot SSE proof, dependency-isolation inspection, and cleanup checks pass. Cargo selected reqwest 0.12.28 and its transitive graph at the highest versions compatible with the workspace Rust 1.85 policy; the workspace MSRV was not changed.
 
-No further implementation item is READY under the current authorization. Do not begin M5.11 or any Flutter/WebUI/HA/BMS/M6 work without a new HUMAN decision.
+### M5.11 — LiftAssistant Client
+
+**IN PROGRESS.**
+
+Authorized scope:
+
+- independent external Flutter read-only graphical client targeting Android, Linux, and Web;
+- consumes only the existing `liftassistant-headless` `experimental/v0` HTTP snapshot (`GET /api/experimental/v0/snapshot`) and SSE stream (`GET /api/experimental/v0/events`);
+- preserves complete-snapshot synchronization, Host-local revision reset across Host restarts, floor-vs-continuous location precision, reported-destination evidence boundaries, `Operational` vs `Auxiliary` authority roles, multi-layer health distinctions, and non-fault diagnostic evidence semantics;
+- strictly read-only with no write endpoint, intent submission, or placeholder control UI.
