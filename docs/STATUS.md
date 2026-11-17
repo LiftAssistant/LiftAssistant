@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.7 are implemented. The M5.8 evidence-bounded architecture check is also implemented: recorded BACnet evidence now exercises the same host lifecycle/health, diagnostics, incident replay, sanitization, and adapter-contract boundaries without adding a production simulator dependency. **A second live production source remains BLOCKED BY EXTERNAL INPUT, no M5 item is READY, and M5.9+ is outside the current authorization. Completion mode is HUMAN-CHECK.**
+M5.1 through M5.8 are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING` but no longer blocks client-platform work. **M5.9a — Pure Experimental Read-model Projection is READY.** The current authorization ends after M5.10 and does not include Flutter, WebUI, HA/BMS, or M6.
 
 ## Validated baseline
 
@@ -817,7 +817,7 @@ Validation: focused warning-free TUI clippy, all 22 TUI tests, deterministic exe
 
 ### M5.8 — Second Production Source Family
 
-**RECORDED-EVIDENCE CHECK IMPLEMENTED; LIVE PRODUCTION VALIDATION BLOCKED BY EXTERNAL INPUT.**
+**COMPLETE — HUMAN ACCEPTED AT THE ARCHITECTURE-VALIDATION BOUNDARY.**
 
 Implemented behavior and evidence:
 
@@ -830,4 +830,12 @@ Implemented behavior and evidence:
 
 Validation: the focused recorded-BACnet headless test, `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 110 workspace tests, all seven TUI scenarios, all three non-live headless scenarios, normal-dependency-tree isolation, canonical dependency/wall-clock/write-boundary checks, diff/whitespace review, temporary-artifact cleanup, and empty Podman container/image inventories pass.
 
-External blocker: no live BACnet Lift endpoint, sanitized real BACnet capture, documented controller API, CiA 417/SocketCAN evidence, or other supplied second-family production input is available. Inventing packets, scanning networks, installing privileged interfaces, or promoting recorded evidence to a live claim is forbidden. M5.8 therefore stops at this explicit external-input boundary; M5.9 is not promoted.
+External validation pending: no live BACnet Lift endpoint, sanitized real BACnet capture, documented controller API, CiA 417/SocketCAN evidence, or other supplied second-family production input is available. Inventing packets, scanning networks, installing privileged interfaces, or promoting recorded evidence to a live claim remains forbidden. HUMAN accepted that this external live-validation item does not block M5.9; no BACnet-live, production-ready, or multi-protocol-production claim is implied.
+
+### M5.9a — Pure Experimental Read-model Projection
+
+**READY.**
+
+Project current `ReadOnlyHost`/Engine facts into a small API-boundary-owned `experimental/v0` read model without opening a socket. Preserve floor-reference versus continuous location, all three reported-destination variants, explicit motion/door/mode/readiness/binding-role representations, truthful source/session state, bounded recent diagnostics, and a host-local monotonic read-model revision.
+
+Do not serialize canonical/internal structs directly, expose Rust `Debug` output, add HTTP dependencies outside headless, add inferred scores/quality/estimates, make API revision an observation sequence, or create a generic messaging/client framework. M5.9b and later are not READY until this projection is tested and reviewed.
