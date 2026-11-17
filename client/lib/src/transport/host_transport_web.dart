@@ -28,6 +28,7 @@ extension type _JSRequestInit._(JSObject _) implements JSObject {
     JSString method,
     JSObject headers,
     JSString cache,
+    JSString redirect,
     JSObject signal,
   });
 }
@@ -121,6 +122,7 @@ final class WebHostTransport implements HostTransport {
           method: 'GET'.toJS,
           headers: headers,
           cache: 'no-store'.toJS,
+          redirect: 'error'.toJS,
           signal: abortController.signal,
         ),
       ).toDart.timeout(requestTimeout);
@@ -142,9 +144,22 @@ final class WebHostTransport implements HostTransport {
         );
       }
 
+      final String? contentLengthRaw =
+          response.headers.get('content-length'.toJS)?.toDart;
+      final int? contentLength =
+          contentLengthRaw == null ? null : int.tryParse(contentLengthRaw);
+      if (contentLength != null && contentLength > maxSnapshotBytes) {
+        abortController.abort();
+        throw const SnapshotTooLargeException(limitBytes: maxSnapshotBytes);
+      }
+
       final JSString bodyText =
           await response.text().toDart.timeout(requestTimeout);
-      return bodyText.toDart;
+      final String dartText = bodyText.toDart;
+      if (dartText.length > maxSnapshotBytes) {
+        throw const SnapshotTooLargeException(limitBytes: maxSnapshotBytes);
+      }
+      return dartText;
     } on HostTransportException {
       rethrow;
     } on TimeoutException {
@@ -182,6 +197,7 @@ final class WebHostTransport implements HostTransport {
           method: 'GET'.toJS,
           headers: headers,
           cache: 'no-store'.toJS,
+          redirect: 'error'.toJS,
           signal: abortController.signal,
         ),
       ).toDart.timeout(requestTimeout);
@@ -242,6 +258,7 @@ final class WebHostTransport implements HostTransport {
         if (closedLocally || outputController.isClosed) {
           return;
         }
+        closedLocally = true;
         outputController.addError(
           const HostStreamDisconnectedException(
             'SSE stream timed out waiting for Host activity or keepalive.',
@@ -249,6 +266,13 @@ final class WebHostTransport implements HostTransport {
         );
         abortController.abort();
         _activeControllers.remove(abortController);
+        unawaited(
+          reader.cancel().toDart.then<void>((_) {}, onError: (_) {}),
+        );
+        unawaited(parsedSubscription?.cancel());
+        if (!byteController.isClosed) {
+          unawaited(byteController.close());
+        }
         unawaited(outputController.close());
       });
     }

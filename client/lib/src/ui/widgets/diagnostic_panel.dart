@@ -346,6 +346,7 @@ class _ContextPair extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
+    final String displayValue = value.isEmpty ? '""' : value;
     return RichText(
       text: TextSpan(
         style: DefaultTextStyle.of(context).style,
@@ -358,7 +359,7 @@ class _ContextPair extends StatelessWidget {
             ),
           ),
           TextSpan(
-            text: value,
+            text: displayValue,
             style: instrumentMonoStyle(
               context,
               fontSize: 11.5,

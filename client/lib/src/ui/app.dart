@@ -9,7 +9,10 @@ import 'theme/instrument_theme.dart';
 import 'widgets/host_connection_dialog.dart';
 
 const String _envHostUrl = String.fromEnvironment('LIFTASSISTANT_HOST_URL');
-const bool _envAutoConnect = bool.fromEnvironment('LIFTASSISTANT_AUTO_CONNECT');
+const bool _envAutoConnect = bool.fromEnvironment(
+  'LIFTASSISTANT_AUTO_CONNECT',
+  defaultValue: true,
+);
 
 class LiftAssistantClientApp extends StatefulWidget {
   const LiftAssistantClientApp({
@@ -53,7 +56,7 @@ class _LiftAssistantClientAppState extends State<LiftAssistantClientApp> {
       return (widget.initialHostUrl!, widget.autoConnect);
     }
     if (_envHostUrl.isNotEmpty) {
-      return (_envHostUrl, _envAutoConnect || true);
+      return (_envHostUrl, _envAutoConnect);
     }
     if (kIsWeb) {
       final String? queryHost = Uri.base.queryParameters['host'];

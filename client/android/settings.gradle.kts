@@ -2,6 +2,9 @@ pluginManagement {
     val flutterSdkPath =
         run {
             val localPropertiesFile = file("local.properties")
+            require(localPropertiesFile.exists()) {
+                "local.properties not found in client/android; run 'flutter pub get' in client/ first."
+            }
             val rawText = localPropertiesFile.readText(Charsets.UTF_8)
             val properties = java.util.Properties()
             properties.load(rawText.reader())

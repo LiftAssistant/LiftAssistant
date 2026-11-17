@@ -64,6 +64,15 @@ class HostEndpoint {
       );
     }
 
+    if (trimmed.contains('?') ||
+        trimmed.contains('#') ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      throw const InvalidHostUrlException(
+        'Host base URL must not contain query parameters or fragments.',
+      );
+    }
+
     // Reject empty port suffix such as "http://127.0.0.1:" or "http://[::1]:/"
     final int schemeSep = trimmed.indexOf('://');
     final String afterScheme = trimmed.substring(schemeSep + 3);
@@ -86,12 +95,6 @@ class HostEndpoint {
     if (uri.path.isNotEmpty && uri.path != '/') {
       throw const InvalidHostUrlException(
         'Host base URL must contain only http://host[:port] without a path.',
-      );
-    }
-
-    if (uri.hasQuery || uri.hasFragment) {
-      throw const InvalidHostUrlException(
-        'Host base URL must not contain query parameters or fragments.',
       );
     }
 

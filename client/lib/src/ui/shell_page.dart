@@ -142,6 +142,8 @@ class _ClientShellPageState extends State<ClientShellPage> {
     bool isWide,
   ) {
     final InstrumentPalette palette = context.palette;
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    final bool showReadOnlyHeaderBadge = screenWidth >= 960;
     final (
       String phaseLabel,
       Color phaseFg,
@@ -177,14 +179,16 @@ class _ClientShellPageState extends State<ClientShellPage> {
               ),
             ),
           ),
-          if (isWide) ...<Widget>[
+          if (showReadOnlyHeaderBadge) ...<Widget>[
             const SizedBox(width: 10),
-            SemanticBadge(
-              label: 'READ-ONLY CLIENT',
-              foreground: palette.info,
-              background: palette.infoContainer,
-              tooltip:
-                  'Strictly read-only experimental/v0 client; exposes zero elevator control or write paths.',
+            Flexible(
+              child: SemanticBadge(
+                label: 'READ-ONLY CLIENT',
+                foreground: palette.info,
+                background: palette.infoContainer,
+                tooltip:
+                    'Strictly read-only experimental/v0 client; exposes zero elevator control or write paths.',
+              ),
             ),
           ],
         ],
@@ -217,7 +221,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                     ),
                     const SizedBox(width: 6),
                     ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 240),
+                      constraints: const BoxConstraints(maxWidth: 220),
                       child: Text(
                         state.endpoint?.origin ?? 'Configure Host',
                         overflow: TextOverflow.ellipsis,
@@ -249,12 +253,15 @@ class _ClientShellPageState extends State<ClientShellPage> {
             icon: const Icon(Icons.dns_outlined, size: 18),
           ),
         Center(
-          child: SemanticBadge(
-            key: const Key('topbar-connection-phase-badge'),
-            label: phaseLabel,
-            foreground: phaseFg,
-            background: phaseBg,
-            icon: phaseIcon,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: isWide ? 200 : 128),
+            child: SemanticBadge(
+              key: const Key('topbar-connection-phase-badge'),
+              label: phaseLabel,
+              foreground: phaseFg,
+              background: phaseBg,
+              icon: phaseIcon,
+            ),
           ),
         ),
         if (state.endpoint != null)
@@ -286,62 +293,73 @@ class _ClientShellPageState extends State<ClientShellPage> {
 
   Widget _buildSideRail(BuildContext context, ReadModelSnapshot snapshot) {
     final InstrumentPalette palette = context.palette;
-    return NavigationRail(
-      backgroundColor: palette.surface,
-      selectedIndex: _section.index,
-      labelType: NavigationRailLabelType.all,
-      minWidth: 88,
-      onDestinationSelected: (int idx) {
-        setState(() {
-          _section = ClientSection.values[idx];
-        });
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints railConstraints) {
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: railConstraints.maxHeight),
+            child: IntrinsicHeight(
+              child: NavigationRail(
+                backgroundColor: palette.surface,
+                selectedIndex: _section.index,
+                labelType: NavigationRailLabelType.all,
+                minWidth: 88,
+                onDestinationSelected: (int idx) {
+                  setState(() {
+                    _section = ClientSection.values[idx];
+                  });
+                },
+                destinations: <NavigationRailDestination>[
+                  const NavigationRailDestination(
+                    icon: Icon(Icons.space_dashboard_outlined),
+                    selectedIcon: Icon(Icons.space_dashboard),
+                    label: Text('Overview'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Badge.count(
+                      count: snapshot.operationalCars.length,
+                      isLabelVisible: snapshot.operationalCars.isNotEmpty,
+                      child: const Icon(Icons.elevator_outlined),
+                    ),
+                    selectedIcon: Badge.count(
+                      count: snapshot.operationalCars.length,
+                      isLabelVisible: snapshot.operationalCars.isNotEmpty,
+                      child: const Icon(Icons.elevator),
+                    ),
+                    label: const Text('Cars'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Badge.count(
+                      count: snapshot.sources.length,
+                      isLabelVisible: snapshot.sources.isNotEmpty,
+                      child: const Icon(Icons.hub_outlined),
+                    ),
+                    selectedIcon: Badge.count(
+                      count: snapshot.sources.length,
+                      isLabelVisible: snapshot.sources.isNotEmpty,
+                      child: const Icon(Icons.hub),
+                    ),
+                    label: const Text('Sources'),
+                  ),
+                  NavigationRailDestination(
+                    icon: Badge.count(
+                      count: snapshot.recentDiagnostics.length,
+                      isLabelVisible: snapshot.recentDiagnostics.isNotEmpty,
+                      child: const Icon(Icons.analytics_outlined),
+                    ),
+                    selectedIcon: Badge.count(
+                      count: snapshot.recentDiagnostics.length,
+                      isLabelVisible: snapshot.recentDiagnostics.isNotEmpty,
+                      child: const Icon(Icons.analytics),
+                    ),
+                    label: const Text('Diagnostics'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
       },
-      destinations: <NavigationRailDestination>[
-        const NavigationRailDestination(
-          icon: Icon(Icons.space_dashboard_outlined),
-          selectedIcon: Icon(Icons.space_dashboard),
-          label: Text('Overview'),
-        ),
-        NavigationRailDestination(
-          icon: Badge.count(
-            count: snapshot.operationalCars.length,
-            isLabelVisible: snapshot.operationalCars.isNotEmpty,
-            child: const Icon(Icons.elevator_outlined),
-          ),
-          selectedIcon: Badge.count(
-            count: snapshot.operationalCars.length,
-            isLabelVisible: snapshot.operationalCars.isNotEmpty,
-            child: const Icon(Icons.elevator),
-          ),
-          label: const Text('Cars'),
-        ),
-        NavigationRailDestination(
-          icon: Badge.count(
-            count: snapshot.sources.length,
-            isLabelVisible: snapshot.sources.isNotEmpty,
-            child: const Icon(Icons.hub_outlined),
-          ),
-          selectedIcon: Badge.count(
-            count: snapshot.sources.length,
-            isLabelVisible: snapshot.sources.isNotEmpty,
-            child: const Icon(Icons.hub),
-          ),
-          label: const Text('Sources'),
-        ),
-        NavigationRailDestination(
-          icon: Badge.count(
-            count: snapshot.recentDiagnostics.length,
-            isLabelVisible: snapshot.recentDiagnostics.isNotEmpty,
-            child: const Icon(Icons.analytics_outlined),
-          ),
-          selectedIcon: Badge.count(
-            count: snapshot.recentDiagnostics.length,
-            isLabelVisible: snapshot.recentDiagnostics.isNotEmpty,
-            child: const Icon(Icons.analytics),
-          ),
-          label: const Text('Diagnostics'),
-        ),
-      ],
     );
   }
 

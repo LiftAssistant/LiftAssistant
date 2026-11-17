@@ -302,4 +302,164 @@ void main() {
       );
     },
   );
+
+  testWidgets(
+    'surfaces hard API/protocol errors alongside retained snapshots, handles long CarIds and landscape viewports without overflow, and syncs inline URL form',
+    (WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1280, 800);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      const String edgeCaseSnapshot = '''
+      {
+        "api_version": "experimental/v0",
+        "revision": 5,
+        "lifecycle": "ready_read_only",
+        "readiness": "read_only",
+        "operational_cars": [
+          {
+            "id": "building-north-tower-service-elevator-car-01",
+            "location": {"kind": "continuous", "floor_position": 1.999, "nearest_floor": 2},
+            "motion": {"state": "stopped"},
+            "door": "closed",
+            "operating_mode": "out_of_service",
+            "reported_destination": {"kind": "none"}
+          },
+          {
+            "id": "car-zero",
+            "location": {"kind": "continuous", "floor_position": -0.0, "nearest_floor": 0},
+            "motion": {"state": "stopped"},
+            "door": "closed",
+            "operating_mode": "normal",
+            "reported_destination": {"kind": "none"}
+          }
+        ],
+        "sources": [],
+        "recent_diagnostics": [
+          {
+            "sequence": 1,
+            "layer": "mapping",
+            "id": "mapping.rejected",
+            "source": "rmf/site",
+            "session": "s1",
+            "car": null,
+            "role": null,
+            "native_entity": ""
+          }
+        ]
+      }
+      ''';
+
+      final _WidgetTestTransport transport = _WidgetTestTransport()
+        ..currentSnapshot = edgeCaseSnapshot;
+      bool failConnect = true;
+      final _FakeConditionalTransport conditional = _FakeConditionalTransport(
+        onFetch: () async {
+          if (failConnect) {
+            throw const HostUnreachableException('Offline');
+          }
+          return edgeCaseSnapshot;
+        },
+        delegate: transport,
+      );
+      final ClientController syncController = ClientController(
+        transport: conditional,
+        initialUrlInput: 'http://127.0.0.1:8080',
+        retryBackoff: (_) => const Duration(seconds: 60),
+      );
+      addTearDown(() {
+        syncController.dispose();
+        transport.dispose();
+      });
+
+      await tester.pumpWidget(
+        LiftAssistantClientApp(controller: syncController),
+      );
+      await tester.pumpAndSettle();
+
+      // Update Host URL via topbar modal while snapshot == null and verify inline form syncs.
+      await tester.tap(find.byKey(const Key('topbar-host-button')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('host-url-input')).last,
+        'http://192.168.1.99:9090',
+      );
+      await tester.tap(find.byKey(const Key('connect-host-button')).last);
+      await tester.pumpAndSettle();
+
+      final TextField inlineField = tester.widget<TextField>(
+        find.byKey(const Key('host-url-input')),
+      );
+      expect(inlineField.controller?.text, 'http://192.168.1.99:9090');
+
+      // Now bring Host online and connect.
+      failConnect = false;
+      await tester.tap(find.byKey(const Key('error-retry-button')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      // Verify -0.00 / +-0.00 never appear on near-integer or negative-zero continuous positions.
+      expect(find.textContaining('(-0.00)'), findsNothing);
+      expect(find.textContaining('+-0.00'), findsNothing);
+      expect(find.text('Nearest Floor 2 (+0.00)'), findsOneWidget);
+      expect(find.text('Nearest Floor 0 (+0.00)'), findsOneWidget);
+
+      // Verify long CarId does not overflow on 360x780 mobile portrait or 800x300 landscape + modal.
+      tester.view.physicalSize = const Size(360, 780);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      tester.view.physicalSize = const Size(800, 300);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(find.byKey(const Key('topbar-host-button')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      Navigator.of(tester.element(find.byType(Dialog))).pop();
+      await tester.pumpAndSettle();
+
+      // Emit unsupported API version while snapshot #5 is retained: BOTH error banner and stale banner must show.
+      tester.view.physicalSize = const Size(1280, 800);
+      await tester.pumpAndSettle();
+      transport.sseController.add('{"api_version": "experimental/v1"}');
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('connection-error-banner')), findsOneWidget);
+      expect(
+        find.textContaining('UNSUPPORTED HOST API VERSION (experimental/v1)'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('stale-retained-snapshot-banner')),
+        findsOneWidget,
+      );
+
+      // Manual disconnect with retained snapshot shows CLIENT DISCONNECTED rather than CLIENT CONNECTION LOST.
+      await syncController.disconnect();
+      await tester.pumpAndSettle();
+      expect(
+        find.text('CLIENT DISCONNECTED — RETAINED SNAPSHOT IS NOT LIVE'),
+        findsOneWidget,
+      );
+    },
+  );
+}
+
+final class _FakeConditionalTransport implements HostTransport {
+  _FakeConditionalTransport({required this.onFetch, required this.delegate});
+
+  final Future<String> Function() onFetch;
+  final _WidgetTestTransport delegate;
+
+  @override
+  Future<String> fetchSnapshotJson(HostEndpoint endpoint) => onFetch();
+
+  @override
+  Future<HostSseConnection> openSnapshotEvents(HostEndpoint endpoint) =>
+      delegate.openSnapshotEvents(endpoint);
+
+  @override
+  void dispose() {}
 }

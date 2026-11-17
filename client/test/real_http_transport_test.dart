@@ -189,5 +189,63 @@ void main() {
       expect(received, <String>['{"rev":1}']);
       expect(terminalError, isA<HostStreamDisconnectedException>());
     });
+
+    test('rejects HTTP 3xx redirects without following to arbitrary targets', () async {
+      final HttpServer targetServer = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(targetServer.close);
+      bool redirectFollowed = false;
+      targetServer.listen((HttpRequest req) async {
+        redirectFollowed = true;
+        req.response.statusCode = HttpStatus.ok;
+        req.response.headers.contentType = ContentType.json;
+        req.response.write('{"api_version":"experimental/v0"}');
+        await req.response.close();
+      });
+
+      final HttpServer redirectServer = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(redirectServer.close);
+      redirectServer.listen((HttpRequest req) async {
+        req.response.statusCode = HttpStatus.found;
+        req.response.headers.set(
+          HttpHeaders.locationHeader,
+          'http://127.0.0.1:${targetServer.port}/unexpected-path',
+        );
+        await req.response.close();
+      });
+
+      final HostEndpoint endpoint = HostEndpoint.parse(
+        'http://127.0.0.1:${redirectServer.port}',
+      );
+      final IoHostTransport transport = IoHostTransport();
+      addTearDown(transport.dispose);
+
+      await expectLater(
+        transport.fetchSnapshotJson(endpoint),
+        throwsA(
+          isA<HostHttpStatusException>().having(
+            (HostHttpStatusException e) => e.statusCode,
+            'statusCode',
+            HttpStatus.found,
+          ),
+        ),
+      );
+      await expectLater(
+        transport.openSnapshotEvents(endpoint),
+        throwsA(
+          isA<HostHttpStatusException>().having(
+            (HostHttpStatusException e) => e.statusCode,
+            'statusCode',
+            HttpStatus.found,
+          ),
+        ),
+      );
+      expect(redirectFollowed, isFalse);
+    });
   });
 }

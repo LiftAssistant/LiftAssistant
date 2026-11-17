@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../api/host_url.dart';
 import 'host_transport.dart';
@@ -50,6 +51,7 @@ final class IoHostTransport implements HostTransport {
       final HttpClientRequest request = await client
           .getUrl(endpoint.snapshotUri)
           .timeout(requestTimeout);
+      request.followRedirects = false;
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
 
@@ -76,11 +78,21 @@ final class IoHostTransport implements HostTransport {
         );
       }
 
-      final String body = await utf8.decoder
-          .bind(response)
-          .join()
-          .timeout(requestTimeout);
-      return body;
+      if (response.contentLength > maxSnapshotBytes) {
+        throw const SnapshotTooLargeException(limitBytes: maxSnapshotBytes);
+      }
+
+      final BytesBuilder builder = BytesBuilder(copy: false);
+      await (() async {
+        await for (final List<int> chunk in response) {
+          if (builder.length + chunk.length > maxSnapshotBytes) {
+            throw const SnapshotTooLargeException(limitBytes: maxSnapshotBytes);
+          }
+          builder.add(chunk);
+        }
+      })().timeout(requestTimeout);
+
+      return utf8.decode(builder.takeBytes());
     } on HostTransportException {
       rethrow;
     } on TimeoutException {
@@ -115,6 +127,7 @@ final class IoHostTransport implements HostTransport {
       final HttpClientRequest request = await client
           .getUrl(endpoint.eventsUri)
           .timeout(requestTimeout);
+      request.followRedirects = false;
       request.headers.set(HttpHeaders.acceptHeader, 'text/event-stream');
       request.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
 

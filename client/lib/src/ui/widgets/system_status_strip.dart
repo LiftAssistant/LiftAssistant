@@ -132,44 +132,110 @@ class SystemStatusStrip extends StatelessWidget {
   final VoidCallback onReconnectNow;
   final VoidCallback onConfigureHost;
 
+  bool _isHardError(ClientConnectionError? error) {
+    if (error == null) {
+      return false;
+    }
+    return state.phase == ConnectionPhase.incompatibleApi ||
+        state.phase == ConnectionPhase.protocolError ||
+        error.kind == ClientErrorKind.invalidUrl;
+  }
+
+  (String, String) _describeRetainedStaleBanner(
+    ReadModelSnapshot snapshot,
+    ClientConnectionError? error, {
+    required bool hasHardErrorAbove,
+  }) {
+    if (hasHardErrorAbove) {
+      return (
+        'RETAINED SNAPSHOT IS NOT LIVE',
+        'Displaying last valid snapshot received at Host revision #${snapshot.revision} '
+            'before the protocol/API error above. Retained values are historical client context, '
+            'NOT live operational truth.',
+      );
+    }
+    if (state.phase == ConnectionPhase.connecting) {
+      return (
+        'RECONNECTING TO HOST — RETAINED SNAPSHOT IS NOT LIVE',
+        'Requesting a fresh complete snapshot from ${state.endpoint?.origin ?? "Host"}. '
+            'Until synchronization completes, Host revision #${snapshot.revision} below '
+            'remains historical client context, NOT live operational truth.',
+      );
+    }
+    if (state.phase == ConnectionPhase.disconnected && error == null) {
+      return (
+        'CLIENT DISCONNECTED — RETAINED SNAPSHOT IS NOT LIVE',
+        'Synchronization stopped. Displaying last complete snapshot received at Host revision '
+            '#${snapshot.revision} as historical client context, NOT live operational truth.',
+      );
+    }
+    final String detail = error?.message ?? 'connection interrupted';
+    final String retryDetail = state.reconnectAttempt > 0
+        ? ' (retry attempt #${state.reconnectAttempt})'
+        : '';
+    return (
+      'CLIENT CONNECTION LOST — RETAINED SNAPSHOT IS NOT LIVE',
+      'Displaying last complete snapshot received at Host revision #${snapshot.revision} '
+          'before connection stopped$retryDetail: $detail '
+          'Retained values are historical client context, NOT live operational truth.',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
     final ReadModelSnapshot? snapshot = state.snapshot;
     final ClientConnectionError? error = state.error;
+    final bool showHardErrorBanner = _isHardError(error);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (state.hasRetainedStaleSnapshot) ...<Widget>[
-          SemanticCalloutBanner(
-            key: const Key('stale-retained-snapshot-banner'),
-            icon: Icons.cloud_off_outlined,
-            title:
-                'CLIENT CONNECTION LOST — RETAINED SNAPSHOT IS NOT LIVE',
-            message:
-                'Displaying last complete snapshot received at Host revision #${snapshot!.revision} '
-                'before connection stopped (${error?.message ?? state.phase.name}). '
-                'Retained values are historical client context, NOT live operational truth.',
-            accent: palette.caution,
-            background: palette.cautionContainer,
-            actions: <Widget>[
-              FilledButton.tonalIcon(
-                key: const Key('banner-reconnect-button'),
-                onPressed: onReconnectNow,
-                icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('Reconnect Now'),
-              ),
-              OutlinedButton.icon(
-                onPressed: onConfigureHost,
-                icon: const Icon(Icons.edit_outlined, size: 16),
-                label: const Text('Change Host'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-        ] else if (error != null) ...<Widget>[
+        if (error != null &&
+            (showHardErrorBanner || !state.hasRetainedStaleSnapshot)) ...<Widget>[
           _buildErrorBanner(context, error, palette),
+          const SizedBox(height: 12),
+        ],
+        if (state.hasRetainedStaleSnapshot) ...<Widget>[
+          Builder(
+            builder: (BuildContext context) {
+              final (String staleTitle, String staleMessage) =
+                  _describeRetainedStaleBanner(
+                    snapshot!,
+                    error,
+                    hasHardErrorAbove: showHardErrorBanner,
+                  );
+              return SemanticCalloutBanner(
+                key: const Key('stale-retained-snapshot-banner'),
+                icon: Icons.cloud_off_outlined,
+                title: staleTitle,
+                message: staleMessage,
+                accent: palette.caution,
+                background: palette.cautionContainer,
+                actions: showHardErrorBanner
+                    ? const <Widget>[]
+                    : <Widget>[
+                        FilledButton.tonalIcon(
+                          key: const Key('banner-reconnect-button'),
+                          onPressed: state.phase == ConnectionPhase.connecting
+                              ? null
+                              : onReconnectNow,
+                          icon: const Icon(Icons.refresh, size: 16),
+                          label: Text(
+                            state.phase == ConnectionPhase.connecting
+                                ? 'Reconnecting...'
+                                : 'Reconnect Now',
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: onConfigureHost,
+                          icon: const Icon(Icons.edit_outlined, size: 16),
+                          label: const Text('Change Host'),
+                        ),
+                      ],
+              );
+            },
+          ),
           const SizedBox(height: 12),
         ],
         if (snapshot != null)
@@ -190,16 +256,16 @@ class SystemStatusStrip extends StatelessWidget {
     ClientConnectionError error,
     InstrumentPalette palette,
   ) {
-    final bool isHardError =
-        state.phase == ConnectionPhase.incompatibleApi ||
-        state.phase == ConnectionPhase.protocolError ||
-        error.kind == ClientErrorKind.invalidUrl;
+    final bool isHardError = _isHardError(error);
+    final String versionLabel =
+        (error.unsupportedVersion == null || error.unsupportedVersion!.isEmpty)
+        ? 'empty'
+        : error.unsupportedVersion!;
 
     final String title;
     switch (error.kind) {
       case ClientErrorKind.unsupportedApiVersion:
-        title =
-            'UNSUPPORTED HOST API VERSION (${error.unsupportedVersion ?? "unknown"})';
+        title = 'UNSUPPORTED HOST API VERSION ($versionLabel)';
       case ClientErrorKind.malformedResponse:
         title = 'MALFORMED HOST RESPONSE';
       case ClientErrorKind.unexpectedContentType:

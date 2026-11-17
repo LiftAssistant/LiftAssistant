@@ -82,6 +82,22 @@ void main() {
         () => HostEndpoint.parse('http://127.0.0.1:70000'),
         throwsA(isA<InvalidHostUrlException>()),
       );
+      expect(
+        () => HostEndpoint.parse('http://127.0.0.1?'),
+        throwsA(isA<InvalidHostUrlException>()),
+      );
+      expect(
+        () => HostEndpoint.parse('http://127.0.0.1#'),
+        throwsA(isA<InvalidHostUrlException>()),
+      );
+      expect(
+        () => HostEndpoint.parse('http://127.0.0.1:?'),
+        throwsA(isA<InvalidHostUrlException>()),
+      );
+      expect(
+        () => HostEndpoint.parse('http://127.0.0.1:#'),
+        throwsA(isA<InvalidHostUrlException>()),
+      );
     });
   });
 }

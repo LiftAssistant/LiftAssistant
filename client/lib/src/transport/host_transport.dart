@@ -53,6 +53,18 @@ final class UnexpectedContentTypeException extends HostTransportException {
   final String operation;
 }
 
+const int maxSnapshotBytes = 8 * 1024 * 1024;
+
+@immutable
+final class SnapshotTooLargeException extends HostTransportException {
+  const SnapshotTooLargeException({required this.limitBytes})
+      : super(
+          'Snapshot response exceeded maximum bounded size ($limitBytes bytes).',
+        );
+
+  final int limitBytes;
+}
+
 @immutable
 final class HostStreamDisconnectedException extends HostTransportException {
   const HostStreamDisconnectedException(super.message);

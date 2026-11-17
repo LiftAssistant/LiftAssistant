@@ -109,6 +109,20 @@ class _HostConnectionFormState extends State<HostConnectionForm> {
   }
 
   @override
+  void didUpdateWidget(covariant HostConnectionForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialUrl != oldWidget.initialUrl &&
+        widget.initialUrl.isNotEmpty &&
+        _controller.text != widget.initialUrl) {
+      _controller.value = TextEditingValue(
+        text: widget.initialUrl,
+        selection: TextSelection.collapsed(offset: widget.initialUrl.length),
+      );
+      _validationError = null;
+    }
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();
@@ -264,7 +278,7 @@ Future<void> showHostConnectionModal({
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (BuildContext sheetContext) {
-        return Padding(
+        return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(
             18,
             18,
@@ -301,7 +315,7 @@ Future<void> showHostConnectionModal({
         ),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 540),
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(22),
             child: HostConnectionForm(
               initialUrl: currentUrl,

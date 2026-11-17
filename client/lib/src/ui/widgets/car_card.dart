@@ -35,59 +35,85 @@ class OperationalCarCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             // Header: Logical CarId + Operating Mode
-            Row(
-              children: <Widget>[
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: palette.operationalRoleContainer,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: palette.operationalRole.withValues(alpha: 0.4),
+            LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints headerConstraints) {
+                final bool showSubtitleInline =
+                    headerConstraints.maxWidth >= 420;
+                final Widget carIdBadge = Tooltip(
+                  message: car.id,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
                     ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Icon(
-                        Icons.elevator_outlined,
-                        size: 17,
-                        color: palette.operationalRole,
+                    decoration: BoxDecoration(
+                      color: palette.operationalRoleContainer,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: palette.operationalRole.withValues(alpha: 0.4),
                       ),
-                      const SizedBox(width: 6),
-                      Text(
-                        car.id,
-                        style: instrumentMonoStyle(
-                          context,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Icon(
+                          Icons.elevator_outlined,
+                          size: 17,
                           color: palette.operationalRole,
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Logical Car (Operational Truth)',
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: palette.subtleText,
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            car.id,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: instrumentMonoStyle(
+                              context,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: palette.operationalRole,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                SemanticBadge(
-                  label: modeLabel,
-                  foreground: modeFg,
-                  background: modeBg,
-                  tooltip: 'LiftAssistant canonical operating mode',
-                ),
-              ],
+                );
+
+                return Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Row(
+                        children: <Widget>[
+                          Flexible(flex: 3, child: carIdBadge),
+                          if (showSubtitleInline) ...<Widget>[
+                            const SizedBox(width: 8),
+                            Flexible(
+                              flex: 2,
+                              child: Text(
+                                'Logical Car (Operational Truth)',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: palette.subtleText,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SemanticBadge(
+                      label: modeLabel,
+                      foreground: modeFg,
+                      background: modeBg,
+                      tooltip: 'LiftAssistant canonical operating mode',
+                    ),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 14),
 
@@ -289,10 +315,12 @@ class _LocationPrecisionPanel extends StatelessWidget {
         );
 
       case ContinuousLocation(:final floorPosition, :final nearestFloor):
-        final double delta = floorPosition - nearestFloor;
-        final String signedDelta = delta >= 0
-            ? '+${delta.toStringAsFixed(2)}'
-            : delta.toStringAsFixed(2);
+        final double rawDelta = floorPosition - nearestFloor;
+        final double roundedCents = (rawDelta * 100).roundToDouble() / 100.0;
+        final double normalizedDelta = roundedCents == 0.0 ? 0.0 : roundedCents;
+        final String signedDelta = normalizedDelta >= 0
+            ? '+${normalizedDelta.toStringAsFixed(2)}'
+            : normalizedDelta.toStringAsFixed(2);
         return Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(

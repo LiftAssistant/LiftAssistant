@@ -286,5 +286,44 @@ void main() {
       expect(controller.state.isSnapshotLive, isFalse);
       expect(controller.state.snapshot?.revision, 5);
     });
+
+    test('increments reconnect backoff when snapshot succeeds but SSE open or initial stream fails repeatedly', () async {
+      final _FakeHostTransport transport = _FakeHostTransport();
+      final List<int> observedAttempts = <int>[];
+      int sseMode = 0;
+
+      transport.onFetchSnapshot = (_) async => _snapshotJson(revision: 3);
+      transport.onOpenEvents = (_) async {
+        if (sseMode == 0) {
+          throw const HostHttpStatusException(statusCode: 502, operation: 'SSE');
+        }
+        final StreamController<String> emptySse = StreamController<String>();
+        unawaited(Future<void>.microtask(emptySse.close));
+        return HostSseConnection(
+          snapshots: emptySse.stream,
+          onClose: () async {},
+        );
+      };
+
+      final ClientController controller = ClientController(
+        transport: transport,
+        retryBackoff: (int attempt) {
+          observedAttempts.add(attempt);
+          return const Duration(milliseconds: 15);
+        },
+      );
+      addTearDown(controller.dispose);
+
+      await controller.connectToUrl('http://127.0.0.1:8080');
+      await _waitUntil(() => observedAttempts.any((int a) => a >= 3));
+      expect(observedAttempts.sublist(0, 3), <int>[1, 2, 3]);
+
+      // Switch to immediate-EOF SSE stream (0 snapshots delivered) and verify attempts still advance.
+      observedAttempts.clear();
+      sseMode = 1;
+      await controller.reconnectNow();
+      await _waitUntil(() => observedAttempts.any((int a) => a >= 3));
+      expect(observedAttempts.sublist(0, 3), <int>[1, 2, 3]);
+    });
   });
 }

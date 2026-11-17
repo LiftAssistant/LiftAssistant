@@ -184,7 +184,7 @@ class ClientController extends ChangeNotifier {
       if (_disposed || opId != _operationId) {
         return;
       }
-      _handleConnectionFailure(opId, endpoint, error, attempt: 1);
+      _handleConnectionFailure(opId, endpoint, error, attempt: attempt + 1);
       return;
     }
 
@@ -203,6 +203,7 @@ class ClientController extends ChangeNotifier {
       ),
     );
 
+    bool receivedSseSnapshot = false;
     _sseSubscription = sseConnection.snapshots.listen(
       (String rawEventJson) {
         if (_disposed || opId != _operationId) {
@@ -212,16 +213,31 @@ class ClientController extends ChangeNotifier {
         try {
           nextSnapshot = ExperimentalV0Decoder.decodeJson(rawEventJson);
         } catch (decodeError) {
-          unawaited(_abortSseOnError(opId, endpoint, decodeError));
+          unawaited(
+            _abortSseOnError(
+              opId,
+              endpoint,
+              decodeError,
+              nextAttempt: receivedSseSnapshot ? 1 : attempt + 1,
+            ),
+          );
           return;
         }
+        receivedSseSnapshot = true;
         _applyIncomingSnapshot(nextSnapshot, phase: ConnectionPhase.live);
       },
       onError: (Object streamError) {
         if (_disposed || opId != _operationId) {
           return;
         }
-        unawaited(_abortSseOnError(opId, endpoint, streamError));
+        unawaited(
+          _abortSseOnError(
+            opId,
+            endpoint,
+            streamError,
+            nextAttempt: receivedSseSnapshot ? 1 : attempt + 1,
+          ),
+        );
       },
       onDone: () {
         if (_disposed || opId != _operationId) {
@@ -234,6 +250,7 @@ class ClientController extends ChangeNotifier {
             const HostStreamDisconnectedException(
               'SSE stream ended unexpectedly.',
             ),
+            nextAttempt: receivedSseSnapshot ? 1 : attempt + 1,
           ),
         );
       },
@@ -244,8 +261,9 @@ class ClientController extends ChangeNotifier {
   Future<void> _abortSseOnError(
     int opId,
     HostEndpoint endpoint,
-    Object error,
-  ) async {
+    Object error, {
+    required int nextAttempt,
+  }) async {
     if (_disposed || opId != _operationId) {
       return;
     }
@@ -256,7 +274,7 @@ class ClientController extends ChangeNotifier {
     final HostSseConnection? sse = _activeSse;
     _activeSse = null;
 
-    _handleConnectionFailure(opId, endpoint, error, attempt: 1);
+    _handleConnectionFailure(opId, endpoint, error, attempt: nextAttempt);
 
     if (sub != null) {
       await sub.cancel();
@@ -362,6 +380,17 @@ class ClientController extends ChangeNotifier {
     }
 
     if (error is MalformedReadModelException) {
+      return (
+        ConnectionPhase.protocolError,
+        ClientConnectionError(
+          kind: ClientErrorKind.malformedResponse,
+          message: error.message,
+        ),
+        false,
+      );
+    }
+
+    if (error is SnapshotTooLargeException) {
       return (
         ConnectionPhase.protocolError,
         ClientConnectionError(
