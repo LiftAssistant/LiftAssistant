@@ -653,14 +653,26 @@ Closeout validation: formatting, warning-free all-target workspace clippy, all 8
 
 ### M5.1a — Rust-native ROS 2 transport compatibility proof
 
+**IMPLEMENTED.**
+
+The bounded proof succeeded without changing the workspace or host toolchain:
+
+- `ros2-client` 0.8.2 declares Rust 1.82 and resolved to RustDDS 0.11.8, which declares Rust 1.73, preserving the workspace Rust 1.85 MSRV;
+- an adapter-local `serde` wire type matching the official `rmf_lift_msgs/msg/LiftState` field order decoded real Kilted payloads without the experimental message generator;
+- a BestEffort, Volatile, KeepLast reader received complete `Lift1` and `Lift2` snapshots from the official Hotel `/lift_states` publisher through host-side RustDDS;
+- a Reliable reader was discovered by the ROS graph but received no payload during the bounded window, so discovery was again insufficient evidence and the proven live reader profile is BestEffort;
+- no system ROS installation, write publisher, generic adapter framework, sidecar protocol, host middleware change, or project-wide MSRV bump was introduced.
+
+The proof used the official rootless Kilted image at digest `sha256:601a6bb7c04d559fb9ec654d9b7a41650918990e35712036d836f072a6430db5`. Temporary proof source and raw output remain outside the repository.
+
+### M5.1b — RMF-owned live subscription and canonical ingestion
+
 **READY.**
 
-Bound the proof before adding an adapter ownership layer:
+Introduce only the concrete ownership demanded by the successful proof:
 
-- preserve workspace Rust 1.85 MSRV;
-- check a compatible `ros2-client`/RustDDS version and its transitive MSRV;
-- subscribe read-only to the official Kilted `/lift_states` source through rootless Podman;
-- validate real `rmf_lift_msgs/msg/LiftState` decoding and QoS interoperability;
-- add no system ROS installation, write publisher, generic adapter framework, sidecar protocol, or project-wide MSRV bump.
-
-If the proof requires a project-wide MSRV increase, experimental unvalidated message-generation hack, foundational IPC sidecar, or host ROS installation, stop the dependent slice at HUMAN-CHECK.
+- keep ROS/RMF dependencies out of model, Core, and Engine;
+- share one RMF semantic mapper between recorded and live paths rather than copying it;
+- use explicit `lift_name` to logical `CarId` configuration, existing binding roles, an adapter-owned source session, and one source-global/session-local observation sequence;
+- deliver live messages only as canonical `CarObservationUpdate` values into Engine;
+- prove two cars, restart invalidation, and strict absence of a write interface against the official simulation.
