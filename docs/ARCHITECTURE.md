@@ -129,6 +129,14 @@ deterministic trigger before writing. The private source is not mutated. Every c
 embeds a mandatory manual-review marker: the transformation is not perfect anonymization,
 security certification, publication approval, or an automatic upload path.
 
+The M5 host/health/diagnostic/capsule boundary is not RMF-specific: the existing recorded
+BACnet Lift mapper drives the same explicit binding/session, readiness, source invalidation,
+typed diagnostics, fresh-host capsule replay, and deterministic sanitization path in a
+headless regression. BACnet remains a test-only dependency of headless, so the normal host
+composition does not acquire the simulator or an unproved BACnet transport. This proves a
+second canonical source family can exercise the internal platform; it does not prove live
+BACnet discovery, COV/liveliness/freshness, controller compatibility, or production operation.
+
 The headless host keeps lifecycle and readiness separate: a live process begins
 `Starting/NotReady`, incomplete Operational evidence remains `Synchronizing/NotReady`,
 and sufficient Operational evidence permits `ReadyReadOnly/ReadOnly`. Restart or an

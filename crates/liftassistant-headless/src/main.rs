@@ -2358,6 +2358,10 @@ fn render_report(run: &ProofRun) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use liftassistant_sim::{
+        BacnetDoorStatus, BacnetLiftCarDirection, BacnetLiftCarMode, BacnetMappingError,
+        RecordedBacnetLiftProperties, map_bacnet_lift_properties,
+    };
 
     fn command_args(values: &[&str]) -> impl Iterator<Item = String> {
         values
@@ -2723,6 +2727,199 @@ mod tests {
                 .expect_err("candidate cannot be silently sanitized twice")
                 .contains("already a sanitized candidate")
         );
+    }
+
+    #[test]
+    fn recorded_bacnet_exercises_protocol_neutral_m5_host_paths() {
+        let source = ObservationSourceId::new("fixture/bacnet-platform-check");
+        let session_a = ObservationSessionId::new("bacnet-platform-session-A");
+        let session_b = ObservationSessionId::new("bacnet-platform-session-B");
+        let car = CarId::new("logical-bacnet-car");
+        let floors = [(1, 1), (2, 2), (3, 3)]
+            .into_iter()
+            .map(|(universal, logical)| (universal, Floor::new(logical)))
+            .collect::<BTreeMap<_, _>>();
+        let properties = RecordedBacnetLiftProperties {
+            object_name: "BACnet Lift Object 7".into(),
+            car_position: 1,
+            car_moving_direction: BacnetLiftCarDirection::Stopped,
+            car_door_status: vec![BacnetDoorStatus::Closed],
+            car_mode: Some(BacnetLiftCarMode::Normal),
+            next_stopping_floor: Some(1),
+            out_of_service: false,
+        };
+        let provenance = |session: &ObservationSessionId, sequence| ObservationProvenance {
+            source: source.clone(),
+            session: session.clone(),
+            sequence: ObservationSequence::new(sequence),
+        };
+        let mapped = map_bacnet_lift_properties(
+            &properties,
+            car.clone(),
+            &floors,
+            provenance(&session_a, 1),
+        )
+        .expect("recorded BACnet properties map through their existing adapter boundary");
+        assert_eq!(mapped.source_context.object_name, "BACnet Lift Object 7");
+        assert_ne!(
+            mapped.source_context.object_name,
+            mapped.observation.car.as_str()
+        );
+
+        let mut host = ReadOnlyHost::new(mapped.topology.clone());
+        host.bind_observation(
+            source.clone(),
+            car.clone(),
+            ObservationBindingRole::Operational,
+        )
+        .expect("BACnet source is explicitly bound");
+        host.begin_source_session(source.clone(), session_a.clone())
+            .expect("BACnet source session starts explicitly");
+
+        let mut unknown_floor = properties.clone();
+        unknown_floor.car_position = 99;
+        let mapping_error = map_bacnet_lift_properties(
+            &unknown_floor,
+            car.clone(),
+            &floors,
+            provenance(&session_a, 1),
+        )
+        .expect_err("unconfigured BACnet universal floor is rejected");
+        assert_eq!(mapping_error, BacnetMappingError::UnknownUniversalFloor(99));
+        host.record_mapping_rejection(
+            source.clone(),
+            session_a.clone(),
+            unknown_floor.object_name,
+            mapping_error.to_string(),
+        );
+        assert!(host.diagnostics().entries().any(|entry| {
+            entry.layer == HostDiagnosticLayer::Mapping
+                && entry.id == HostDiagnosticId::MappingRejected
+                && entry.context.source.as_ref() == Some(&source)
+                && entry.context.session.as_ref() == Some(&session_a)
+                && entry.context.native_entity.as_deref() == Some("BACnet Lift Object 7")
+        }));
+
+        host.ingest_observation(mapped.observation.into());
+        assert_eq!(host.lifecycle(), &HostLifecycle::ReadyReadOnly);
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+        assert_eq!(
+            host.source_health(&source)
+                .expect("source health is protocol-neutral")
+                .payload,
+            PayloadActivity::Active
+        );
+
+        host.mark_source_payload_stale(source.clone(), session_a.clone())
+            .expect("host applies explicit source-specific freshness decision");
+        assert_eq!(host.lifecycle(), &HostLifecycle::Synchronizing);
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        assert!(host.engine.car_states().is_empty());
+        assert_eq!(
+            host.source_health(&source)
+                .expect("stale BACnet source remains inspectable")
+                .payload,
+            PayloadActivity::Stale
+        );
+
+        let capsule =
+            host.capture_incident(CapsuleTrigger::source_payload_stale(&source, &session_a));
+        let replay = capsule
+            .replay()
+            .expect("BACnet-origin canonical capsule replays in a fresh host");
+        assert_eq!(replay.trigger_id, "source.payload-stale");
+        let (candidate, sanitization) = capsule
+            .sanitize_candidate()
+            .expect("BACnet-origin capsule uses the protocol-neutral sanitization path");
+        assert!(sanitization.manual_review_required);
+        assert_eq!(
+            candidate
+                .replay()
+                .expect("sanitized BACnet-origin capsule still replays")
+                .trigger_id,
+            replay.trigger_id
+        );
+        let candidate_json = candidate.to_json().expect("candidate encodes");
+        for private_value in [
+            "fixture/bacnet-platform-check",
+            "bacnet-platform-session-A",
+            "logical-bacnet-car",
+        ] {
+            assert!(!candidate_json.contains(private_value));
+        }
+
+        let mut recovered_properties = properties.clone();
+        recovered_properties.car_position = 2;
+        recovered_properties.next_stopping_floor = Some(2);
+        let recovered = map_bacnet_lift_properties(
+            &recovered_properties,
+            car.clone(),
+            &floors,
+            provenance(&session_a, 2),
+        )
+        .expect("newer same-session BACnet snapshot maps");
+        host.ingest_observation(recovered.observation.into());
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+
+        let mut ambiguous_properties = recovered_properties.clone();
+        ambiguous_properties.car_door_status =
+            vec![BacnetDoorStatus::Opened, BacnetDoorStatus::Closed];
+        let ambiguous = map_bacnet_lift_properties(
+            &ambiguous_properties,
+            car.clone(),
+            &floors,
+            provenance(&session_a, 3),
+        )
+        .expect("multi-door disagreement remains valid source evidence");
+        assert_eq!(ambiguous.observation.door, DoorEvidence::Unknown);
+        assert_eq!(
+            ambiguous.source_context.door_statuses,
+            [BacnetDoorStatus::Opened, BacnetDoorStatus::Closed]
+        );
+        host.ingest_observation(ambiguous.observation.into());
+        assert_eq!(host.lifecycle(), &HostLifecycle::Synchronizing);
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        assert!(host.diagnostics().entries().any(|entry| {
+            entry.id == HostDiagnosticId::ObservationUnresolved
+                && entry.context.source.as_ref() == Some(&source)
+                && entry.context.car.as_ref() == Some(&car)
+                && entry.context.role == Some(ObservationBindingRole::Operational)
+        }));
+
+        host.begin_source_session(source.clone(), session_b.clone())
+            .expect("BACnet source restart is an explicit lifecycle action");
+        assert!(host.engine.evidence(&source, &car).is_none());
+        let restarted = map_bacnet_lift_properties(
+            &properties,
+            car.clone(),
+            &floors,
+            provenance(&session_b, 1),
+        )
+        .expect("new BACnet source session starts at sequence one");
+        host.ingest_observation(restarted.observation.into());
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+
+        let delayed = map_bacnet_lift_properties(
+            &properties,
+            car.clone(),
+            &floors,
+            provenance(&session_a, 4),
+        )
+        .expect("delayed old-session snapshot remains syntactically mappable");
+        host.ingest_observation(delayed.observation.into());
+        assert!(matches!(
+            host.lifecycle(),
+            HostLifecycle::Degraded(DegradedReason::ObservationRejected(
+                ObservationIngestError::InactiveSourceSession { active, received, .. }
+            )) if active == &session_b && received == &session_a
+        ));
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        assert!(host.diagnostics().entries().any(|entry| {
+            entry.id == HostDiagnosticId::ObservationRejected
+                && entry.context.source.as_ref() == Some(&source)
+                && entry.context.session.as_ref() == Some(&session_a)
+                && entry.context.car.as_ref() == Some(&car)
+        }));
     }
 
     #[test]

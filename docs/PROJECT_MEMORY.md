@@ -125,6 +125,8 @@ The headless host now records a bounded replay-action window and can freeze an o
 
 A deterministic sanitization step can produce a separate candidate capsule without mutating the private source. It preserves ordering and source/session/car relationships through stable pseudonyms, remaps topology/floor evidence consistently, and must reproduce the same trigger before being written. The candidate carries an explicit manual-review requirement; LiftAssistant makes no perfect-anonymization, security-certification, or automatic-sharing claim.
 
+The M5.8 architecture check reuses the existing recorded BACnet Lift mapper as a headless test-only dependency. BACnet-origin canonical observations exercise the same explicit host binding/session, readiness and stale recovery, typed diagnostics, incident replay, and sanitization boundaries as RMF without adding `liftassistant-sim` or a BACnet stack to the normal headless dependency tree. This is durable evidence that those internal platform paths are protocol-neutral, while live BACnet transport, COV/liveliness/freshness, controller compatibility, and a second live production source remain unvalidated and blocked on real external input.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.7 are implemented: the Rust-native Open-RMF adapter and long-running headless composition have passed official Hotel ingestion, stale/recovery, readiness, graceful-shutdown, bounded production diagnostics, fresh-process incident replay, deterministic sanitization/replay, and bounded adapter-contract validation against both live/recorded RMF and recorded-only BACnet evidence. **M5.8 — Second Production Source Family is READY only for the evidence-bounded architecture check below.** No later M5 slice is READY merely because it appears in the roadmap.
+M5.1 through M5.7 are implemented. The M5.8 evidence-bounded architecture check is also implemented: recorded BACnet evidence now exercises the same host lifecycle/health, diagnostics, incident replay, sanitization, and adapter-contract boundaries without adding a production simulator dependency. **A second live production source remains BLOCKED BY EXTERNAL INPUT, no M5 item is READY, and M5.9+ is outside the current authorization. Completion mode is HUMAN-CHECK.**
 
 ## Validated baseline
 
@@ -813,12 +813,21 @@ Implemented behavior and evidence:
 - evidence scope remains explicit in machine-executable output: RMF is backed by the official live Hotel proof plus recorded regression, while BACnet is recorded mapping only and has no supplied live production endpoint;
 - two runs produce an identical report. The output says these are internal engineering checks and not certification; no family is called certified, conformant, safety-validated, or live when that evidence does not exist.
 
-Validation: focused warning-free TUI clippy, all 22 TUI tests, deterministic execution of the new profile scenario, and diff/whitespace review pass before workspace validation.
+Validation: focused warning-free TUI clippy, all 22 TUI tests, deterministic execution of the new profile scenario, warning-free workspace all-target clippy, all 109 then-current workspace tests, all seven TUI scenarios, all three non-live headless scenarios, dependency/write-boundary checks, diff/whitespace review, and Podman-absence checks pass.
 
 ### M5.8 — Second Production Source Family
 
-**READY — EVIDENCE-BOUNDED ARCHITECTURE CHECK.**
+**RECORDED-EVIDENCE CHECK IMPLEMENTED; LIVE PRODUCTION VALIDATION BLOCKED BY EXTERNAL INPUT.**
 
-Use the existing recorded BACnet Lift evidence to check that the M5 runtime-health, diagnostics, incident-capsule, sanitization, and validation assumptions did not become RMF-only. Keep all source-specific ambiguity and lifecycle ownership explicit. Do not invent BACnet packets, transport, COV behavior, controller behavior, or live claims.
+Implemented behavior and evidence:
 
-If a second live production source cannot be implemented and validated without a supplied live endpoint, sanitized real capture, documented controller API, or other real external input, record `BLOCKED BY EXTERNAL INPUT`. Do not manufacture the missing evidence or promote M5.9.
+- a headless test-only dependency reuses the existing recorded BACnet Lift mapper; the normal production dependency tree remains Engine/model/RMF/runtime plus host support and still contains neither `liftassistant-sim` nor a BACnet stack;
+- real mapped BACnet canonical evidence now drives the protocol-neutral `ReadOnlyHost` from explicit binding/session through `ReadyReadOnly`, explicit payload-stale invalidation, `Synchronizing/NotReady`, newer same-session recovery, ambiguous multi-door resolution loss, explicit source-session restart, sequence restart, and delayed old-session rejection;
+- an actual unconfigured universal-floor mapping error enters the Mapping diagnostic layer with source/session/native-object context. Resolved, unresolved, stale, readiness, and inactive-session events retain the corresponding generic source/session/car/role context without becoming elevator faults;
+- a BACnet-origin stale incident capsule replays in a fresh host, passes the same deterministic pseudonymization/manual-review path, removes the private source/session/car identifiers, and reproduces the same trigger after sanitization;
+- source-specific BACnet semantics remain outside Engine: `Object_Name` stays native context, universal floors require configured mapping, and disagreeing car-door entries remain `DoorEvidence::Unknown` rather than being fused or guessed;
+- M5.7's executable checklist and this host-level check therefore cover adapter mapping, canonical ownership, runtime health, diagnostics, incident replay, and sanitization with a second independent family. They do not implement or claim BACnet transport, COV/liveliness semantics, discovery, live freshness timing, controller compatibility, writes, conformance, certification, or second live production-source validation.
+
+Validation: the focused recorded-BACnet headless test, `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 110 workspace tests, all seven TUI scenarios, all three non-live headless scenarios, normal-dependency-tree isolation, canonical dependency/wall-clock/write-boundary checks, diff/whitespace review, temporary-artifact cleanup, and empty Podman container/image inventories pass.
+
+External blocker: no live BACnet Lift endpoint, sanitized real BACnet capture, documented controller API, CiA 417/SocketCAN evidence, or other supplied second-family production input is available. Inventing packets, scanning networks, installing privileged interfaces, or promoting recorded evidence to a live claim is forbidden. M5.8 therefore stops at this explicit external-input boundary; M5.9 is not promoted.
