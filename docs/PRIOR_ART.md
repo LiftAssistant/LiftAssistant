@@ -213,6 +213,8 @@ https://design.ros2.org/articles/qos_deadline_liveliness_lifespan.html
 
 Useful idea: freshness expectations, publisher liveliness and sample lifespan are distinct concepts. This is relevant to deciding when elevator observations are still usable.
 
+M5.2 applies that distinction without copying a DDS policy into Core. The official ROS 2 design defines Deadline as an allowed interval between messages, Liveliness as entity-aliveness reporting, and Lifespan as sample validity. LiftAssistant's first RMF supervision therefore uses an explicitly configured adapter/host payload-silence interval only after payload has actually flowed. Subscriber creation or discovery alone remains separate evidence, source timestamps are not the host clock, and a missed interval revokes live operational truth rather than asserting an elevator fault. This remains internal and source-specific rather than a universal deadline or stable health schema.
+
 ### Kubernetes controllers/reconciliation
 
 Official documentation:

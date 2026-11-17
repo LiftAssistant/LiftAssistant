@@ -123,6 +123,26 @@ pub struct SourceSessionTransition {
     pub invalidated_cars: Vec<CarId>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SourceObservationInvalidationError {
+    NoActiveSourceSession {
+        source: ObservationSourceId,
+        requested: ObservationSessionId,
+    },
+    InactiveSourceSession {
+        source: ObservationSourceId,
+        active: ObservationSessionId,
+        requested: ObservationSessionId,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceObservationInvalidation {
+    pub source: ObservationSourceId,
+    pub session: ObservationSessionId,
+    pub invalidated_cars: Vec<CarId>,
+}
+
 /// Deterministic semantic orchestration shared by interactive and headless callers.
 ///
 /// Adapters, time driving, UI state, persistence, and transport remain outside this boundary.
@@ -297,6 +317,60 @@ impl Engine {
             previous_session,
             active_session: session,
             invalidated_cars: invalidated_cars.into_iter().collect(),
+        })
+    }
+
+    /// Explicitly revokes current observations from one active source session.
+    ///
+    /// The caller owns the lifecycle/freshness policy and any wall clock. Engine only applies
+    /// the deterministic invalidation action. The session remains active and its ordering
+    /// watermark is preserved, so a delayed or duplicate sample cannot restore stale evidence.
+    pub fn invalidate_source_observations(
+        &mut self,
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+    ) -> Result<SourceObservationInvalidation, SourceObservationInvalidationError> {
+        let Some(active) = self.active_source_sessions.get(&source) else {
+            return Err(SourceObservationInvalidationError::NoActiveSourceSession {
+                source,
+                requested: session,
+            });
+        };
+        if active != &session {
+            return Err(SourceObservationInvalidationError::InactiveSourceSession {
+                source,
+                active: active.clone(),
+                requested: session,
+            });
+        }
+
+        self.observations.invalidate_source_evidence(&source);
+        let mut invalidated_cars: BTreeSet<_> = self
+            .source_states
+            .keys()
+            .filter_map(|(candidate, car)| (candidate == &source).then_some(car.clone()))
+            .collect();
+        self.source_states
+            .retain(|(candidate, _), _| candidate != &source);
+        for ((bound_source, car), role) in &self.observation_bindings {
+            if bound_source == &source
+                && *role == ObservationBindingRole::Operational
+                && self.operational_states.remove(car).is_some()
+            {
+                invalidated_cars.insert(car.clone());
+            }
+        }
+        let invalidated_cars = invalidated_cars.into_iter().collect::<Vec<_>>();
+        self.diagnostics.record_source_invalidation(
+            source.clone(),
+            session.clone(),
+            invalidated_cars.clone(),
+        );
+
+        Ok(SourceObservationInvalidation {
+            source,
+            session,
+            invalidated_cars,
         })
     }
 
@@ -988,6 +1062,116 @@ mod tests {
                 }
             ))
         );
+    }
+
+    #[test]
+    fn explicit_source_invalidation_revokes_truth_without_resetting_session_order() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let source = ObservationSourceId::new("controller-main");
+        let session = ObservationSessionId::new("connection-A");
+        let car = CarId::new("A");
+        engine
+            .bind_observation(
+                source.clone(),
+                car.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .expect("one operational binding is valid");
+        engine
+            .begin_source_session(source.clone(), session.clone())
+            .expect("source session starts explicitly");
+        let state = CarState::new("A", Floor::new(3));
+        let update = |sequence| {
+            CarObservationUpdate::from_state(
+                ObservationProvenance {
+                    source: source.clone(),
+                    session: session.clone(),
+                    sequence: ObservationSequence::new(sequence),
+                },
+                &state,
+            )
+        };
+        assert!(matches!(
+            engine.ingest_observation_update(update(100)),
+            ObservationIngestResult::Resolution(CarStateResolution::Resolved(_))
+        ));
+
+        assert_eq!(
+            engine.invalidate_source_observations(source.clone(), session.clone()),
+            Ok(SourceObservationInvalidation {
+                source: source.clone(),
+                session: session.clone(),
+                invalidated_cars: vec![car.clone()],
+            })
+        );
+        assert!(engine.operational_car_state(&car).is_none());
+        assert!(engine.source_state(&source, &car).is_none());
+        assert!(engine.evidence(&source, &car).is_none());
+        assert_eq!(engine.active_source_session(&source), Some(&session));
+        assert!(engine.diagnostics().entries().any(|entry| matches!(
+            &entry.event,
+            DiagnosticEvent::SourceObservationsInvalidated {
+                source: observed_source,
+                session: observed_session,
+                cars,
+            } if observed_source == &source
+                && observed_session == &session
+                && cars == std::slice::from_ref(&car)
+        )));
+
+        assert!(matches!(
+            engine.ingest_observation_update(update(100)),
+            ObservationIngestResult::Rejected(ObservationIngestError::Assembly(
+                ObservationAssemblyError::NonIncreasingSequence { .. }
+            ))
+        ));
+        assert!(engine.operational_car_state(&car).is_none());
+        assert_eq!(
+            engine.ingest_observation_update(update(101)),
+            ObservationIngestResult::Resolution(CarStateResolution::Resolved(state.clone()))
+        );
+        assert_eq!(engine.operational_car_state(&car), Some(&state));
+    }
+
+    #[test]
+    fn stale_invalidation_from_an_old_session_cannot_revoke_the_active_session() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let source = ObservationSourceId::new("controller-main");
+        let old_session = ObservationSessionId::new("connection-A");
+        let active_session = ObservationSessionId::new("connection-B");
+        let car = CarId::new("A");
+        engine
+            .bind_observation(
+                source.clone(),
+                car.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .expect("one operational binding is valid");
+        engine
+            .begin_source_session(source.clone(), old_session.clone())
+            .expect("first session starts");
+        engine
+            .begin_source_session(source.clone(), active_session.clone())
+            .expect("second session starts");
+        let state = CarState::new("A", Floor::new(4));
+        engine.ingest_observation_update(CarObservationUpdate::from_state(
+            ObservationProvenance {
+                source: source.clone(),
+                session: active_session.clone(),
+                sequence: ObservationSequence::new(1),
+            },
+            &state,
+        ));
+
+        assert_eq!(
+            engine.invalidate_source_observations(source.clone(), old_session.clone()),
+            Err(SourceObservationInvalidationError::InactiveSourceSession {
+                source: source.clone(),
+                active: active_session,
+                requested: old_session,
+            })
+        );
+        assert_eq!(engine.operational_car_state(&car), Some(&state));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, time::Duration};
 
 use futures::StreamExt;
 use ros2_client::{
@@ -54,6 +54,52 @@ pub struct RmfLivePayload {
 pub enum RmfReceiveControl {
     Continue,
     Stop,
+}
+
+/// Explicit source-specific payload-silence policy.
+///
+/// This is an adapter/runtime setting, not a universal LiftAssistant freshness deadline.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RmfFreshnessPolicy {
+    max_payload_silence: Duration,
+}
+
+impl RmfFreshnessPolicy {
+    pub fn new(max_payload_silence: Duration) -> Result<Self, RmfFreshnessPolicyError> {
+        if max_payload_silence.is_zero() {
+            return Err(RmfFreshnessPolicyError::ZeroPayloadSilence);
+        }
+        Ok(Self {
+            max_payload_silence,
+        })
+    }
+
+    pub const fn max_payload_silence(self) -> Duration {
+        self.max_payload_silence
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RmfFreshnessPolicyError {
+    ZeroPayloadSilence,
+}
+
+impl fmt::Display for RmfFreshnessPolicyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ZeroPayloadSilence => {
+                f.write_str("Open-RMF max payload silence must be greater than zero")
+            }
+        }
+    }
+}
+
+impl Error for RmfFreshnessPolicyError {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RmfReceiveOutcome {
+    HandlerStopped,
+    PayloadStale { max_silence: Duration },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -113,9 +159,35 @@ impl RmfLiveSubscriber {
     }
 
     pub fn receive_until(
-        mut self,
-        mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+        self,
+        handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
     ) -> Result<(), RmfTransportError> {
+        match self.receive(None, handler)? {
+            RmfReceiveOutcome::HandlerStopped => Ok(()),
+            RmfReceiveOutcome::PayloadStale { .. } => {
+                unreachable!("receive_until has no payload-silence policy")
+            }
+        }
+    }
+
+    /// Receives payloads until the handler stops or an active data plane becomes stale.
+    ///
+    /// The silence timer arms only after this subscription receives its first payload. Before
+    /// that point the reader is still awaiting discovery/data and cannot truthfully be called
+    /// stale.
+    pub fn receive_until_stale(
+        self,
+        policy: RmfFreshnessPolicy,
+        handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+    ) -> Result<RmfReceiveOutcome, RmfTransportError> {
+        self.receive(Some(policy), handler)
+    }
+
+    fn receive(
+        mut self,
+        freshness: Option<RmfFreshnessPolicy>,
+        mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+    ) -> Result<RmfReceiveOutcome, RmfTransportError> {
         let spinner = self
             .node
             .spinner()
@@ -123,24 +195,62 @@ impl RmfLiveSubscriber {
         let receive = async {
             let stream = self.subscription.async_stream();
             futures::pin_mut!(stream);
-            while let Some(result) = stream.next().await {
+            let mut payload_seen = false;
+            loop {
+                let next = if let Some(policy) = freshness.filter(|_| payload_seen) {
+                    smol::future::race(async { Some(stream.next().await) }, async {
+                        smol::Timer::after(policy.max_payload_silence()).await;
+                        None
+                    })
+                    .await
+                } else {
+                    Some(stream.next().await)
+                };
+                let Some(next) = next else {
+                    let policy = freshness.expect("a silence timer exists only with a policy");
+                    return Ok(RmfReceiveOutcome::PayloadStale {
+                        max_silence: policy.max_payload_silence(),
+                    });
+                };
+                let Some(result) = next else {
+                    return Err(RmfTransportError::Receive(
+                        "subscription stream ended unexpectedly".into(),
+                    ));
+                };
                 let (message, _) =
                     result.map_err(|error| RmfTransportError::Receive(error.to_string()))?;
+                payload_seen = true;
                 if handler(message.into_payload()) == RmfReceiveControl::Stop {
-                    return Ok(());
+                    return Ok(RmfReceiveOutcome::HandlerStopped);
                 }
             }
-            Err(RmfTransportError::Receive(
-                "subscription stream ended unexpectedly".into(),
-            ))
         };
         let spin = async {
             spinner
                 .spin()
                 .await
-                .map_err(|error| RmfTransportError::Receive(error.to_string()))
+                .map_err(|error| RmfTransportError::Receive(error.to_string()))?;
+            Err(RmfTransportError::Receive(
+                "Open-RMF node spinner ended unexpectedly".into(),
+            ))
         };
         let executor = smol::Executor::new();
         smol::block_on(executor.run(smol::future::race(receive, spin)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn freshness_policy_is_explicit_and_rejects_a_disabled_deadline() {
+        assert_eq!(
+            RmfFreshnessPolicy::new(Duration::ZERO),
+            Err(RmfFreshnessPolicyError::ZeroPayloadSilence)
+        );
+        let policy = RmfFreshnessPolicy::new(Duration::from_secs(3))
+            .expect("a source-specific nonzero silence limit is valid");
+        assert_eq!(policy.max_payload_silence(), Duration::from_secs(3));
     }
 }

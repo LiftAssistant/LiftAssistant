@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 is implemented: the Rust-native Open-RMF adapter has passed official Hotel live read-only validation through Engine-owned state. **M5.2 — Source Lifecycle / Freshness / Health is READY.** No later M5 slice is READY merely because it appears in the roadmap.
+M5.1 and M5.2 are implemented: the Rust-native Open-RMF adapter has passed official Hotel live read-only ingestion plus stale/recovery validation through Engine-owned state. **M5.3 — Production Read-only Host is READY.** No later M5 slice is READY merely because it appears in the roadmap.
 
 ## Validated baseline
 
@@ -717,10 +717,26 @@ Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clip
 
 ### M5.2 — Source Lifecycle / Freshness / Health
 
+**IMPLEMENTED.**
+
+Implemented behavior and evidence:
+
+- Engine now accepts an explicit invalidation action scoped to the currently active source/session. It deterministically removes assembled evidence, per-source resolved state, and Operational state contributed by that source while retaining the active session and sequence watermark;
+- a stale event carrying an old session token is rejected and cannot revoke a newer active session; duplicate/non-increasing same-session data remains rejected after invalidation, while a genuinely newer complete update may rebuild state;
+- invalidation is recorded in the bounded Flight Recorder with source/session/car context but is not an anomaly, equipment fault, root cause, or maintenance action;
+- the internal host tracks transport/discovery evidence, payload activity, source-session activity, per-car observation availability, and Engine readiness separately. Discovery/subscriber creation without payload cannot make the host ready;
+- the RMF adapter owns an explicit nonzero maximum-payload-silence policy with no default. The timer runs outside Core and only arms after that subscription has received payload, so initial DDS discovery delay cannot be misclassified as stale data-plane activity;
+- Operational staleness changes `ReadyReadOnly -> Synchronizing/NotReady` and removes current operational truth. Auxiliary staleness remains visible without changing healthy Operational readiness, promoting authority, fusing fields, or failing over;
+- official Hotel validation used an explicitly configured 3000 ms source policy: one continuous subscriber established two-car readiness, source silence revoked both operational states, and source recovery restored both cars under the same adapter session with source-global sequences continuing from 63/64.
+
+Negative evidence retained: the first live attempt armed the timer on creation of a second reader and falsely declared stale during DDS discovery despite a healthy publisher. The implementation now distinguishes pre-payload Awaiting from post-payload Stale and the corrected continuous-subscription proof passes. A cold official-simulation start also had no `/lift_states` publisher during its initial asset-download window and an adjacent fleet adapter failed independently; container/process existence was not accepted as payload readiness.
+
+Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 98 workspace tests, all six TUI scenarios, the headless recorded lifecycle scenario, missing-policy rejection, Core wall-clock isolation, RMF write-boundary checks, and the official live stale/recovery proof pass. The named Podman container and image were removed after validation; no global prune was used.
+
+### M5.3 — Production Read-only Host
+
 **READY.**
 
-Implement host-observed, source-specific, configurable freshness without moving wall-clock time into Core or treating observation sequence as freshness. The next slice must distinguish transport/discovery, payload activity, source/session activity, observation resolution, and Engine operational readiness at least enough that discovery alone cannot claim healthy ingestion.
+Evolve `liftassistant-headless` from proof-only hard-coded compositions into the smallest long-running read-only host: load minimal explicit source/binding/freshness configuration, create Engine/RMF adapter/session ownership, supervise payload freshness, report readiness, and shut down gracefully on SIGINT/SIGTERM. Preserve the existing canonical ingestion and authority boundaries.
 
-An Operational source becoming stale must explicitly revoke its current live operational truth/readiness while retaining bounded inspectable evidence; an Auxiliary source becoming stale must not revoke a healthy Operational authority. Recovery must pass through synchronization and require sufficient new canonical evidence. Do not add automatic failover, a universal timeout, an equipment-fault inference, or a stable public health taxonomy.
-
-M5.3 and later dependent slices remain not READY until M5.2 supplies the lifecycle/freshness evidence required by a production read-only host.
+Do not create a universal configuration DSL, plugin framework, database, daemon-control protocol, stable public API, or any write path. M5.4 and later remain not READY until this composition exists and its lifecycle/failure paths are validated.

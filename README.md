@@ -104,6 +104,16 @@ ROS_DOMAIN_ID=47 cargo run -p liftassistant-headless -- --scenario headless-rmf-
 
 The proof requires explicit `Lift1 -> A` and `Lift2 -> B` configuration, starts an adapter-owned source session, consumes `/lift_states` with BestEffort/Volatile QoS, and feeds canonical updates into Engine-owned operational state. It pauses for an operator-controlled source restart and an independent simulation-only movement request so it can verify session invalidation/recovery plus real motion and door transitions. LiftAssistant creates no `/lift_requests` publisher and exposes no live RMF `IntentSink`.
 
+Exercise the live payload-freshness proof with an explicit RMF-source silence policy:
+
+~~~bash
+ROS_DOMAIN_ID=47 \
+LIFTASSISTANT_RMF_MAX_SILENCE_MS=3000 \
+cargo run -p liftassistant-headless -- --scenario headless-rmf-freshness-proof
+~~~
+
+This proof keeps one subscription active, asks the operator to stop and restart only the official simulation source, and verifies `ReadyReadOnly -> Synchronizing/NotReady -> ReadyReadOnly`. The configured duration is deliberately source-specific and has no default. It begins measuring silence only after the subscription has received a payload, so DDS discovery delay remains distinct from a previously active data plane becoming stale.
+
 Controls:
 
 - Up/Down select a floor; U/D create an UP/DOWN hall call.

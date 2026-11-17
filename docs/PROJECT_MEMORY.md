@@ -113,6 +113,10 @@ M5.1 implements a concrete `liftassistant-rmf` ownership boundary because record
 
 Open-RMF `MODE_AGV` and `MODE_HUMAN` remain source-specific evidence by default. A configured RMF source may explicitly and independently project either interaction mode to canonical Normal evidence; this never changes Fire, Offline, Unknown, or Emergency handling and never discards raw current/available modes or RMF control-session context. Official Hotel validation exercised two lifts through explicit mapping, ReadyReadOnly state, adapter/source restart, old-session invalidation/rejection, sequence restart, and real simulation motion/door transitions without giving LiftAssistant a write path.
 
+Freshness is adapter/host-owned and source-specific; observation sequence remains ordering only and Core owns no wall clock. Engine exposes a deterministic explicit source-observation invalidation action for the active session. It removes current evidence, resolved source state, and any Operational truth contributed by that source while retaining the active session and sequence watermark. This prevents delayed or duplicate same-session data from restoring stale evidence and permits genuinely newer data in the same adapter lifetime to resynchronize.
+
+The read-only host separates transport/discovery evidence, payload activity, source-session activity, per-car observation availability, and Engine readiness rather than collapsing them into one health flag. The RMF payload-silence policy has no default and starts only after that subscription has received payload, so reader discovery delay is not a false stale event. Official Hotel validation established Operational stale/readiness revocation and same-session recovery. Auxiliary staleness remains diagnostic/inspectable and cannot revoke a healthy Operational authority or trigger failover/fusion.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

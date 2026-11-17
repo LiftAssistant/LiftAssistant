@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use liftassistant_model::{
-    CarObservationUpdate, Intent, ObservationSequence, ObservationSessionId, ObservationSourceId,
+    CarId, CarObservationUpdate, Intent, ObservationSequence, ObservationSessionId,
+    ObservationSourceId,
 };
 use liftassistant_runtime::RuntimeEvent;
 
@@ -41,6 +42,11 @@ pub enum DiagnosticEvent {
         role: ObservationBindingRole,
     },
     Engine(EngineEvent),
+    SourceObservationsInvalidated {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        cars: Vec<CarId>,
+    },
     Anomaly(DiagnosticAnomaly),
 }
 
@@ -112,6 +118,19 @@ impl FlightRecorder {
         for event in events {
             self.record(DiagnosticEvent::Engine(event.clone()));
         }
+    }
+
+    pub(crate) fn record_source_invalidation(
+        &mut self,
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        cars: Vec<CarId>,
+    ) {
+        self.record(DiagnosticEvent::SourceObservationsInvalidated {
+            source,
+            session,
+            cars,
+        });
     }
 
     fn record(&mut self, event: DiagnosticEvent) {
@@ -241,7 +260,9 @@ impl SequenceDetector {
                     }]
                 }
             }
-            DiagnosticEvent::Engine(_) | DiagnosticEvent::Anomaly(_) => Vec::new(),
+            DiagnosticEvent::Engine(_)
+            | DiagnosticEvent::SourceObservationsInvalidated { .. }
+            | DiagnosticEvent::Anomaly(_) => Vec::new(),
         }
     }
 }

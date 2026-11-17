@@ -187,6 +187,17 @@ impl ObservationAssembler {
         self.last_sequence
             .retain(|(candidate, _), _| candidate != source);
     }
+
+    /// Removes current evidence while preserving the active stream's ordering watermark.
+    ///
+    /// A host uses this after an explicit lifecycle/freshness decision. Keeping the last
+    /// sequence prevents an old or duplicate sample in the same source session from restoring
+    /// invalidated evidence. Starting a genuinely new source session still uses `remove_source`
+    /// to reset both evidence and ordering.
+    pub fn invalidate_source_evidence(&mut self, source: &ObservationSourceId) {
+        self.observations
+            .retain(|(candidate, _, _), _| candidate != source);
+    }
 }
 
 fn merge_sample<T>(
@@ -488,6 +499,37 @@ mod tests {
                 .map(|sample| sample.value),
             Some(PositionEvidence::FloorReference(Floor::new(3)))
         );
+    }
+
+    #[test]
+    fn explicit_invalidation_drops_evidence_but_preserves_session_ordering() {
+        let mut assembler = ObservationAssembler::new();
+        let source = ObservationSourceId::new("fixture/incremental");
+        let car = CarId::new("lift-A");
+        let mut first = update(100);
+        first.position = Some(PositionEvidence::FloorReference(Floor::new(3)));
+        assembler.apply(first).expect("first update is ordered");
+
+        assembler.invalidate_source_evidence(&source);
+        assert!(assembler.current(&source, &session(), &car).is_none());
+
+        assert_eq!(
+            assembler.apply(update(100)),
+            Err(ObservationAssemblyError::NonIncreasingSequence {
+                source: source.clone(),
+                session: session(),
+                previous: ObservationSequence::new(100),
+                received: ObservationSequence::new(100),
+            })
+        );
+        let resumed = assembler
+            .apply(update(101))
+            .expect("a newer sample in the active session may rebuild evidence");
+        assert_eq!(
+            resumed.latest_provenance.sequence,
+            ObservationSequence::new(101)
+        );
+        assert!(resumed.position.is_none());
     }
 
     #[test]

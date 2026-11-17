@@ -4,11 +4,13 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     env, io,
     process::ExitCode,
+    time::Duration,
 };
 
 use liftassistant_engine::{
     DiagnosticAnomaly, DiagnosticEvent, Engine, ObservationBindingError, ObservationBindingRole,
-    ObservationIngestError, ObservationIngestResult, SourceSessionError, SourceSessionTransition,
+    ObservationIngestError, ObservationIngestResult, SourceObservationInvalidation,
+    SourceObservationInvalidationError, SourceSessionError, SourceSessionTransition,
 };
 use liftassistant_model::{
     BuildingTopology, CarId, CarLocation, CarObservation, CarObservationUpdate, DoorEvidence,
@@ -17,13 +19,15 @@ use liftassistant_model::{
     PositionEvidence, ReportedDestination,
 };
 use liftassistant_rmf::{
-    RmfInteractionModeProjection, RmfLiftBinding, RmfLiftState, RmfLiveSubscriber,
-    RmfObservationAdapter, RmfReceiveControl, RmfSourceContext,
+    RmfFreshnessPolicy, RmfInteractionModeProjection, RmfLiftBinding, RmfLiftState,
+    RmfLiveSubscriber, RmfObservationAdapter, RmfReceiveControl, RmfReceiveOutcome,
+    RmfSourceContext,
 };
 use liftassistant_runtime::{CarStateResolution, UnresolvedCarStateReason};
 
 const LIFECYCLE_SCENARIO: &str = "headless-read-only-lifecycle";
 const RMF_LIVE_SCENARIO: &str = "headless-rmf-live-proof";
+const RMF_FRESHNESS_SCENARIO: &str = "headless-rmf-freshness-proof";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Readiness {
@@ -68,6 +72,59 @@ enum HostEvent {
         source: ObservationSourceId,
         car: CarId,
     },
+    SourcePayloadStale {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        invalidated_cars: Vec<CarId>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TransportDiscoveryState {
+    Unknown,
+    SubscriberCreated,
+    DiscoveryObserved,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PayloadActivity {
+    Awaiting,
+    Active,
+    Stale,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SourceSessionActivity {
+    Inactive,
+    Active(ObservationSessionId),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ObservationAvailability {
+    Awaiting,
+    Incomplete,
+    Unresolved,
+    Resolved,
+    Revoked,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SourceHealth {
+    transport_discovery: TransportDiscoveryState,
+    payload: PayloadActivity,
+    session: SourceSessionActivity,
+    observations: BTreeMap<CarId, ObservationAvailability>,
+}
+
+impl SourceHealth {
+    fn new() -> Self {
+        Self {
+            transport_discovery: TransportDiscoveryState::Unknown,
+            payload: PayloadActivity::Awaiting,
+            session: SourceSessionActivity::Inactive,
+            observations: BTreeMap::new(),
+        }
+    }
 }
 
 /// Internal in-memory source for the headless proof. It exposes observations only.
@@ -95,6 +152,7 @@ impl RecordedObservationFeed {
 struct ReadOnlyHost {
     engine: Engine,
     required_operational_cars: BTreeSet<CarId>,
+    source_health: BTreeMap<ObservationSourceId, SourceHealth>,
     lifecycle: HostLifecycle,
     events: Vec<HostEvent>,
 }
@@ -104,6 +162,7 @@ impl ReadOnlyHost {
         Self {
             engine: Engine::new(topology),
             required_operational_cars: BTreeSet::new(),
+            source_health: BTreeMap::new(),
             lifecycle: HostLifecycle::Starting,
             events: vec![HostEvent::LifecycleChanged(HostLifecycle::Starting)],
         }
@@ -117,13 +176,23 @@ impl ReadOnlyHost {
         self.lifecycle.readiness()
     }
 
+    fn source_health(&self, source: &ObservationSourceId) -> Option<&SourceHealth> {
+        self.source_health.get(source)
+    }
+
     fn bind_observation(
         &mut self,
         source: ObservationSourceId,
         car: CarId,
         role: ObservationBindingRole,
     ) -> Result<(), ObservationBindingError> {
-        self.engine.bind_observation(source, car.clone(), role)?;
+        self.engine
+            .bind_observation(source.clone(), car.clone(), role)?;
+        self.source_health
+            .entry(source)
+            .or_insert_with(SourceHealth::new)
+            .observations
+            .insert(car.clone(), ObservationAvailability::Awaiting);
         if role == ObservationBindingRole::Operational {
             self.required_operational_cars.insert(car);
         }
@@ -174,6 +243,23 @@ impl ReadOnlyHost {
                 )));
             }
             return;
+        }
+
+        if !matches!(&resolution, ObservationIngestResult::Rejected(_))
+            && let Some(health) = self.source_health.get_mut(&observation_source)
+        {
+            health.payload = PayloadActivity::Active;
+            let availability = match &resolution {
+                ObservationIngestResult::Incomplete(_) => ObservationAvailability::Incomplete,
+                ObservationIngestResult::Resolution(CarStateResolution::Resolved(_)) => {
+                    ObservationAvailability::Resolved
+                }
+                ObservationIngestResult::Resolution(CarStateResolution::Unresolved { .. }) => {
+                    ObservationAvailability::Unresolved
+                }
+                ObservationIngestResult::Rejected(_) => unreachable!(),
+            };
+            health.observations.insert(car.clone(), availability);
         }
 
         if !is_operational {
@@ -236,6 +322,15 @@ impl ReadOnlyHost {
         session: ObservationSessionId,
     ) -> Result<SourceSessionTransition, SourceSessionError> {
         let transition = self.engine.begin_source_session(source, session)?;
+        let health = self
+            .source_health
+            .get_mut(&transition.source)
+            .expect("Engine accepts sessions only for a bound source");
+        health.session = SourceSessionActivity::Active(transition.active_session.clone());
+        health.payload = PayloadActivity::Awaiting;
+        for availability in health.observations.values_mut() {
+            *availability = ObservationAvailability::Awaiting;
+        }
         let invalidated_operational_state = transition.invalidated_cars.iter().any(|car| {
             self.engine
                 .observation_binding_role(&transition.source, car)
@@ -245,6 +340,49 @@ impl ReadOnlyHost {
             self.transition(HostLifecycle::Synchronizing);
         }
         Ok(transition)
+    }
+
+    fn note_transport_subscriber_created(&mut self, source: &ObservationSourceId) {
+        if let Some(health) = self.source_health.get_mut(source) {
+            health.transport_discovery = TransportDiscoveryState::SubscriberCreated;
+        }
+    }
+
+    fn note_transport_discovery(&mut self, source: &ObservationSourceId) {
+        if let Some(health) = self.source_health.get_mut(source) {
+            health.transport_discovery = TransportDiscoveryState::DiscoveryObserved;
+        }
+    }
+
+    fn mark_source_payload_stale(
+        &mut self,
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+    ) -> Result<SourceObservationInvalidation, SourceObservationInvalidationError> {
+        let invalidation = self
+            .engine
+            .invalidate_source_observations(source.clone(), session.clone())?;
+        let health = self
+            .source_health
+            .get_mut(&source)
+            .expect("Engine invalidates only a bound source");
+        health.payload = PayloadActivity::Stale;
+        for availability in health.observations.values_mut() {
+            *availability = ObservationAvailability::Revoked;
+        }
+        self.events.push(HostEvent::SourcePayloadStale {
+            source: source.clone(),
+            session,
+            invalidated_cars: invalidation.invalidated_cars.clone(),
+        });
+        let source_has_operational_binding = self
+            .required_operational_cars
+            .iter()
+            .any(|car| self.engine.operational_observation_source(car) == Some(&source));
+        if source_has_operational_binding {
+            self.transition(HostLifecycle::Synchronizing);
+        }
+        Ok(invalidation)
     }
 
     fn transition(&mut self, lifecycle: HostLifecycle) {
@@ -300,7 +438,7 @@ fn parse_scenario(mut args: impl Iterator<Item = String>) -> Result<String, Stri
     match (args.next(), args.next(), args.next()) {
         (Some(flag), Some(name), None) if flag == "--scenario" => Ok(name),
         _ => Err(format!(
-            "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}>"
+            "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}>"
         )),
     }
 }
@@ -309,8 +447,9 @@ fn run_scenario(name: &str) -> Result<String, String> {
     match name {
         LIFECYCLE_SCENARIO => run_lifecycle_scenario(),
         RMF_LIVE_SCENARIO => run_rmf_live_scenario(),
+        RMF_FRESHNESS_SCENARIO => run_rmf_freshness_scenario(),
         _ => Err(format!(
-            "unknown scenario {name:?}; available scenarios: {LIFECYCLE_SCENARIO}, {RMF_LIVE_SCENARIO}"
+            "unknown scenario {name:?}; available scenarios: {LIFECYCLE_SCENARIO}, {RMF_LIVE_SCENARIO}, {RMF_FRESHNESS_SCENARIO}"
         )),
     }
 }
@@ -333,12 +472,14 @@ struct LiveRmfRound {
     last_update: CarObservationUpdate,
 }
 
-fn run_rmf_live_scenario() -> Result<String, String> {
-    let domain_id = env::var("ROS_DOMAIN_ID")
+fn rmf_domain_id() -> Result<u16, String> {
+    env::var("ROS_DOMAIN_ID")
         .unwrap_or_else(|_| "47".into())
         .parse::<u16>()
-        .map_err(|error| format!("ROS_DOMAIN_ID must fit in u16: {error}"))?;
-    let source = ObservationSourceId::new("rmf/hotel-live");
+        .map_err(|error| format!("ROS_DOMAIN_ID must fit in u16: {error}"))
+}
+
+fn hotel_host(source: &ObservationSourceId) -> Result<ReadOnlyHost, String> {
     let mut host = ReadOnlyHost::new(
         BuildingTopology::new([Floor::new(1), Floor::new(2), Floor::new(3)])
             .expect("Hotel proof topology is non-empty"),
@@ -347,6 +488,13 @@ fn run_rmf_live_scenario() -> Result<String, String> {
         host.bind_observation(source.clone(), car, ObservationBindingRole::Operational)
             .map_err(|error| format!("failed to bind live RMF source: {error:?}"))?;
     }
+    Ok(host)
+}
+
+fn run_rmf_live_scenario() -> Result<String, String> {
+    let domain_id = rmf_domain_id()?;
+    let source = ObservationSourceId::new("rmf/hotel-live");
+    let mut host = hotel_host(&source)?;
 
     let mut first_adapter = hotel_adapter(source.clone(), "hotel-adapter-session-A")?;
     host.begin_source_session(source.clone(), first_adapter.session().clone())
@@ -457,6 +605,151 @@ fn run_rmf_live_scenario() -> Result<String, String> {
     .join("\n"))
 }
 
+fn run_rmf_freshness_scenario() -> Result<String, String> {
+    let domain_id = rmf_domain_id()?;
+    let max_silence_ms = env::var("LIFTASSISTANT_RMF_MAX_SILENCE_MS")
+        .map_err(|_| {
+            "LIFTASSISTANT_RMF_MAX_SILENCE_MS must explicitly configure this source's freshness proof"
+                .to_owned()
+        })?
+        .parse::<u64>()
+        .map_err(|error| {
+            format!("LIFTASSISTANT_RMF_MAX_SILENCE_MS must fit in u64: {error}")
+        })?;
+    let freshness = RmfFreshnessPolicy::new(Duration::from_millis(max_silence_ms))
+        .map_err(|error| format!("invalid Hotel freshness policy: {error}"))?;
+    let source = ObservationSourceId::new("rmf/hotel-freshness-live");
+    let session = ObservationSessionId::new("hotel-freshness-adapter-session-A");
+    let mut host = hotel_host(&source)?;
+    let mut adapter = hotel_adapter(source.clone(), session.as_str())?;
+    host.begin_source_session(source.clone(), session.clone())
+        .map_err(|error| format!("failed to begin Hotel freshness session: {error:?}"))?;
+    let initial_sequences =
+        receive_ready_then_rmf_stale(&mut host, &mut adapter, domain_id, freshness)?;
+    let invalidation = host
+        .mark_source_payload_stale(source.clone(), session.clone())
+        .map_err(|error| format!("failed to revoke stale source observations: {error:?}"))?;
+    if invalidation.invalidated_cars != [CarId::new("A"), CarId::new("B")]
+        || host.readiness() != Readiness::NotReady
+        || !host.engine.car_states().is_empty()
+    {
+        return Err("stale Operational source did not revoke two-car readiness/truth".into());
+    }
+    let stale_health = host
+        .source_health(&source)
+        .expect("configured source health remains available");
+    if stale_health.payload != PayloadActivity::Stale
+        || stale_health
+            .observations
+            .values()
+            .any(|availability| *availability != ObservationAvailability::Revoked)
+    {
+        return Err(format!(
+            "source health did not separate stale payload from revoked observations: {stale_health:?}"
+        ));
+    }
+
+    println!(
+        "freshness-proof: stale state revoked; restart the official RMF source, wait for /lift_states, then press Enter"
+    );
+    let mut acknowledgment = String::new();
+    io::stdin()
+        .read_line(&mut acknowledgment)
+        .map_err(|error| format!("failed while waiting for source recovery: {error}"))?;
+    let recovered = receive_live_rmf_round(&mut host, &mut adapter, domain_id, "fresh_B", 0)?;
+    if host.readiness() != Readiness::ReadOnly || host.engine.car_states().len() != 2 {
+        return Err("resumed source did not resynchronize two-car ReadyReadOnly state".into());
+    }
+    let recovered_health = host
+        .source_health(&source)
+        .expect("recovered source health remains available");
+    if recovered_health.payload != PayloadActivity::Active
+        || recovered_health
+            .observations
+            .values()
+            .any(|availability| *availability != ObservationAvailability::Resolved)
+    {
+        return Err(format!(
+            "source health did not recover payload/resolution dimensions: {recovered_health:?}"
+        ));
+    }
+
+    Ok([
+        format!("scenario: {RMF_FRESHNESS_SCENARIO}"),
+        format!(
+            "policy: PASS (explicit RMF source max payload silence = {} ms; no universal/default timeout)",
+            freshness.max_payload_silence().as_millis()
+        ),
+        "health layers: PASS (subscriber/discovery evidence, payload activity, adapter session, per-car resolution, Engine readiness remain distinct)".into(),
+        format!(
+            "stale: PASS (continuous subscription sequences {initial_sequences:?}; two operational states revoked; ReadyReadOnly -> Synchronizing/NotReady)"
+        ),
+        format!(
+            "recovery: PASS (same adapter session and increasing source-global sequences {:?}; two complete states restored ReadyReadOnly)",
+            recovered.sequences
+        ),
+        "evidence: PASS (last known canonical observations remain in bounded diagnostics; current evidence/state revoked)".into(),
+        "authority: PASS (no Auxiliary promotion, automatic failover, field fusion, or write path)".into(),
+        String::new(),
+    ]
+    .join("\n"))
+}
+
+fn receive_ready_then_rmf_stale(
+    host: &mut ReadOnlyHost,
+    adapter: &mut RmfObservationAdapter,
+    domain_id: u16,
+    freshness: RmfFreshnessPolicy,
+) -> Result<Vec<u64>, String> {
+    let node_name = format!("rmf_freshness_proof_{}", std::process::id());
+    let subscriber = RmfLiveSubscriber::connect(domain_id, &node_name)
+        .map_err(|error| format!("failed to connect freshness observer: {error}"))?;
+    host.note_transport_subscriber_created(adapter.source());
+    let mut sequences = Vec::new();
+    let mut ready_announced = false;
+    let mut mapping_error = None;
+    let outcome = subscriber
+        .receive_until_stale(freshness, |payload| {
+            host.note_transport_discovery(adapter.source());
+            let mapped = match adapter.map(&payload.state) {
+                Ok(mapped) => mapped,
+                Err(error) => {
+                    mapping_error = Some(error.to_string());
+                    return RmfReceiveControl::Stop;
+                }
+            };
+            sequences.push(mapped.update.provenance.sequence.value());
+            host.ingest_observation(mapped.update);
+            if !ready_announced
+                && host.readiness() == Readiness::ReadOnly
+                && host.engine.car_states().len() == 2
+            {
+                ready_announced = true;
+                println!(
+                    "freshness-proof: initial payloads ready; stop the official RMF source and leave this observer running"
+                );
+            }
+            RmfReceiveControl::Continue
+        })
+        .map_err(|error| format!("live RMF freshness receive loop failed: {error}"))?;
+    if let Some(error) = mapping_error {
+        return Err(error);
+    }
+    if !ready_announced {
+        return Err("payload silence occurred before two-car ReadyReadOnly was established".into());
+    }
+    match outcome {
+        RmfReceiveOutcome::PayloadStale { max_silence }
+            if max_silence == freshness.max_payload_silence() =>
+        {
+            Ok(sequences)
+        }
+        other => Err(format!(
+            "freshness observer stopped without the configured payload-silence event: {other:?}"
+        )),
+    }
+}
+
 #[derive(Debug)]
 struct LiveRmfTransition {
     sequences: Vec<u64>,
@@ -470,6 +763,7 @@ fn receive_live_rmf_transition(
     let node_name = format!("rmf_live_transition_proof_{}", std::process::id());
     let subscriber = RmfLiveSubscriber::connect(domain_id, &node_name)
         .map_err(|error| format!("failed to connect transition observer: {error}"))?;
+    host.note_transport_subscriber_created(adapter.source());
     let mut sequences = Vec::new();
     let mut saw_moving = false;
     let mut saw_door_moving = false;
@@ -477,6 +771,7 @@ fn receive_live_rmf_transition(
 
     subscriber
         .receive_until(|payload| {
+            host.note_transport_discovery(adapter.source());
             if payload.state.lift_name != "Lift1" {
                 let mapped = match adapter.map(&payload.state) {
                     Ok(mapped) => mapped,
@@ -573,6 +868,7 @@ fn receive_live_rmf_round(
     let node_name = format!("rmf_live_proof_{}_{}", std::process::id(), round);
     let subscriber = RmfLiveSubscriber::connect(domain_id, &node_name)
         .map_err(|error| format!("failed to connect live RMF subscriber: {error}"))?;
+    host.note_transport_subscriber_created(adapter.source());
     let expected_topology = host.engine.topology().clone();
     let mut source_times = Vec::new();
     let mut sequences = Vec::new();
@@ -582,6 +878,7 @@ fn receive_live_rmf_round(
 
     subscriber
         .receive_until(|payload| {
+            host.note_transport_discovery(adapter.source());
             let mapped = match adapter.map(&payload.state) {
                 Ok(mapped) => mapped,
                 Err(error) => {
@@ -954,6 +1251,142 @@ mod tests {
         assert!(host.poll(&mut resumed));
         assert_eq!(host.lifecycle(), &HostLifecycle::ReadyReadOnly);
         assert_eq!(host.readiness(), Readiness::ReadOnly);
+    }
+
+    #[test]
+    fn discovery_without_payload_does_not_establish_readiness() {
+        let mut host = reference_host();
+
+        host.note_transport_subscriber_created(&reference_source_id());
+        host.note_transport_discovery(&reference_source_id());
+
+        let health = host
+            .source_health(&reference_source_id())
+            .expect("bound source has health dimensions");
+        assert_eq!(
+            health.transport_discovery,
+            TransportDiscoveryState::DiscoveryObserved
+        );
+        assert_eq!(health.payload, PayloadActivity::Awaiting);
+        assert_eq!(
+            health.session,
+            SourceSessionActivity::Active(reference_session_id())
+        );
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        assert!(host.engine.car_states().is_empty());
+    }
+
+    #[test]
+    fn operational_payload_staleness_revokes_truth_and_newer_payload_recovers() {
+        let mut host = reference_host();
+        host.ingest_observation(
+            complete_observation(
+                reference_source_id(),
+                reference_session_id(),
+                1,
+                Floor::new(4),
+            )
+            .into(),
+        );
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+
+        let invalidation = host
+            .mark_source_payload_stale(reference_source_id(), reference_session_id())
+            .expect("the active source session can be explicitly invalidated");
+        assert_eq!(invalidation.invalidated_cars, vec![reference_car_id()]);
+        assert_eq!(host.lifecycle(), &HostLifecycle::Synchronizing);
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        assert!(host.engine.car_states().is_empty());
+        let health = host
+            .source_health(&reference_source_id())
+            .expect("source health remains inspectable");
+        assert_eq!(health.payload, PayloadActivity::Stale);
+        assert_eq!(
+            health.observations.get(&reference_car_id()),
+            Some(&ObservationAvailability::Revoked)
+        );
+        assert!(host.engine.diagnostics().entries().any(|entry| matches!(
+            &entry.event,
+            DiagnosticEvent::SourceObservationsInvalidated {
+                source,
+                session,
+                cars,
+            } if source == &reference_source_id()
+                && session == &reference_session_id()
+                && cars == std::slice::from_ref(&reference_car_id())
+        )));
+
+        host.ingest_observation(
+            complete_observation(
+                reference_source_id(),
+                reference_session_id(),
+                2,
+                Floor::new(4),
+            )
+            .into(),
+        );
+        assert_eq!(host.lifecycle(), &HostLifecycle::ReadyReadOnly);
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+        let recovered = host
+            .source_health(&reference_source_id())
+            .expect("source health remains inspectable after recovery");
+        assert_eq!(recovered.payload, PayloadActivity::Active);
+        assert_eq!(
+            recovered.observations.get(&reference_car_id()),
+            Some(&ObservationAvailability::Resolved)
+        );
+    }
+
+    #[test]
+    fn auxiliary_payload_staleness_is_visible_without_revoking_operational_readiness() {
+        let mut host = reference_host();
+        host.ingest_observation(
+            complete_observation(
+                reference_source_id(),
+                reference_session_id(),
+                1,
+                Floor::new(4),
+            )
+            .into(),
+        );
+        let operational = host.engine.car_states();
+        let auxiliary_source = ObservationSourceId::new("fixture/auxiliary-rmf");
+        let auxiliary_session = ObservationSessionId::new("auxiliary-session-A");
+        host.bind_observation(
+            auxiliary_source.clone(),
+            reference_car_id(),
+            ObservationBindingRole::Auxiliary,
+        )
+        .expect("auxiliary binding is explicit");
+        host.begin_source_session(auxiliary_source.clone(), auxiliary_session.clone())
+            .expect("auxiliary source starts explicitly");
+        host.ingest_observation(
+            complete_observation(
+                auxiliary_source.clone(),
+                auxiliary_session.clone(),
+                1,
+                Floor::new(1),
+            )
+            .into(),
+        );
+
+        host.mark_source_payload_stale(auxiliary_source.clone(), auxiliary_session.clone())
+            .expect("auxiliary freshness is supervised independently");
+
+        assert_eq!(host.engine.car_states(), operational);
+        assert_eq!(host.lifecycle(), &HostLifecycle::ReadyReadOnly);
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+        assert_eq!(
+            host.source_health(&auxiliary_source)
+                .expect("auxiliary health remains visible")
+                .payload,
+            PayloadActivity::Stale
+        );
+        assert!(host.events.iter().any(|event| matches!(
+            event,
+            HostEvent::SourcePayloadStale { source, session, .. }
+                if source == &auxiliary_source && session == &auxiliary_session
+        )));
     }
 
     #[test]
