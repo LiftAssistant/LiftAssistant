@@ -69,6 +69,7 @@ Canonical `CarObservationUpdate` values enter Engine through one ingestion bound
 
 ## Current packages
 
+- `liftassistant-cli`: independent experimental HTTP/SSE read-only client process.
 - `liftassistant-model`: canonical domain types.
 - `liftassistant-core`: deterministic vendor-neutral semantic decisions/state transitions.
 - `liftassistant-engine`: shared deterministic semantic orchestration, observation assembly/resolution, and operational state ownership.
@@ -78,13 +79,21 @@ Canonical `CarObservationUpdate` values enter Engine through one ingestion bound
 - `liftassistant-sim`: deterministic active simulator, native-semantic recorded/read-only backend, and recorded BACnet mapping experiment.
 - `liftassistant-tui`: developer simulator composition, scenario runner, and UI.
 
-These eight packages reflect demonstrated ownership boundaries. The headless package
+These nine packages reflect demonstrated ownership boundaries. The headless package
 exists because Engine has a real second composition independent of the TUI. The RMF
 package exists because recorded and live paths now share protocol-specific mapping
 while transport dependencies must remain outside model, Core, and Engine. Neither
 package establishes a general service or adapter framework.
 Further packages still require real lifecycle/reuse pressure rather than speculative
 layering.
+
+The CLI is a real caller across the external process boundary, not a second composition of
+Engine. It has a deliberately local `experimental/v0` response parser and only HTTP client,
+JSON, and display concerns; it does not depend on model, Core, Engine, runtime, RMF, simulator,
+or headless internals. Snapshot and continuously consumed SSE state both render host
+lifecycle/readiness and revision, operational cars, source/session summaries, and recent
+diagnostic identities. This proves separation without creating a shared client SDK, generated
+schema, generic messaging layer, or commitment to a future frontend technology.
 
 ## Determinism boundary
 

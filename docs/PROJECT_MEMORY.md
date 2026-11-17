@@ -129,6 +129,8 @@ The M5.8 architecture check reuses the existing recorded BACnet Lift mapper as a
 
 The first Host-to-external-client boundary is an explicitly enabled, headless-owned HTTP JSON snapshot plus SSE current-state stream. Its separate `experimental/v0` DTO projects existing lifecycle/readiness, Engine-owned cars, source/session health, roles, bounded diagnostics, and a host-local revision without changing canonical semantics or freezing internal Rust/event structures. SSE retains only the latest complete snapshot and may coalesce intermediate revisions; reconnect receives current state, while Flight Recorder and Incident Capsule retain forensic/replay responsibility. API connection/keepalive state cannot affect source freshness or Engine readiness. The server has no write route, wildcard CORS, authentication, TLS, or RBAC claim and does not bind anywhere unless the operator explicitly supplies a listen address.
 
+`liftassistant-cli` is the first independent external client proof. It is a separate process with only HTTP/JSON parsing and display dependencies, owns a small local `experimental/v0` parser, and consumes snapshot or continuous SSE state without linking any LiftAssistant canonical, Engine, RMF, simulator, or headless crate. It displays revision, lifecycle/readiness, cars, source/session/observation summaries, and recent diagnostic identities. This validates the process boundary but intentionally creates no shared SDK, generated schema, write path, or frontend-technology decision.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

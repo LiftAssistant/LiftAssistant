@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.9 are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING` but no longer blocks client-platform work. **M5.10 — Independent External CLI Client is READY.** The current authorization ends after M5.10 and does not include Flutter, WebUI, HA/BMS, or M6.
+M5.1 through M5.10 are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING`. **Completion mode: HUMAN-CHECK.** The current authorization ends here and does not include Flutter, WebUI, HA/BMS, M5.11+, or M6.
 
 ## Validated baseline
 
@@ -899,6 +899,17 @@ The bounded API exits are satisfied: snapshot and SSE work across real process b
 
 ### M5.10 — Independent External CLI Client
 
-**READY.**
+**IMPLEMENTED — MANDATORY HUMAN-CHECK BOUNDARY REACHED.**
 
-Add one minimal separate read-only CLI process that consumes only the experimental HTTP snapshot/SSE boundary and displays revision, lifecycle/readiness, cars, source/session summary, and recent diagnostics. It must not instantiate Engine, link the RMF adapter, share host memory, add a client SDK/framework, or start Flutter/WebUI work. Completion requires a real Host process plus independent LiftAssistant CLI process proof, then the mandatory HUMAN-CHECK boundary.
+Implemented behavior and evidence:
+
+- new `liftassistant-cli` is a separate executable crate with direct dependencies only on a blocking HTTP client and serde/JSON. It has no dependency on LiftAssistant model, Core, Engine, runtime, RMF, simulator, TUI, or headless crates and cannot instantiate or read Host memory;
+- `snapshot <http://host:port>` requests and validates one `experimental/v0` JSON snapshot. `watch <http://host:port>` continuously consumes complete SSE `snapshot` events, with an optional positive `--max-snapshots` bound for deterministic automation;
+- its deliberately local parser and text renderer display revision, lifecycle/readiness, operational cars, source/session/transport/payload/observation summary, and recent diagnostic identity/context. Unsupported API versions, non-HTTP or path-bearing base URLs, HTTP failures, wrong content types, invalid JSON, and premature stream end fail explicitly;
+- no SDK crate, schema generation, OpenAPI client, generic client framework, FRB, WebUI, Flutter assumption, write path, reconnect backlog, or stable/public compatibility claim was introduced;
+- process proof 1 ran the real long-running RMF Host on an otherwise idle ROS domain and an independent CLI process fetched its actual `Synchronizing/NotReady` state plus active source session, then the Host shut down cooperatively;
+- process proof 2 ran the independent headless API fixture and independent CLI `watch` process; the client received and rendered the initial complete car state plus a pushed newer diagnostic revision without polling. All proof processes, listeners, and temporary artifacts were cleaned.
+
+Validation: three focused CLI parser/renderer/SSE tests, `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 119 workspace tests, all seven TUI scenarios, all four non-live headless scenarios, process-level production Host plus independent CLI snapshot proof, process-level Host fixture plus independent CLI multi-snapshot SSE proof, dependency-isolation inspection, and cleanup checks pass. Cargo selected reqwest 0.12.28 and its transitive graph at the highest versions compatible with the workspace Rust 1.85 policy; the workspace MSRV was not changed.
+
+No further implementation item is READY under the current authorization. Do not begin M5.11 or any Flutter/WebUI/HA/BMS/M6 work without a new HUMAN decision.

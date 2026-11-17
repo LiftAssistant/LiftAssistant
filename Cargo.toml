@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/liftassistant-cli",
     "crates/liftassistant-model",
     "crates/liftassistant-rmf",
     "crates/liftassistant-core",

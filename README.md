@@ -131,6 +131,15 @@ cargo run -p liftassistant-headless -- \
 
 `GET /api/experimental/v0/snapshot` returns the complete current JSON projection. `GET /api/experimental/v0/events` sends complete `snapshot` events when the read-model revision changes. The stream retains only the latest complete value, so reconnecting recovers current state without a durable cursor or forensic event backlog. Both routes are read-only, return no wildcard CORS policy, and are experimental rather than stable/public API contracts. The fixture is disabled unless this explicit command is used.
 
+Consume that boundary from the independent read-only CLI process:
+
+~~~bash
+cargo run -p liftassistant-cli -- snapshot http://127.0.0.1:8080
+cargo run -p liftassistant-cli -- watch http://127.0.0.1:8080
+~~~
+
+The CLI prints Host lifecycle/readiness and revision, operational cars, source/session/observation summaries, and recent diagnostic identities. `watch` continuously consumes complete SSE snapshots; `--max-snapshots <n>` is available for bounded automation. The client has its own small `experimental/v0` parser and communicates only over HTTP/SSE: it neither links nor instantiates Engine, the RMF adapter, a write boundary, or a shared client SDK.
+
 Exercise the live Open-RMF subscription proof against an independently running official Hotel simulation:
 
 ~~~bash
@@ -190,6 +199,7 @@ AGENTS.md                  authoritative AI-agent workflow
 agent.md                   compatibility/navigation pointer
 
 crates/
+  liftassistant-cli/       independent experimental HTTP/SSE read-only client
   liftassistant-model/     canonical domain types
   liftassistant-core/      deterministic semantic decisions
   liftassistant-engine/    shared semantic orchestration
