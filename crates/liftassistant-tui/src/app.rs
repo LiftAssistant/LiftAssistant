@@ -38,7 +38,7 @@ impl App {
         let mut engine = Engine::new(topology);
         let source = ObservationSourceId::new(runtime.source_name());
         let source_session = runtime.source_session().clone();
-        for (car, capabilities) in runtime.all_capabilities() {
+        for (car, capabilities) in runtime.all_execution_capabilities() {
             engine
                 .bind_observation(
                     source.clone(),
@@ -46,7 +46,7 @@ impl App {
                     ObservationBindingRole::Operational,
                 )
                 .expect("simulator cars have unique operational observation bindings");
-            engine.set_capabilities(car, capabilities);
+            engine.set_execution_capabilities(car, capabilities);
         }
         engine
             .begin_source_session(source, source_session)

@@ -83,8 +83,8 @@ pub fn render(frame: &mut Frame, app: &App) {
         };
         let reported_destination = car.reported_destination.to_string();
         let serve = app
-            .runtime
-            .capabilities(&car.id)
+            .engine
+            .execution_capabilities(&car.id)
             .is_some_and(|caps| caps.serve_floor);
         details.push(Line::from(format!(
             "{}  {} {motion} reported -> {reported_destination}",

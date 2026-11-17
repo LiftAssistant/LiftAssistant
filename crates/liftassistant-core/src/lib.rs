@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use liftassistant_model::{
-    BuildingTopology, CallId, CallRecord, CallState, Capabilities, CarId, CarLocation, CarState,
-    Direction, Floor, HallCall, Intent, OperatingMode, ReportedDestination,
+    BuildingTopology, CallId, CallRecord, CallState, CarId, CarLocation, CarState, Direction,
+    ExecutionCapabilities, Floor, HallCall, Intent, OperatingMode, ReportedDestination,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -220,7 +220,7 @@ pub struct DispatchDecision {
 pub fn dispatch(
     call: &HallCall,
     cars: &[CarState],
-    capabilities: &BTreeMap<CarId, Capabilities>,
+    capabilities: &BTreeMap<CarId, ExecutionCapabilities>,
     occupied_cars: &BTreeSet<CarId>,
 ) -> DispatchDecision {
     let mut candidates: Vec<_> = cars
@@ -310,9 +310,9 @@ mod tests {
     use super::*;
     use liftassistant_model::{Direction, Floor, Position};
 
-    fn capabilities(cars: &[CarState]) -> BTreeMap<CarId, Capabilities> {
+    fn capabilities(cars: &[CarState]) -> BTreeMap<CarId, ExecutionCapabilities> {
         cars.iter()
-            .map(|car| (car.id.clone(), Capabilities::reference_defaults()))
+            .map(|car| (car.id.clone(), ExecutionCapabilities::reference_defaults()))
             .collect()
     }
 
@@ -604,7 +604,7 @@ mod tests {
             CarState::new("B", Floor::new(1)),
         ];
         let mut capabilities = BTreeMap::new();
-        let mut unsupported = Capabilities::reference_defaults();
+        let mut unsupported = ExecutionCapabilities::reference_defaults();
         unsupported.serve_floor = false;
         capabilities.insert(CarId::new("B"), unsupported);
         let call = HallCall {

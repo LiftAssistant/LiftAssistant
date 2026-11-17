@@ -7,19 +7,18 @@ use liftassistant_engine::{
     ObservationBindingRole, ObservationIngestResult,
 };
 use liftassistant_model::{
-    BuildingTopology, CallId, CallState, Capabilities, CarId, CarLocation, CarObservation,
-    CarObservationUpdate, CarState, Direction, DoorEvidence, DoorState, Floor, HallCall,
-    MotionEvidence, MotionState, ObservationProvenance, ObservationSequence, ObservationSessionId,
-    ObservationSourceId, OperatingMode, OperatingModeEvidence, Position, PositionEvidence,
-    ReportedDestination,
+    BuildingTopology, CallId, CallState, CarId, CarLocation, CarObservation, CarObservationUpdate,
+    CarState, Direction, DoorEvidence, DoorState, Floor, HallCall, MotionEvidence, MotionState,
+    ObservationProvenance, ObservationSequence, ObservationSessionId, ObservationSourceId,
+    OperatingMode, OperatingModeEvidence, Position, PositionEvidence, ReportedDestination,
 };
 use liftassistant_runtime::{
     CarStateResolution, RuntimeEvent, SimulationDriver, UnresolvedCarStateReason,
 };
 use liftassistant_sim::{
     BacnetDoorStatus, BacnetLiftCarDirection, BacnetLiftCarMode, MappedBacnetObservation,
-    MappedRmfObservation, RecordedBacnetLiftProperties, RecordedFrame, RecordedRuntime,
-    RmfLiftState, map_bacnet_lift_properties, map_rmf_lift_state,
+    MappedRmfObservation, ObservationCoverage, RecordedBacnetLiftProperties, RecordedFrame,
+    RecordedRuntime, RmfLiftState, map_bacnet_lift_properties, map_rmf_lift_state,
 };
 
 use crate::{
@@ -67,7 +66,7 @@ struct RecordedBatch {
 #[derive(Debug, PartialEq)]
 struct RecordedPlayback {
     source_name: String,
-    capabilities: Capabilities,
+    observation_coverage: ObservationCoverage,
     batches: Vec<RecordedBatch>,
     remaining_frames: usize,
 }
@@ -204,9 +203,9 @@ fn play_recording() -> Result<RecordedPlayback, String> {
     let mut runtime = recorded_runtime()?;
     let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
     let source_name = runtime.source_name().to_owned();
-    let capabilities = runtime
-        .capabilities(&CarId::new("A"))
-        .ok_or_else(|| "recorded car A has no capabilities".to_owned())?;
+    let observation_coverage = runtime
+        .observation_coverage(&CarId::new("A"))
+        .ok_or_else(|| "recorded car A has no observation coverage".to_owned())?;
     engine
         .bind_observation(
             ObservationSourceId::new(&source_name),
@@ -220,7 +219,6 @@ fn play_recording() -> Result<RecordedPlayback, String> {
             runtime.source_session().clone(),
         )
         .map_err(|error| format!("recorded source session failed: {error:?}"))?;
-    engine.set_capabilities(CarId::new("A"), capabilities.clone());
     for update in runtime.take_observation_updates() {
         engine.ingest_observation_update(update);
     }
@@ -248,7 +246,7 @@ fn play_recording() -> Result<RecordedPlayback, String> {
     }
     Ok(RecordedPlayback {
         source_name,
-        capabilities,
+        observation_coverage,
         batches,
         remaining_frames: runtime.remaining_frames(),
     })
@@ -732,10 +730,8 @@ fn verify_rejection_outcome(replay: &Replay) -> Result<(), String> {
 
 fn verify_recorded_outcome(playback: &RecordedPlayback) -> Result<(), String> {
     if playback.source_name != "recorded-read-only"
-        || !playback.capabilities.observe_position
-        || !playback.capabilities.observe_door
-        || playback.capabilities.serve_floor
-        || playback.capabilities.park
+        || !playback.observation_coverage.position
+        || !playback.observation_coverage.door
     {
         return Err("recorded runtime did not preserve its explicit read-only boundary".into());
     }

@@ -7,9 +7,9 @@ mod rmf_recorded;
 use std::{collections::BTreeMap, time::Duration};
 
 use liftassistant_model::{
-    Capabilities, CarId, CarLocation, CarObservationUpdate, CarState, Direction, DoorState, Floor,
-    Intent, MotionState, ObservationProvenance, ObservationSequence, ObservationSessionId,
-    ObservationSourceId, OperatingMode, Position, ReportedDestination,
+    CarId, CarLocation, CarObservationUpdate, CarState, Direction, DoorState,
+    ExecutionCapabilities, Floor, Intent, MotionState, ObservationProvenance, ObservationSequence,
+    ObservationSessionId, ObservationSourceId, OperatingMode, Position, ReportedDestination,
 };
 use liftassistant_runtime::{IntentSink, RuntimeError, RuntimeEvent, SimulationDriver};
 
@@ -18,7 +18,7 @@ pub use bacnet_recorded::{
     BacnetMappingError, MappedBacnetObservation, RecordedBacnetLiftProperties,
     map_bacnet_lift_properties,
 };
-pub use recorded::{RecordedFrame, RecordedRuntime};
+pub use recorded::{ObservationCoverage, RecordedFrame, RecordedRuntime};
 pub use rmf_recorded::{
     MappedRmfObservation, RmfLiftState, RmfMappingError, RmfSourceContext, map_rmf_lift_state,
 };
@@ -26,7 +26,7 @@ pub use rmf_recorded::{
 #[derive(Debug)]
 struct SimCar {
     state: CarState,
-    capabilities: Capabilities,
+    execution_capabilities: ExecutionCapabilities,
     desired_target: Option<Floor>,
 }
 
@@ -44,17 +44,17 @@ pub struct SimRuntime {
 
 impl SimRuntime {
     pub fn new(
-        cars: impl IntoIterator<Item = (CarState, Capabilities)>,
+        cars: impl IntoIterator<Item = (CarState, ExecutionCapabilities)>,
         speed_floors_per_second: f64,
     ) -> Self {
         let cars = cars
             .into_iter()
-            .map(|(state, capabilities)| {
+            .map(|(state, execution_capabilities)| {
                 (
                     state.id.clone(),
                     SimCar {
                         state,
-                        capabilities,
+                        execution_capabilities,
                         desired_target: None,
                     },
                 )
@@ -83,11 +83,11 @@ impl SimRuntime {
             [
                 (
                     CarState::with_continuous_position("A", Position::at_floor(Floor::new(3))),
-                    Capabilities::reference_defaults(),
+                    ExecutionCapabilities::reference_defaults(),
                 ),
                 (
                     CarState::with_continuous_position("B", Position::at_floor(Floor::new(1))),
-                    Capabilities::reference_defaults(),
+                    ExecutionCapabilities::reference_defaults(),
                 ),
             ],
             1.5,
@@ -119,16 +119,16 @@ impl SimRuntime {
         self.cars.values().map(|car| car.state.clone()).collect()
     }
 
-    pub fn capabilities(&self, car: &CarId) -> Option<Capabilities> {
+    pub fn execution_capabilities(&self, car: &CarId) -> Option<ExecutionCapabilities> {
         self.cars
             .get(car)
-            .map(|sim_car| sim_car.capabilities.clone())
+            .map(|sim_car| sim_car.execution_capabilities.clone())
     }
 
-    pub fn all_capabilities(&self) -> Vec<(CarId, Capabilities)> {
+    pub fn all_execution_capabilities(&self) -> Vec<(CarId, ExecutionCapabilities)> {
         self.cars
             .iter()
-            .map(|(car, sim_car)| (car.clone(), sim_car.capabilities.clone()))
+            .map(|(car, sim_car)| (car.clone(), sim_car.execution_capabilities.clone()))
             .collect()
     }
 
@@ -161,9 +161,15 @@ impl SimRuntime {
                 )));
             }
 
-            if !sim_car.capabilities.serve_floor {
+            let (supported, capability) = match intent {
+                Intent::ServeFloor { .. } => {
+                    (sim_car.execution_capabilities.serve_floor, "serve_floor")
+                }
+                Intent::ParkAt { .. } => (sim_car.execution_capabilities.park, "park"),
+            };
+            if !supported {
                 return Err(RuntimeError::new(format!(
-                    "car {car_id} does not expose serve_floor"
+                    "car {car_id} does not expose {capability}"
                 )));
             }
 
@@ -380,5 +386,35 @@ mod tests {
                 .advance(Duration::from_millis(500))
                 .contains(&RuntimeEvent::IntentAccepted(intent))
         );
+    }
+
+    #[test]
+    fn each_execution_intent_checks_its_own_capability() {
+        let state = CarState::with_continuous_position("A", Position::at_floor(Floor::new(3)));
+        let mut runtime = SimRuntime::new(
+            [(
+                state,
+                ExecutionCapabilities {
+                    serve_floor: true,
+                    park: false,
+                },
+            )],
+            1.5,
+        );
+        runtime.take_observation_updates();
+
+        let error = runtime
+            .submit_intent(Intent::ParkAt {
+                car: CarId::new("A"),
+                floor: Floor::new(1),
+            })
+            .expect_err("park must use the park execution capability");
+        assert_eq!(error.to_string(), "car A does not expose park");
+        runtime
+            .submit_intent(Intent::ServeFloor {
+                car: CarId::new("A"),
+                floor: Floor::new(4),
+            })
+            .expect("serve-floor remains independently enabled");
     }
 }

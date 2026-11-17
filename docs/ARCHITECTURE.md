@@ -16,7 +16,7 @@ SimulationDriver -- explicit duration --> semantic runtime events --> Engine
 
 The simulator is the first active runtime backend and emits canonical observation updates while implementing high-level-intent and deterministic-driving contracts. M4 adds deterministic recorded/read-only feeds and replay driving without an intent-submission contract. Live feeds and intent backends should implement only the responsibilities they actually provide; explicit `advance(Duration)` is not a universal live-adapter requirement.
 
-The shared Engine owns topology, call lifecycle, dispatch, pending scheduling, capabilities, incremental observation assembly, resolved operational state/evidence, high-level intent submission/result handling, and runtime-feedback processing. Dispatch and read-side clients consume this Engine-owned view rather than querying an adapter-owned state store. The developer TUI composition retains only UI state, simulator-specific controls, explicit time driving, bounded display trace, and replay input recording. Interactive, headless, and non-interactive scenario callers use the same Engine ingestion/read path.
+The shared Engine owns topology, call lifecycle, dispatch, pending scheduling, execution capabilities, explicit observation bindings/sessions, incremental observation assembly, resolved operational state/evidence, high-level intent submission/result handling, and runtime-feedback processing. Dispatch and read-side clients consume this Engine-owned view rather than querying an adapter-owned state store. The developer TUI composition retains only UI state, simulator-specific controls, explicit time driving, bounded display trace, and replay input recording. Interactive, headless, and non-interactive scenario callers use the same Engine ingestion/read path.
 
 ## Functional core
 
@@ -34,7 +34,11 @@ M1 established deterministic one-shot dispatch. M2.1 through M2.5 added persiste
 
 M3 added developer-only executable scenarios, complete trace/final-state inspection, expected-outcome verification, and a one-shot simulator intent-rejection control. These remain composition/simulator tools rather than Core semantics, equipment diagnostics, a public scenario format, or a certification/conformance system.
 
-M4 read-only experiments demonstrate that operational `CarState` is intentionally complete while retaining truthful location precision: `CarLocation::Floor` records only floor association, whereas `CarLocation::Continuous` contains a genuine continuous coordinate. It also requires known motion, directed door state, and a LiftAssistant operating mode. External sources with unknown location, unknown/undirected/aggregate door state, or source-specific control modes enter canonical observation evidence and must not fabricate those fields. `CarObservationUpdate` distinguishes an omitted field from explicit unknown evidence; the deterministic in-memory `ObservationAssembler` merges fields only within one configured source/car stream, retains per-field provenance, and rejects non-increasing per-source sequence without treating sequence as freshness. A deterministic resolver is the only promotion path from assembled evidence to complete operational state; source-specific context stays outside Core. The Open-RMF experiment demonstrates floor references, undirected door movement, and source-specific modes. The BACnet experiment demonstrates floor-level operational state plus explicit unknown evidence for a decoupled object and for per-door arrays that cannot safely become one car door state. The observation model remains internal and reversible rather than a frozen public schema.
+M4 read-only experiments demonstrate that operational `CarState` is intentionally complete while retaining truthful location precision: `CarLocation::Floor` records only floor association, whereas `CarLocation::Continuous` contains a genuine continuous coordinate. It also requires known motion, directed door state, and a LiftAssistant operating mode. External sources with unknown location, unknown/undirected/aggregate door state, or source-specific control modes enter canonical observation evidence and must not fabricate those fields. `CarObservationUpdate` distinguishes an omitted field from explicit unknown evidence; the deterministic in-memory `ObservationAssembler` merges fields only within one `(source, session, logical car)` stream, retains per-field provenance, and enforces one source-global ordered sequence within each explicitly activated session without treating sequence as freshness. A deterministic resolver is the only promotion path from assembled evidence to complete operational state; source-specific context stays outside Core. The Open-RMF experiment demonstrates floor references, undirected door movement, and source-specific modes. The BACnet experiment demonstrates floor-level operational state plus explicit unknown evidence for a decoupled object and for per-door arrays that cannot safely become one car door state. The observation model remains internal and reversible rather than a frozen public schema.
+
+`CarId` is LiftAssistant logical car identity. `ObservationSourceId` identifies a configured feed, and source-native identifiers such as Open-RMF `lift_name` remain adapter context that must map explicitly to `CarId`. Engine accepts observations only for an explicit `(source, car)` binding and explicitly activated opaque source session. One source may bind several cars and one car may have several sources, but each logical car has at most one Operational observation authority. Auxiliary sources retain isolated evidence and resolved source state for inspection/diagnostics; they do not enter `car_states()`, Core dispatch, readiness truth, field fusion, or automatic failover. Starting a new source session invalidates only that source's prior evidence/state, retires the old session token, and resets ordering without inferring restart from sequence values.
+
+Observation authority and execution capability are independent. Core consumes `ExecutionCapabilities` for high-level `ServeFloor`/`ParkAt` decisions. Source-side observation coverage stays with the adapter when demonstrated, and neither Operational nor Auxiliary observation binding grants an `IntentSink` or write authority.
 
 Core must not own networking, field buses, wall-clock time, persistence, terminal/UI frameworks, or vendor SDKs.
 
@@ -89,11 +93,12 @@ distinct from equipment faults, alarms, root causes, and maintenance actions. No
 durable store, telemetry service, or stable public diagnostic schema is implied.
 
 The headless proof keeps lifecycle and readiness separate: a live process begins
-`Starting/NotReady`, incomplete evidence remains `Synchronizing/NotReady`, sufficient
-evidence permits `ReadyReadOnly/ReadOnly`, and a source-sequence invariant violation
-produces `Degraded/NotReady`. The last resolved state may remain inspectable after
-degradation, but it is not current-readiness evidence. These internal states do not
-grant write authority and are not a frozen public lifecycle model.
+`Starting/NotReady`, incomplete Operational evidence remains `Synchronizing/NotReady`,
+and sufficient Operational evidence permits `ReadyReadOnly/ReadOnly`. Restart or an
+invariant violation from the Operational authority revokes readiness, while an
+Auxiliary anomaly remains diagnostic evidence without revoking a healthy authority's
+readiness. These internal states do not grant write authority and are not a frozen
+public lifecycle model.
 
 ## Semantic design method
 

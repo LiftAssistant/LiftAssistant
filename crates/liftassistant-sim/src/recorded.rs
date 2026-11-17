@@ -1,8 +1,8 @@
 use std::{collections::BTreeMap, collections::VecDeque, time::Duration};
 
 use liftassistant_model::{
-    Capabilities, CarId, CarObservationUpdate, CarState, Intent, ObservationProvenance,
-    ObservationSequence, ObservationSessionId, ObservationSourceId,
+    CarId, CarObservationUpdate, CarState, Intent, ObservationProvenance, ObservationSequence,
+    ObservationSessionId, ObservationSourceId,
 };
 use liftassistant_runtime::{
     CarStateResolution, ObservationAssembler, RuntimeError, RuntimeEvent, SimulationDriver,
@@ -24,11 +24,18 @@ impl RecordedFrame {
     }
 }
 
+/// Source-side fields exposed by the recorded observation feed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObservationCoverage {
+    pub position: bool,
+    pub door: bool,
+}
+
 /// Deterministic read-only playback of native semantic runtime observations.
 #[derive(Debug)]
 pub struct RecordedRuntime {
     states: BTreeMap<CarId, CarState>,
-    capabilities: BTreeMap<CarId, Capabilities>,
+    observation_coverage: BTreeMap<CarId, ObservationCoverage>,
     assembler: ObservationAssembler,
     source_session: ObservationSessionId,
     initial_observations: Vec<CarObservationUpdate>,
@@ -108,17 +115,15 @@ impl RecordedRuntime {
             }
         }
 
-        let capabilities = states
+        let observation_coverage = states
             .keys()
             .cloned()
             .map(|car| {
                 (
                     car,
-                    Capabilities {
-                        observe_position: true,
-                        observe_door: true,
-                        serve_floor: false,
-                        park: false,
+                    ObservationCoverage {
+                        position: true,
+                        door: true,
                     },
                 )
             })
@@ -126,7 +131,7 @@ impl RecordedRuntime {
         let until_next_frame = frames.front().map(|frame| frame.after);
         Ok(Self {
             states,
-            capabilities,
+            observation_coverage,
             assembler,
             source_session,
             initial_observations,
@@ -151,8 +156,8 @@ impl RecordedRuntime {
         self.states.values().cloned().collect()
     }
 
-    pub fn capabilities(&self, car: &CarId) -> Option<Capabilities> {
-        self.capabilities.get(car).cloned()
+    pub fn observation_coverage(&self, car: &CarId) -> Option<ObservationCoverage> {
+        self.observation_coverage.get(car).copied()
     }
 
     pub fn take_observation_updates(&mut self) -> Vec<CarObservationUpdate> {
@@ -319,11 +324,10 @@ mod tests {
 
         assert_eq!(runtime.source_name(), "recorded-read-only");
         assert_eq!(runtime.car_states(), initial);
-        let capabilities = runtime
-            .capabilities(&CarId::new("A"))
-            .expect("recorded car has observation capabilities");
-        assert!(capabilities.observe_position && capabilities.observe_door);
-        assert!(!capabilities.serve_floor && !capabilities.park);
+        let coverage = runtime
+            .observation_coverage(&CarId::new("A"))
+            .expect("recorded car has observation coverage");
+        assert!(coverage.position && coverage.door);
         assert_eq!(runtime.advance(Duration::from_millis(500)).len(), 1);
     }
 

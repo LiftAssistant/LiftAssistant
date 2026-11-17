@@ -14,8 +14,8 @@ use liftassistant_core::{
     dispatch, validate_hall_call,
 };
 use liftassistant_model::{
-    BuildingTopology, CallId, CallState, Capabilities, CarId, CarObservationUpdate, CarState,
-    HallCall, Intent, ObservationSessionId, ObservationSourceId,
+    BuildingTopology, CallId, CallState, CarId, CarObservationUpdate, CarState,
+    ExecutionCapabilities, HallCall, Intent, ObservationSessionId, ObservationSourceId,
 };
 use liftassistant_runtime::{
     AssembledCarObservation, CarStateResolution, IntentSink, ObservationAssembler,
@@ -139,7 +139,7 @@ pub struct Engine {
     observations: ObservationAssembler,
     source_states: BTreeMap<(ObservationSourceId, CarId), CarState>,
     operational_states: BTreeMap<CarId, CarState>,
-    capabilities: BTreeMap<CarId, Capabilities>,
+    execution_capabilities: BTreeMap<CarId, ExecutionCapabilities>,
     diagnostics: FlightRecorder,
 }
 
@@ -161,7 +161,7 @@ impl Engine {
             observations: ObservationAssembler::new(),
             source_states: BTreeMap::new(),
             operational_states: BTreeMap::new(),
-            capabilities: BTreeMap::new(),
+            execution_capabilities: BTreeMap::new(),
             diagnostics: FlightRecorder::new(capacity),
         }
     }
@@ -186,8 +186,12 @@ impl Engine {
         &self.diagnostics
     }
 
-    pub fn set_capabilities(&mut self, car: CarId, capabilities: Capabilities) {
-        self.capabilities.insert(car, capabilities);
+    pub fn set_execution_capabilities(&mut self, car: CarId, capabilities: ExecutionCapabilities) {
+        self.execution_capabilities.insert(car, capabilities);
+    }
+
+    pub fn execution_capabilities(&self, car: &CarId) -> Option<&ExecutionCapabilities> {
+        self.execution_capabilities.get(car)
     }
 
     pub fn bind_observation(
@@ -483,7 +487,7 @@ impl Engine {
         for (id, call) in pending {
             let states = self.car_states();
             let occupied_cars = self.calls.occupied_cars();
-            let decision = dispatch(&call, &states, &self.capabilities, &occupied_cars);
+            let decision = dispatch(&call, &states, &self.execution_capabilities, &occupied_cars);
             events.extend(
                 decision
                     .candidates
@@ -529,9 +533,9 @@ impl Engine {
 mod tests {
     use super::*;
     use liftassistant_model::{
-        Capabilities, CarId, CarObservationUpdate, CarState, Direction, DoorEvidence, DoorState,
-        Floor, ObservationProvenance, ObservationSequence, ObservationSessionId,
-        ObservationSourceId, PositionEvidence, ReportedDestination,
+        CarId, CarObservationUpdate, CarState, Direction, DoorEvidence, DoorState,
+        ExecutionCapabilities, Floor, ObservationProvenance, ObservationSequence,
+        ObservationSessionId, ObservationSourceId, PositionEvidence, ReportedDestination,
     };
     use liftassistant_runtime::RuntimeError;
 
@@ -573,7 +577,10 @@ mod tests {
                 .begin_source_session(source, ObservationSessionId::new("engine-test-session-A"))
                 .expect("test source session starts once");
         }
-        engine.set_capabilities(state.id.clone(), Capabilities::reference_defaults());
+        engine.set_execution_capabilities(
+            state.id.clone(),
+            ExecutionCapabilities::reference_defaults(),
+        );
         assert_eq!(
             engine.ingest_observation_update(CarObservationUpdate::from_state(
                 provenance(sequence),
@@ -1036,7 +1043,7 @@ mod tests {
                     ObservationBindingRole::Operational,
                 )
                 .expect("controller has one operational binding per car");
-            engine.set_capabilities(car, Capabilities::reference_defaults());
+            engine.set_execution_capabilities(car, ExecutionCapabilities::reference_defaults());
         }
         engine
             .bind_observation(
@@ -1083,6 +1090,10 @@ mod tests {
         assert_eq!(
             engine.source_state(&auxiliary, &CarId::new("A")),
             Some(&contradictory_auxiliary)
+        );
+        assert_eq!(
+            engine.execution_capabilities(&CarId::new("A")).cloned(),
+            Some(ExecutionCapabilities::reference_defaults())
         );
         assert!(engine.diagnostics().entries().any(|entry| matches!(
             &entry.event,

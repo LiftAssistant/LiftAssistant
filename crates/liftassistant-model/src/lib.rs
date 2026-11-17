@@ -197,19 +197,18 @@ impl fmt::Display for ReportedDestination {
     }
 }
 
+/// High-level actions available through the configured execution path for a logical car.
+///
+/// Observation coverage and observation authority are independent from these capabilities.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Capabilities {
-    pub observe_position: bool,
-    pub observe_door: bool,
+pub struct ExecutionCapabilities {
     pub serve_floor: bool,
     pub park: bool,
 }
 
-impl Capabilities {
+impl ExecutionCapabilities {
     pub const fn reference_defaults() -> Self {
         Self {
-            observe_position: true,
-            observe_door: true,
             serve_floor: true,
             park: true,
         }

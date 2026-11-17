@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4.9 Observation Semantics Hardening is implemented through M4.9d. Its HUMAN-CHECK was accepted by the explicit M4.10 authorization on 2026-11-16.
 
-M4.10 Source / Entity Binding & Observation Authority is in progress. M4.10a explicit logical-car/source binding, M4.10b explicit source sessions, and M4.10c Operational/Auxiliary state ownership are implemented; M4.10d capability ownership cleanup is READY. The live read-only external-input blocker remains unchanged, so M5 is not READY.
+M4.10 Source / Entity Binding & Observation Authority is implemented through M4.10d and awaits HUMAN-CHECK. The live read-only external-input blocker remains unchanged, so M5 is not READY.
 
 ## Validated baseline
 
@@ -169,7 +169,7 @@ Implemented behavior:
 - TUI selection/rendering iterates configured floors, including non-contiguous floor sets;
 - invalid call events distinguish unserved floors from unavailable terminal direction;
 - reset and replay preserve and compare the same topology alongside semantic and physical state;
-- runtime-provided per-car capabilities remain the dispatch input; no speculative building/door/capability DSL was introduced;
+- runtime-provided per-car execution capabilities remain the dispatch input; no speculative building/door/capability DSL was introduced;
 - the deliberate boundary from BACnet floor indexes and SAREF4LIFT service/space graphs is recorded in `docs/PRIOR_ART.md`.
 
 ## M2 completion review
@@ -236,7 +236,7 @@ Implemented behavior:
 - partial ticks preserve remaining frame time, and one tick may deterministically release every frame whose delay is covered;
 - position/arrival/door observations update the backend's canonical observed car state;
 - construction rejects events for unknown cars rather than silently manufacturing state;
-- capabilities advertise position/door observation while `serve_floor` and `park` are false;
+- source-side observation coverage advertises position/door evidence, while the recorded feed exposes no `IntentSink` and supplies no execution capability to Engine;
 - every submitted intent is rejected without changing state or disturbing later playback;
 - `cargo run -p liftassistant-tui -- --scenario recorded-read-only-observation` runs the recording twice, checks identical batches/states, verifies the no-write boundary, and shows that frames release at 500 ms and 1000 ms but not at 250 ms or 999 ms;
 - the recording is internal Rust data: no file schema, protocol mapping, network transport, hardware access, or write path was added.
@@ -529,7 +529,7 @@ Validation: formatting, all 63 workspace tests, focused Open-RMF/BACnet/recorded
 - `CarObservationUpdate` uses outer optional fields for omitted/not-updated values while existing evidence variants retain explicit unknown/unavailable semantics;
 - `ObservationAssembler` merges updates deterministically per source and car without cross-source evidence mixing;
 - each assembled field retains the provenance of the update that last supplied it, while a snapshot records the latest accepted update provenance;
-- non-increasing per-source sequence is rejected without mutating current evidence; sequence remains ordering evidence, not freshness;
+- non-increasing sequence is rejected without mutating current evidence; M4.10b later scoped this source-global ordering to each explicit source session, and sequence remains ordering evidence rather than freshness;
 - no persistence, clock/freshness policy, probability, history smoothing, or telemetry framework was added.
 
 Validation: formatting, warning-free workspace clippy, all 66 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass. Focused regressions cover omitted-vs-explicit-unknown merge, per-field provenance, rejection without mutation, and source isolation. No new blocker was found; the live read-only external-input blocker remains unchanged.
@@ -552,7 +552,7 @@ Validation: formatting, warning-free workspace clippy, all 71 workspace tests, a
 
 ## M4.10 — Source / Entity Binding & Observation Authority
 
-**IN PROGRESS — M4.10a–M4.10c implemented; M4.10d READY. M5 is not READY.**
+**IMPLEMENTED — M4.10a–M4.10d complete; awaiting HUMAN-CHECK. M5 is not READY.**
 
 Observation authority in this milestone selects the configured observation stream that may become Engine operational truth. It does not grant command/write authority, change `IntentSink`, or establish failover.
 
@@ -602,19 +602,41 @@ Validation: focused uniqueness/dispatch isolation and no-fusion regressions, foc
 
 ### M4.10d — Capability ownership cleanup
 
-**READY.**
+**IMPLEMENTED.**
 
-Next: separate observation coverage from execution capability only as far as current callers require. Core dispatch must consume execution capability alone, and adding an Auxiliary read-only observation source must not disable a logical car's execution capability.
+- the former mixed `Capabilities` type is replaced by Core-facing `ExecutionCapabilities`, containing only the current high-level `serve_floor` and `park` execution abilities;
+- Engine owns execution capability by logical `CarId`, and Core dispatch accepts only that execution-capability map;
+- source observation coverage no longer masquerades as execution capability. RecordedRuntime keeps its demonstrated position/door `ObservationCoverage` locally in the source/adapter layer and does not write false execution capability into Engine;
+- Simulator exposes execution capability explicitly for composition, while the TUI reads the Engine-owned execution view;
+- an Auxiliary read-only source cannot remove or disable the logical car's configured execution capability, and observation authority still grants no `IntentSink` or write authority;
+- Simulator checks `ServeFloor` and `ParkAt` against their independent execution capability rather than reusing the serve-floor flag;
+- no observation-coverage negotiation, write-authority model, principal, lease, quality score, or adapter capability framework was introduced.
+
+Validation: the dispatch capability regressions, per-intent Simulator capability regression, recorded source-boundary regression, and authority/dispatch isolation regression pass with the split types; all 81 workspace tests pass.
+
+## M4.10 completion review
+
+**AUTO review complete; HUMAN-CHECK required.**
+
+- `CarId` remains LiftAssistant logical car identity; source-native identities remain adapter context and require explicit mapping;
+- every accepted observation requires explicit source/car binding and an explicitly active opaque source session;
+- each logical car has at most one Operational observation authority and exactly one operational state entry when that authority has complete resolvable evidence;
+- Auxiliary evidence remains inspectable and diagnostic but cannot enter dispatch truth, fill authority gaps, trigger failover, or revoke healthy authority readiness merely because it has an anomaly;
+- source restart invalidates that source's evidence/state, resets session-local ordering, and cannot be inferred from sequence values or reversed by delayed retired-session data;
+- execution capability is independent from observation coverage and authority; `IntentSink` remains unchanged and no write ownership was added;
+- no field fusion, automatic source failover, freshness/liveliness deadline, cross-source disagreement alarm, public binding schema, configuration service, transport, or M5 implementation was added.
+
+Final validation at this checkpoint: formatting, warning-free workspace clippy, all 81 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass after the durable architecture/memory documentation update.
 
 ## M4 exit / M5 promotion rule after audit
 
-M4.3–M4.8 remain valid prototype evidence. M5 is **not READY** yet.
+M4.3–M4.10 remain valid internal prototype evidence. M5 is **not READY** yet.
 
 Before promoting a production read-only M5 slice, require:
 
-1. M4.9 semantic hardening complete;
-2. Open-RMF and BACnet mappings still pass through the same corrected observation/Engine path;
-3. Engine owns its operational state rather than querying adapter-owned truth;
+1. M4.9 observation semantic hardening complete;
+2. M4.10 explicit binding, session, observation-authority isolation, and capability ownership complete;
+3. Open-RMF and BACnet mappings still pass through the same corrected observation/Engine path;
 4. live read-only evidence or an explicitly supplied sanitized real capture/test endpoint exists for the next live slice.
 
-M4.9 satisfies items 1–3. Item 4 remains blocked by the existing live environment: no ROS/Open-RMF runtime, BACnet read/listener path, CAN/vcan interface, or external fixture is available. No network scan, package installation, privileged interface creation, real-controller connection, or invented packet/capture is authorized. M4.9 has no remaining machine-actionable implementation work; HUMAN-CHECK and explicitly supplied live read-only evidence remain external gates. Do not invent a live source or install privileged system components merely to advance the milestone.
+M4.9 and M4.10 satisfy items 1–3. Item 4 remains blocked by the existing live environment: no ROS/Open-RMF runtime, BACnet read/listener path, CAN/vcan interface, or external fixture is available. No network scan, package installation, privileged interface creation, real-controller connection, or invented packet/capture is authorized. M4.10 has no remaining machine-actionable implementation work; HUMAN-CHECK and explicitly supplied live read-only evidence remain external gates. Do not invent a live source or install privileged system components merely to advance the milestone.
