@@ -2,7 +2,6 @@
 
 mod bacnet_recorded;
 mod recorded;
-mod rmf_recorded;
 
 use std::{collections::BTreeMap, time::Duration};
 
@@ -18,11 +17,11 @@ pub use bacnet_recorded::{
     BacnetMappingError, MappedBacnetObservation, RecordedBacnetLiftProperties,
     map_bacnet_lift_properties,
 };
-pub use recorded::{ObservationCoverage, RecordedFrame, RecordedRuntime};
-pub use rmf_recorded::{
+pub use liftassistant_rmf::{
     MappedRmfObservation, RmfInteractionModeProjection, RmfLiftState, RmfMappingError,
     RmfSourceContext, map_rmf_lift_state, map_rmf_lift_state_with_projection,
 };
+pub use recorded::{ObservationCoverage, RecordedFrame, RecordedRuntime};
 
 #[derive(Debug)]
 struct SimCar {

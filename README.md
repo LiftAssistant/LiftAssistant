@@ -36,7 +36,7 @@ developer TUI
 
 M2 evolved this from one-shot dispatch into persistent call semantics: call identity/lifecycle, multiple pending calls, runtime-feedback-driven completion, explainable decisions, and explicit served-floor topology. That semantic vertical path is implemented and machine-reviewed.
 
-M3 turned the deterministic simulator and replay path into a small research laboratory with executable scenarios, trace inspection, expected-outcome checks, and one-shot integration-failure injection. M4 established native-semantic recorded/read-only inputs, canonical incremental observations, explicit source bindings and sessions, observation authority isolation, Engine-owned operational state, diagnostics/replay, and a headless read-only lifecycle proof. External live evidence from the official Open-RMF Hotel simulation has now closed M4 and permits a bounded M5 live read-only adapter proof. No live adapter is implemented yet, and none of this implies passenger-elevator control, certification, or conformance claims.
+M3 turned the deterministic simulator and replay path into a small research laboratory with executable scenarios, trace inspection, expected-outcome checks, and one-shot integration-failure injection. M4 established native-semantic recorded/read-only inputs, canonical incremental observations, explicit source bindings and sessions, observation authority isolation, Engine-owned operational state, diagnostics/replay, and a headless read-only lifecycle proof. M5.1 now adds a Rust-native, subscription-only Open-RMF adapter that maps explicitly configured native lift names through the same canonical Engine path. It has been exercised against the official Open-RMF Hotel simulation, but none of this implies passenger-elevator control, certification, or conformance claims.
 
 The TUI is a composition/debugging client, not the architecture.
 
@@ -94,7 +94,15 @@ Run the non-interactive headless/read-only lifecycle proof:
 cargo run -p liftassistant-headless -- --scenario headless-read-only-lifecycle
 ~~~
 
-This separate binary has no TUI or simulator dependency and connects only an internal recorded canonical-observation source. It proves that process existence is distinct from readiness: partial evidence remains `Synchronizing`, complete evidence reaches `ReadyReadOnly`, and a repeated source sequence moves the host to `Degraded`/not-ready while retaining the last known state for inspection. It has no `IntentSink`, transport, passenger-elevator write path, deployment claim, or stable public API.
+This scenario uses an internal recorded canonical-observation source and exercises no transport. It proves that process existence is distinct from readiness: partial evidence remains `Synchronizing`, complete evidence reaches `ReadyReadOnly`, and a repeated source sequence moves the host to `Degraded`/not-ready while retaining the last known state for inspection. The headless binary has no TUI, simulator, `IntentSink`, passenger-elevator write path, deployment claim, or stable public API.
+
+Exercise the live Open-RMF subscription proof against an independently running official Hotel simulation:
+
+~~~bash
+ROS_DOMAIN_ID=47 cargo run -p liftassistant-headless -- --scenario headless-rmf-live-proof
+~~~
+
+The proof requires explicit `Lift1 -> A` and `Lift2 -> B` configuration, starts an adapter-owned source session, consumes `/lift_states` with BestEffort/Volatile QoS, and feeds canonical updates into Engine-owned operational state. It pauses for an operator-controlled source restart and an independent simulation-only movement request so it can verify session invalidation/recovery plus real motion and door transitions. LiftAssistant creates no `/lift_requests` publisher and exposes no live RMF `IntentSink`.
 
 Controls:
 
@@ -122,9 +130,10 @@ crates/
   liftassistant-model/     canonical domain types
   liftassistant-core/      deterministic semantic decisions
   liftassistant-engine/    shared semantic orchestration
-  liftassistant-headless/  internal read-only host/lifecycle proof
+  liftassistant-headless/  internal read-only host/lifecycle and live proofs
+  liftassistant-rmf/       Open-RMF mapping and subscription-only adapter
   liftassistant-runtime/   semantic runtime contract
-  liftassistant-sim/       deterministic reference backend
+  liftassistant-sim/       deterministic reference and recorded backends
   liftassistant-tui/       developer simulator composition / UI
 
 docs/

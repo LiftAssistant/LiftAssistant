@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-Official Open-RMF Hotel live read-only evidence now satisfies the M5 entry gate. **M5.1a — Rust-native ROS 2 transport compatibility proof is READY.** No later M5 slice is READY merely because it appears in the roadmap.
+M5.1 is implemented: the Rust-native Open-RMF adapter has passed official Hotel live read-only validation through Engine-owned state. **M5.2 — Source Lifecycle / Freshness / Health is READY.** No later M5 slice is READY merely because it appears in the roadmap.
 
 ## Validated baseline
 
@@ -667,7 +667,7 @@ The proof used the official rootless Kilted image at digest `sha256:601a6bb7c04d
 
 ### M5.1b — RMF-owned live subscription and canonical ingestion
 
-**IN PROGRESS — explicit mode projection implemented; live ownership READY.**
+**IMPLEMENTED.**
 
 The M5.1a payload proof reproduced the official Hotel source's steady-state `current_mode=MODE_AGV`. Open-RMF defines `MODE_AGV` and `MODE_HUMAN` as RMF interaction/control modes, while the same field may also report exceptional lift states such as fire or offline. They therefore remain source-specific evidence by default and are not globally redefined as LiftAssistant operating modes.
 
@@ -699,8 +699,28 @@ Focused RMF regressions and the complete workspace gate pass: formatting, warnin
 
 #### M5.1b-2 — RMF-owned live subscription and Engine ingestion
 
+**IMPLEMENTED.**
+
+Implemented behavior and evidence:
+
+- a concrete `liftassistant-rmf` package owns the shared recorded/live semantic mapper, explicit native `lift_name` bindings, adapter session/source-global sequence, and Rust-native `/lift_states` subscriber; ROS 2/RustDDS dependencies do not enter model, Core, or Engine ownership;
+- `Lift1 -> A` and `Lift2 -> B` are explicit configuration in the Hotel proof; an unconfigured native name is rejected even when its text matches a logical `CarId`;
+- the adapter's opaque `ObservationSessionId` is independent of RMF control `session_id` and `lift_time`, and restarting the adapter resets its source-global sequence only after an explicit Engine session transition;
+- Headless readiness requires complete Engine-owned operational state for every configured Operational car rather than becoming ready after the first car resolves;
+- the official Hotel source produced two operational cars and `ReadyReadOnly`; an explicit session transition invalidated both old states, a delayed old-session update was rejected, and the restarted source restored both cars under a new session starting at sequence 1;
+- an independent simulation-only request moved `Lift1` to `L2`; the subscription observed moving and undirected door-moving evidence followed by stopped/open resolved state at `L2` while preserving raw RMF mode context;
+- `liftassistant-rmf` contains no publisher, `LiftRequest`, or `IntentSink`, so observation authority grants no write authority.
+
+The validated transport profile remains BestEffort, Volatile, KeepLast. The live proof used the official rootless Kilted Hotel image at the M5.1a digest, then removed only its named test container and image. The official simulation did not exit within Podman's ten-second SIGTERM window during restarts/cleanup and required SIGKILL; this is preserved as external lifecycle evidence, not reclassified as an elevator fault or a LiftAssistant adapter failure.
+
+Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 91 workspace tests, all six TUI scenarios, the headless recorded lifecycle scenario, dependency/source pollution checks, and the official live two-lift/restart/movement proof pass.
+
+### M5.2 — Source Lifecycle / Freshness / Health
+
 **READY.**
 
-Extract the existing RMF mapper only after the demonstrated live ownership pressure, keep recorded and live callers on that one implementation, and prove the official two-lift read-only flow through explicit identity mapping, adapter-owned session/sequence, canonical updates, and Engine-owned operational state.
+Implement host-observed, source-specific, configurable freshness without moving wall-clock time into Core or treating observation sequence as freshness. The next slice must distinguish transport/discovery, payload activity, source/session activity, observation resolution, and Engine operational readiness at least enough that discovery alone cannot claim healthy ingestion.
 
-M5.2 and later dependent slices remain not READY until M5.1b completes its live canonical-ingestion exit evidence. The Rust-native transport proof remains valid and read-only; this HUMAN decision grants no write authority and changes no canonical model type.
+An Operational source becoming stale must explicitly revoke its current live operational truth/readiness while retaining bounded inspectable evidence; an Auxiliary source becoming stale must not revoke a healthy Operational authority. Recovery must pass through synchronization and require sufficient new canonical evidence. Do not add automatic failover, a universal timeout, an equipment-fault inference, or a stable public health taxonomy.
+
+M5.3 and later dependent slices remain not READY until M5.2 supplies the lifecycle/freshness evidence required by a production read-only host.

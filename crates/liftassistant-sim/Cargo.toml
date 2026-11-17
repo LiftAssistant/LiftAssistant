@@ -8,4 +8,5 @@ publish.workspace = true
 
 [dependencies]
 liftassistant-model = { path = "../liftassistant-model" }
+liftassistant-rmf = { path = "../liftassistant-rmf" }
 liftassistant-runtime = { path = "../liftassistant-runtime" }

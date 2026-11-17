@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/liftassistant-model",
+    "crates/liftassistant-rmf",
     "crates/liftassistant-core",
     "crates/liftassistant-engine",
     "crates/liftassistant-headless",

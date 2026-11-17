@@ -3,18 +3,19 @@
 ## Current composition
 
 ~~~text
-Simulator / recorded feed -- canonical observation updates --> Engine
-                                                               |
-Developer TUI / scenarios / headless <--- Engine-owned state ---+
-                                                               |
-                                                               +--> LiftAssistant Core
-                                                               |
-                                                               +--> IntentSink --> Simulator
+Simulator / recorded feed ---- canonical observation updates ----> Engine
+Live RMF subscriber / mapper -- canonical observation updates ---->   |
+                                                                     |
+Developer TUI / scenarios / headless <--- Engine-owned state --------+
+                                                                     |
+                                                                     +--> LiftAssistant Core
+                                                                     |
+                                                                     +--> IntentSink --> Simulator
 
 SimulationDriver -- explicit duration --> semantic runtime events --> Engine
 ~~~
 
-The simulator is the first active runtime backend and emits canonical observation updates while implementing high-level-intent and deterministic-driving contracts. M4 adds deterministic recorded/read-only feeds and replay driving without an intent-submission contract. Live feeds and intent backends should implement only the responsibilities they actually provide; explicit `advance(Duration)` is not a universal live-adapter requirement.
+The simulator is the first active runtime backend and emits canonical observation updates while implementing high-level-intent and deterministic-driving contracts. M4 adds deterministic recorded/read-only feeds and replay driving without an intent-submission contract. The M5 Open-RMF adapter adds a live subscription and source-owned mapping/session/sequence boundary without an intent-submission contract. Live feeds and intent backends implement only the responsibilities they actually provide; explicit `advance(Duration)` is not a universal live-adapter requirement.
 
 The shared Engine owns topology, call lifecycle, dispatch, pending scheduling, execution capabilities, explicit observation bindings/sessions, incremental observation assembly, resolved operational state/evidence, high-level intent submission/result handling, and runtime-feedback processing. Dispatch and read-side clients consume this Engine-owned view rather than querying an adapter-owned state store. The developer TUI composition retains only UI state, simulator-specific controls, explicit time driving, bounded display trace, and replay input recording. Interactive, headless, and non-interactive scenario callers use the same Engine ingestion/read path.
 
@@ -40,7 +41,9 @@ M4 read-only experiments demonstrate that operational `CarState` is intentionall
 
 Observation authority and execution capability are independent. Core consumes `ExecutionCapabilities` for high-level `ServeFloor`/`ParkAt` decisions. Source-side observation coverage stays with the adapter when demonstrated, and neither Operational nor Auxiliary observation binding grants an `IntentSink` or write authority.
 
-Official Open-RMF Hotel live evidence confirms that one source/publisher may carry periodic complete snapshots for several source-native lift identities, including unchanged idle state. A live adapter must still map those identities explicitly to logical `CarId` values and create its own explicitly controlled `ObservationSessionId` for each ingestion lifetime. Transport discovery and DDS graph presence are diagnostic evidence, not proof that payloads are flowing and not the sole authority for session lifecycle. Source timestamps and Open-RMF control `session_id` remain payload context; neither is promoted to LiftAssistant source generation.
+The live Open-RMF adapter maps every configured native `lift_name` explicitly to a logical `CarId`, creates its own `ObservationSessionId` for each ingestion lifetime, and assigns one source-global sequence across all mapped cars. Recorded and live RMF inputs share the same semantic mapper. `MODE_AGV` and `MODE_HUMAN` remain source-specific by default; a configured RMF source may explicitly project either to canonical Normal evidence, while raw current/available modes and RMF control-session context remain adapter-owned evidence. This narrow projection is not a global mode equivalence.
+
+Official Open-RMF Hotel validation confirms that one source/publisher may carry periodic complete snapshots for several source-native lift identities, including unchanged idle state. It also exercises adapter/source restart, old-state invalidation, new-session sequence restart, delayed-old-session rejection, and real simulation motion/door transitions through Engine-owned state. Transport discovery and DDS graph presence remain diagnostic evidence, not proof that payloads are flowing and not the sole authority for session lifecycle. Source timestamps and Open-RMF control `session_id` remain payload context; neither is promoted to LiftAssistant source generation.
 
 Core must not own networking, field buses, wall-clock time, persistence, terminal/UI frameworks, or vendor SDKs.
 
@@ -65,15 +68,19 @@ Canonical `CarObservationUpdate` values enter Engine through one ingestion bound
 - `liftassistant-model`: canonical domain types.
 - `liftassistant-core`: deterministic vendor-neutral semantic decisions/state transitions.
 - `liftassistant-engine`: shared deterministic semantic orchestration, observation assembly/resolution, and operational state ownership.
-- `liftassistant-headless`: internal non-interactive read-only host/lifecycle proof.
+- `liftassistant-headless`: internal non-interactive read-only host/lifecycle and live integration proofs.
+- `liftassistant-rmf`: shared Open-RMF semantic mapping, explicit native/logical binding adapter, and Rust-native subscription-only transport.
 - `liftassistant-runtime`: semantic execution contract and runtime events.
-- `liftassistant-sim`: deterministic active simulator, native-semantic recorded/read-only backend, and recorded external-state mapping experiments.
+- `liftassistant-sim`: deterministic active simulator, native-semantic recorded/read-only backend, and recorded BACnet mapping experiment.
 - `liftassistant-tui`: developer simulator composition, scenario runner, and UI.
 
-These seven packages reflect demonstrated ownership boundaries. The headless package
-exists because Engine now has a real second composition independent of the TUI; it
-does not establish a general service framework. Further packages still require real
-lifecycle/reuse pressure rather than speculative layering.
+These eight packages reflect demonstrated ownership boundaries. The headless package
+exists because Engine has a real second composition independent of the TUI. The RMF
+package exists because recorded and live paths now share protocol-specific mapping
+while transport dependencies must remain outside model, Core, and Engine. Neither
+package establishes a general service or adapter framework.
+Further packages still require real lifecycle/reuse pressure rather than speculative
+layering.
 
 ## Determinism boundary
 

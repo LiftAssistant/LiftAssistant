@@ -1,10 +1,14 @@
 #![forbid(unsafe_code)]
 
-use std::{collections::VecDeque, env, process::ExitCode};
+use std::{
+    collections::{BTreeMap, BTreeSet, VecDeque},
+    env, io,
+    process::ExitCode,
+};
 
 use liftassistant_engine::{
-    DiagnosticAnomaly, DiagnosticEvent, Engine, ObservationBindingRole, ObservationIngestError,
-    ObservationIngestResult, SourceSessionError, SourceSessionTransition,
+    DiagnosticAnomaly, DiagnosticEvent, Engine, ObservationBindingError, ObservationBindingRole,
+    ObservationIngestError, ObservationIngestResult, SourceSessionError, SourceSessionTransition,
 };
 use liftassistant_model::{
     BuildingTopology, CarId, CarLocation, CarObservation, CarObservationUpdate, DoorEvidence,
@@ -12,9 +16,14 @@ use liftassistant_model::{
     ObservationSessionId, ObservationSourceId, OperatingMode, OperatingModeEvidence, Position,
     PositionEvidence, ReportedDestination,
 };
+use liftassistant_rmf::{
+    RmfInteractionModeProjection, RmfLiftBinding, RmfLiftState, RmfLiveSubscriber,
+    RmfObservationAdapter, RmfReceiveControl, RmfSourceContext,
+};
 use liftassistant_runtime::{CarStateResolution, UnresolvedCarStateReason};
 
 const LIFECYCLE_SCENARIO: &str = "headless-read-only-lifecycle";
+const RMF_LIVE_SCENARIO: &str = "headless-rmf-live-proof";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Readiness {
@@ -85,6 +94,7 @@ impl RecordedObservationFeed {
 #[derive(Debug)]
 struct ReadOnlyHost {
     engine: Engine,
+    required_operational_cars: BTreeSet<CarId>,
     lifecycle: HostLifecycle,
     events: Vec<HostEvent>,
 }
@@ -93,6 +103,7 @@ impl ReadOnlyHost {
     fn new(topology: BuildingTopology) -> Self {
         Self {
             engine: Engine::new(topology),
+            required_operational_cars: BTreeSet::new(),
             lifecycle: HostLifecycle::Starting,
             events: vec![HostEvent::LifecycleChanged(HostLifecycle::Starting)],
         }
@@ -106,10 +117,28 @@ impl ReadOnlyHost {
         self.lifecycle.readiness()
     }
 
+    fn bind_observation(
+        &mut self,
+        source: ObservationSourceId,
+        car: CarId,
+        role: ObservationBindingRole,
+    ) -> Result<(), ObservationBindingError> {
+        self.engine.bind_observation(source, car.clone(), role)?;
+        if role == ObservationBindingRole::Operational {
+            self.required_operational_cars.insert(car);
+        }
+        Ok(())
+    }
+
     fn poll(&mut self, source: &mut RecordedObservationFeed) -> bool {
         let Some(observation) = source.next_observation() else {
             return false;
         };
+        self.ingest_observation(observation);
+        true
+    }
+
+    fn ingest_observation(&mut self, observation: CarObservationUpdate) {
         let observation_source = observation.provenance.source.clone();
         let car = observation.car.clone();
         let role = self
@@ -144,7 +173,7 @@ impl ReadOnlyHost {
                     anomaly,
                 )));
             }
-            return true;
+            return;
         }
 
         if !is_operational {
@@ -159,13 +188,21 @@ impl ReadOnlyHost {
                     });
                 }
             }
-            return true;
+            return;
         }
 
         match resolution {
             ObservationIngestResult::Resolution(CarStateResolution::Resolved(state)) => {
                 self.events.push(HostEvent::StateUpdated(state));
-                self.transition(HostLifecycle::ReadyReadOnly);
+                let all_operational_cars_resolved = self
+                    .required_operational_cars
+                    .iter()
+                    .all(|car| self.engine.operational_car_state(car).is_some());
+                if all_operational_cars_resolved {
+                    self.transition(HostLifecycle::ReadyReadOnly);
+                } else if !matches!(self.lifecycle, HostLifecycle::Synchronizing) {
+                    self.transition(HostLifecycle::Synchronizing);
+                }
             }
             ObservationIngestResult::Resolution(CarStateResolution::Unresolved {
                 car,
@@ -191,7 +228,6 @@ impl ReadOnlyHost {
                 ));
             }
         }
-        true
     }
 
     fn begin_source_session(
@@ -264,18 +300,22 @@ fn parse_scenario(mut args: impl Iterator<Item = String>) -> Result<String, Stri
     match (args.next(), args.next(), args.next()) {
         (Some(flag), Some(name), None) if flag == "--scenario" => Ok(name),
         _ => Err(format!(
-            "usage: liftassistant-headless --scenario {LIFECYCLE_SCENARIO}"
+            "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}>"
         )),
     }
 }
 
 fn run_scenario(name: &str) -> Result<String, String> {
-    if name != LIFECYCLE_SCENARIO {
-        return Err(format!(
-            "unknown scenario {name:?}; available scenario: {LIFECYCLE_SCENARIO}"
-        ));
+    match name {
+        LIFECYCLE_SCENARIO => run_lifecycle_scenario(),
+        RMF_LIVE_SCENARIO => run_rmf_live_scenario(),
+        _ => Err(format!(
+            "unknown scenario {name:?}; available scenarios: {LIFECYCLE_SCENARIO}, {RMF_LIVE_SCENARIO}"
+        )),
     }
+}
 
+fn run_lifecycle_scenario() -> Result<String, String> {
     let first = execute_proof();
     let second = execute_proof();
     if first != second {
@@ -283,6 +323,317 @@ fn run_scenario(name: &str) -> Result<String, String> {
     }
     verify_proof(&first)?;
     Ok(render_report(&first))
+}
+
+#[derive(Debug)]
+struct LiveRmfRound {
+    source_times: Vec<i64>,
+    sequences: Vec<u64>,
+    source_contexts: BTreeMap<String, RmfSourceContext>,
+    last_update: CarObservationUpdate,
+}
+
+fn run_rmf_live_scenario() -> Result<String, String> {
+    let domain_id = env::var("ROS_DOMAIN_ID")
+        .unwrap_or_else(|_| "47".into())
+        .parse::<u16>()
+        .map_err(|error| format!("ROS_DOMAIN_ID must fit in u16: {error}"))?;
+    let source = ObservationSourceId::new("rmf/hotel-live");
+    let mut host = ReadOnlyHost::new(
+        BuildingTopology::new([Floor::new(1), Floor::new(2), Floor::new(3)])
+            .expect("Hotel proof topology is non-empty"),
+    );
+    for car in [CarId::new("A"), CarId::new("B")] {
+        host.bind_observation(source.clone(), car, ObservationBindingRole::Operational)
+            .map_err(|error| format!("failed to bind live RMF source: {error:?}"))?;
+    }
+
+    let mut first_adapter = hotel_adapter(source.clone(), "hotel-adapter-session-A")?;
+    host.begin_source_session(source.clone(), first_adapter.session().clone())
+        .map_err(|error| format!("failed to begin first live RMF session: {error:?}"))?;
+    let first = receive_live_rmf_round(
+        &mut host,
+        &mut first_adapter,
+        domain_id,
+        "A",
+        60_000_000_000,
+    )?;
+    if host.readiness() != Readiness::ReadOnly || host.engine.car_states().len() != 2 {
+        return Err("first live RMF session did not establish two-car ReadyReadOnly state".into());
+    }
+
+    let second_adapter = hotel_adapter(source.clone(), "hotel-adapter-session-B")?;
+    let transition = host
+        .begin_source_session(source.clone(), second_adapter.session().clone())
+        .map_err(|error| format!("failed to begin second live RMF session: {error:?}"))?;
+    if transition.invalidated_cars != [CarId::new("A"), CarId::new("B")]
+        || host.readiness() != Readiness::NotReady
+        || !host.engine.car_states().is_empty()
+    {
+        return Err("new live RMF session did not invalidate both operational cars".into());
+    }
+    match host
+        .engine
+        .ingest_observation_update(first.last_update.clone())
+    {
+        ObservationIngestResult::Rejected(ObservationIngestError::InactiveSourceSession {
+            active,
+            received,
+            ..
+        }) if active == *second_adapter.session()
+            && received == ObservationSessionId::new("hotel-adapter-session-A") => {}
+        other => {
+            return Err(format!(
+                "delayed retired-session update was not rejected as inactive: {other:?}"
+            ));
+        }
+    }
+
+    println!(
+        "live-proof: first session ready; restart the official RMF source, wait for it to publish /lift_states, then press Enter"
+    );
+    let mut acknowledgment = String::new();
+    io::stdin()
+        .read_line(&mut acknowledgment)
+        .map_err(|error| {
+            format!("failed while waiting for source-restart acknowledgment: {error}")
+        })?;
+
+    let mut second_adapter = second_adapter;
+    let second = receive_live_rmf_round(&mut host, &mut second_adapter, domain_id, "B", 0)?;
+    if host.readiness() != Readiness::ReadOnly || host.engine.car_states().len() != 2 {
+        return Err("second live RMF session did not restore two-car ReadyReadOnly state".into());
+    }
+    let first_max_time = first
+        .source_times
+        .iter()
+        .max()
+        .copied()
+        .expect("a completed live round has source times");
+    let second_min_time = second
+        .source_times
+        .iter()
+        .min()
+        .copied()
+        .expect("a completed live round has source times");
+    if second_min_time >= first_max_time {
+        return Err(format!(
+            "RMF lift_time did not reset across the externally acknowledged source restart: first max={first_max_time}, second min={second_min_time}"
+        ));
+    }
+
+    println!(
+        "live-proof: second session ready; issue the independent simulation-only Lift1 -> L2 AGV request now"
+    );
+    let transition = receive_live_rmf_transition(&mut host, &mut second_adapter, domain_id)?;
+
+    let raw_modes = second
+        .source_contexts
+        .iter()
+        .map(|(lift, context)| format!("{lift}={}", context.source_mode))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok([
+        format!("scenario: {RMF_LIVE_SCENARIO}"),
+        "scope: official Open-RMF simulation; subscription only; no LiftRequest publisher or IntentSink".into(),
+        "identity: PASS (Lift1 -> A, Lift2 -> B through explicit configuration)".into(),
+        format!(
+            "session A: PASS (source-global sequences {:?}; two Engine operational cars; ReadyReadOnly)",
+            first.sequences
+        ),
+        "session transition: PASS (both old operational states invalidated; delayed session-A update rejected)".into(),
+        format!(
+            "session B: PASS (source-global sequences {:?}; lift_time reset after source restart; ReadyReadOnly restored)",
+            second.sequences
+        ),
+        format!(
+            "movement/door: PASS (independent simulation harness observed by LiftAssistant at sequences {:?}; moving and door-moving evidence seen; Lift1 resolved stopped/open at L2)",
+            transition.sequences
+        ),
+        format!("raw RMF context: PASS ({raw_modes}; explicit AGV-as-Normal projection retained raw modes)"),
+        "write boundary: PASS (live RMF crate exposes a subscriber and canonical observation adapter only)".into(),
+        String::new(),
+    ]
+    .join("\n"))
+}
+
+#[derive(Debug)]
+struct LiveRmfTransition {
+    sequences: Vec<u64>,
+}
+
+fn receive_live_rmf_transition(
+    host: &mut ReadOnlyHost,
+    adapter: &mut RmfObservationAdapter,
+    domain_id: u16,
+) -> Result<LiveRmfTransition, String> {
+    let node_name = format!("rmf_live_transition_proof_{}", std::process::id());
+    let subscriber = RmfLiveSubscriber::connect(domain_id, &node_name)
+        .map_err(|error| format!("failed to connect transition observer: {error}"))?;
+    let mut sequences = Vec::new();
+    let mut saw_moving = false;
+    let mut saw_door_moving = false;
+    let mut mapping_error = None;
+
+    subscriber
+        .receive_until(|payload| {
+            if payload.state.lift_name != "Lift1" {
+                let mapped = match adapter.map(&payload.state) {
+                    Ok(mapped) => mapped,
+                    Err(error) => {
+                        mapping_error = Some(error.to_string());
+                        return RmfReceiveControl::Stop;
+                    }
+                };
+                sequences.push(mapped.update.provenance.sequence.value());
+                host.ingest_observation(mapped.update);
+                return RmfReceiveControl::Continue;
+            }
+
+            saw_moving |= matches!(
+                payload.state.motion_state,
+                RmfLiftState::MOTION_UP | RmfLiftState::MOTION_DOWN
+            );
+            saw_door_moving |= payload.state.door_state == RmfLiftState::DOOR_MOVING;
+            let stopped_open_at_l2 = payload.state.current_floor == "L2"
+                && payload.state.motion_state == RmfLiftState::MOTION_STOPPED
+                && payload.state.door_state == RmfLiftState::DOOR_OPEN;
+            let mapped = match adapter.map(&payload.state) {
+                Ok(mapped) => mapped,
+                Err(error) => {
+                    mapping_error = Some(error.to_string());
+                    return RmfReceiveControl::Stop;
+                }
+            };
+            sequences.push(mapped.update.provenance.sequence.value());
+            host.ingest_observation(mapped.update);
+            if stopped_open_at_l2 && saw_moving && saw_door_moving {
+                RmfReceiveControl::Stop
+            } else {
+                RmfReceiveControl::Continue
+            }
+        })
+        .map_err(|error| format!("live RMF transition receive loop failed: {error}"))?;
+    if let Some(error) = mapping_error {
+        return Err(error);
+    }
+    let Some(state) = host.engine.operational_car_state(&CarId::new("A")) else {
+        return Err("Lift1 transition did not restore logical car A operational state".into());
+    };
+    if !saw_moving
+        || !saw_door_moving
+        || state.location != CarLocation::Floor(Floor::new(2))
+        || state.motion != MotionState::Stopped
+        || state.door != DoorState::Open
+        || state.mode != OperatingMode::Normal
+        || host.readiness() != Readiness::ReadOnly
+    {
+        return Err(format!(
+            "Lift1 transition evidence was incomplete: moving={saw_moving}, door_moving={saw_door_moving}, state={state:?}, readiness={:?}",
+            host.readiness()
+        ));
+    }
+
+    Ok(LiveRmfTransition { sequences })
+}
+
+fn hotel_adapter(
+    source: ObservationSourceId,
+    session: &str,
+) -> Result<RmfObservationAdapter, String> {
+    let floor_labels = [("L1", 1), ("L2", 2), ("L3", 3)]
+        .into_iter()
+        .map(|(label, floor)| (label.to_owned(), Floor::new(floor)))
+        .collect::<BTreeMap<_, _>>();
+    RmfObservationAdapter::new(
+        source,
+        ObservationSessionId::new(session),
+        RmfInteractionModeProjection::conservative().with_agv_as_normal(),
+        [
+            (
+                "Lift1".into(),
+                RmfLiftBinding::new(CarId::new("A"), floor_labels.clone()),
+            ),
+            (
+                "Lift2".into(),
+                RmfLiftBinding::new(CarId::new("B"), floor_labels),
+            ),
+        ],
+    )
+    .map_err(|error| format!("invalid Hotel RMF adapter configuration: {error}"))
+}
+
+fn receive_live_rmf_round(
+    host: &mut ReadOnlyHost,
+    adapter: &mut RmfObservationAdapter,
+    domain_id: u16,
+    round: &str,
+    minimum_source_time_nanos: i64,
+) -> Result<LiveRmfRound, String> {
+    let node_name = format!("rmf_live_proof_{}_{}", std::process::id(), round);
+    let subscriber = RmfLiveSubscriber::connect(domain_id, &node_name)
+        .map_err(|error| format!("failed to connect live RMF subscriber: {error}"))?;
+    let expected_topology = host.engine.topology().clone();
+    let mut source_times = Vec::new();
+    let mut sequences = Vec::new();
+    let mut source_contexts = BTreeMap::new();
+    let mut last_update = None;
+    let mut mapping_error = None;
+
+    subscriber
+        .receive_until(|payload| {
+            let mapped = match adapter.map(&payload.state) {
+                Ok(mapped) => mapped,
+                Err(error) => {
+                    mapping_error = Some(error.to_string());
+                    return RmfReceiveControl::Stop;
+                }
+            };
+            if mapped.topology != expected_topology {
+                mapping_error = Some(format!(
+                    "live RMF topology {:?} differs from configured Engine topology {:?}",
+                    mapped.topology.served_floors(),
+                    expected_topology.served_floors()
+                ));
+                return RmfReceiveControl::Stop;
+            }
+            source_times.push(payload.source_time_nanos);
+            sequences.push(mapped.update.provenance.sequence.value());
+            source_contexts.insert(
+                mapped.source_context.lift_name.clone(),
+                mapped.source_context,
+            );
+            last_update = Some(mapped.update.clone());
+            host.ingest_observation(mapped.update);
+
+            if host.readiness() == Readiness::ReadOnly
+                && host.engine.car_states().len() == 2
+                && payload.source_time_nanos >= minimum_source_time_nanos
+            {
+                RmfReceiveControl::Stop
+            } else {
+                RmfReceiveControl::Continue
+            }
+        })
+        .map_err(|error| format!("live RMF receive loop failed: {error}"))?;
+    if let Some(error) = mapping_error {
+        return Err(error);
+    }
+    if source_contexts.keys().cloned().collect::<BTreeSet<_>>()
+        != BTreeSet::from(["Lift1".to_owned(), "Lift2".to_owned()])
+    {
+        return Err(format!(
+            "live RMF round did not observe both explicitly configured lifts: {:?}",
+            source_contexts.keys().collect::<Vec<_>>()
+        ));
+    }
+
+    Ok(LiveRmfRound {
+        source_times,
+        sequences,
+        source_contexts,
+        last_update: last_update.expect("a completed live round has an update"),
+    })
 }
 
 fn execute_proof() -> ProofRun {
@@ -307,13 +658,12 @@ fn reference_host() -> ReadOnlyHost {
         BuildingTopology::new([1, 2, 3, 4].map(Floor::new))
             .expect("reference topology is non-empty"),
     );
-    host.engine
-        .bind_observation(
-            reference_source_id(),
-            reference_car_id(),
-            ObservationBindingRole::Operational,
-        )
-        .expect("headless fixture has one operational observation binding");
+    host.bind_observation(
+        reference_source_id(),
+        reference_car_id(),
+        ObservationBindingRole::Operational,
+    )
+    .expect("headless fixture has one operational observation binding");
     host.begin_source_session(reference_source_id(), reference_session_id())
         .expect("headless fixture starts one source session");
     host
@@ -488,6 +838,33 @@ mod tests {
     }
 
     #[test]
+    fn readiness_waits_for_every_configured_operational_car() {
+        let source = ObservationSourceId::new("fixture/two-car-source");
+        let session = ObservationSessionId::new("two-car-session-A");
+        let mut host = ReadOnlyHost::new(
+            BuildingTopology::new([Floor::new(1), Floor::new(2)]).expect("valid topology"),
+        );
+        for car in [CarId::new("A"), CarId::new("B")] {
+            host.bind_observation(source.clone(), car, ObservationBindingRole::Operational)
+                .expect("each logical car has one authority");
+        }
+        host.begin_source_session(source.clone(), session.clone())
+            .expect("source starts explicitly");
+
+        let mut first = complete_observation(source.clone(), session.clone(), 1, Floor::new(1));
+        first.car = CarId::new("A");
+        host.ingest_observation(first.into());
+        assert_eq!(host.lifecycle(), &HostLifecycle::Synchronizing);
+        assert_eq!(host.readiness(), Readiness::NotReady);
+
+        let mut second = complete_observation(source, session, 2, Floor::new(2));
+        second.car = CarId::new("B");
+        host.ingest_observation(second.into());
+        assert_eq!(host.lifecycle(), &HostLifecycle::ReadyReadOnly);
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+    }
+
+    #[test]
     fn executable_proof_is_deterministic_and_reports_no_write_boundary() {
         let report = run_scenario(LIFECYCLE_SCENARIO).expect("reference scenario should pass");
 
@@ -594,13 +971,12 @@ mod tests {
 
         let auxiliary_source = ObservationSourceId::new("fixture/auxiliary-rmf");
         let auxiliary_session = ObservationSessionId::new("auxiliary-session-A");
-        host.engine
-            .bind_observation(
-                auxiliary_source.clone(),
-                reference_car_id(),
-                ObservationBindingRole::Auxiliary,
-            )
-            .expect("auxiliary binding is explicit");
+        host.bind_observation(
+            auxiliary_source.clone(),
+            reference_car_id(),
+            ObservationBindingRole::Auxiliary,
+        )
+        .expect("auxiliary binding is explicit");
         host.begin_source_session(auxiliary_source.clone(), auxiliary_session.clone())
             .expect("auxiliary source starts explicitly");
         let auxiliary = complete_observation(
