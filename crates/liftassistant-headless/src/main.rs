@@ -3,7 +3,8 @@
 use std::{collections::VecDeque, env, process::ExitCode};
 
 use liftassistant_engine::{
-    DiagnosticAnomaly, DiagnosticEvent, Engine, ObservationBindingRole, ObservationIngestResult,
+    DiagnosticAnomaly, DiagnosticEvent, Engine, ObservationBindingRole, ObservationIngestError,
+    ObservationIngestResult, SourceSessionError, SourceSessionTransition,
 };
 use liftassistant_model::{
     BuildingTopology, CarId, CarLocation, CarObservation, CarObservationUpdate, DoorEvidence,
@@ -24,6 +25,7 @@ enum Readiness {
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum DegradedReason {
     ObservationAnomaly(DiagnosticAnomaly),
+    ObservationRejected(ObservationIngestError),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -52,6 +54,11 @@ enum HostEvent {
     },
     StateUpdated(liftassistant_model::CarState),
     ObservationRejected(DiagnosticAnomaly),
+    IngestionRejected(ObservationIngestError),
+    AuxiliaryObservationAccepted {
+        source: ObservationSourceId,
+        car: CarId,
+    },
 }
 
 /// Internal in-memory source for the headless proof. It exposes observations only.
@@ -103,11 +110,19 @@ impl ReadOnlyHost {
         let Some(observation) = source.next_observation() else {
             return false;
         };
+        let observation_source = observation.provenance.source.clone();
+        let car = observation.car.clone();
+        let role = self
+            .engine
+            .observation_binding_role(&observation_source, &car);
+        let is_operational = role == Some(ObservationBindingRole::Operational);
 
-        if matches!(
-            self.lifecycle,
-            HostLifecycle::Starting | HostLifecycle::Degraded(_)
-        ) {
+        if is_operational
+            && matches!(
+                self.lifecycle,
+                HostLifecycle::Starting | HostLifecycle::Degraded(_)
+            )
+        {
             self.transition(HostLifecycle::Synchronizing);
         }
 
@@ -124,9 +139,26 @@ impl ReadOnlyHost {
                 .clone();
             self.events
                 .push(HostEvent::ObservationRejected(anomaly.clone()));
-            self.transition(HostLifecycle::Degraded(DegradedReason::ObservationAnomaly(
-                anomaly,
-            )));
+            if is_operational {
+                self.transition(HostLifecycle::Degraded(DegradedReason::ObservationAnomaly(
+                    anomaly,
+                )));
+            }
+            return true;
+        }
+
+        if !is_operational {
+            match resolution {
+                ObservationIngestResult::Rejected(error) => {
+                    self.events.push(HostEvent::IngestionRejected(error));
+                }
+                ObservationIngestResult::Incomplete(_) | ObservationIngestResult::Resolution(_) => {
+                    self.events.push(HostEvent::AuxiliaryObservationAccepted {
+                        source: observation_source,
+                        car,
+                    });
+                }
+            }
             return true;
         }
 
@@ -151,11 +183,32 @@ impl ReadOnlyHost {
                 }
                 debug_assert!(assembled.snapshot().is_none());
             }
-            ObservationIngestResult::Rejected(_) => {
-                unreachable!("assembly rejection creates the diagnostic incident handled above")
+            ObservationIngestResult::Rejected(error) => {
+                self.events
+                    .push(HostEvent::IngestionRejected(error.clone()));
+                self.transition(HostLifecycle::Degraded(
+                    DegradedReason::ObservationRejected(error),
+                ));
             }
         }
         true
+    }
+
+    fn begin_source_session(
+        &mut self,
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+    ) -> Result<SourceSessionTransition, SourceSessionError> {
+        let transition = self.engine.begin_source_session(source, session)?;
+        let invalidated_operational_state = transition.invalidated_cars.iter().any(|car| {
+            self.engine
+                .observation_binding_role(&transition.source, car)
+                == Some(ObservationBindingRole::Operational)
+        });
+        if invalidated_operational_state {
+            self.transition(HostLifecycle::Synchronizing);
+        }
+        Ok(transition)
     }
 
     fn transition(&mut self, lifecycle: HostLifecycle) {
@@ -261,8 +314,7 @@ fn reference_host() -> ReadOnlyHost {
             ObservationBindingRole::Operational,
         )
         .expect("headless fixture has one operational observation binding");
-    host.engine
-        .begin_source_session(reference_source_id(), reference_session_id())
+    host.begin_source_session(reference_source_id(), reference_session_id())
         .expect("headless fixture starts one source session");
     host
 }
@@ -287,14 +339,30 @@ fn snapshot(host: &ReadOnlyHost) -> LifecycleSnapshot {
 }
 
 fn reference_source() -> RecordedObservationFeed {
-    let mut complete = observation(2);
-    complete.position = PositionEvidence::Exact(Position::at_floor(Floor::new(4)));
+    let complete = complete_observation(
+        reference_source_id(),
+        reference_session_id(),
+        2,
+        Floor::new(4),
+    );
+    let duplicate = complete.clone();
+    RecordedObservationFeed::new([observation(1), complete, duplicate])
+}
+
+fn complete_observation(
+    source: ObservationSourceId,
+    session: ObservationSessionId,
+    sequence: u64,
+    floor: Floor,
+) -> CarObservation {
+    let mut complete = observation(sequence);
+    complete.provenance.source = source;
+    complete.provenance.session = session;
+    complete.position = PositionEvidence::Exact(Position::at_floor(floor));
     complete.motion = MotionEvidence::Known(MotionState::Stopped);
     complete.door = DoorEvidence::Known(DoorState::Open);
     complete.reported_destination = ReportedDestination::None;
-
-    let duplicate = complete.clone();
-    RecordedObservationFeed::new([observation(1), complete, duplicate])
+    complete
 }
 
 fn observation(sequence: u64) -> CarObservation {
@@ -452,11 +520,12 @@ mod tests {
 
     #[test]
     fn new_incidents_still_revoke_readiness_after_incident_retention_is_full() {
-        let mut complete = observation(2);
-        complete.position = PositionEvidence::Exact(Position::at_floor(Floor::new(4)));
-        complete.motion = MotionEvidence::Known(MotionState::Stopped);
-        complete.door = DoorEvidence::Known(DoorState::Open);
-        complete.reported_destination = ReportedDestination::None;
+        let complete = complete_observation(
+            reference_source_id(),
+            reference_session_id(),
+            2,
+            Floor::new(4),
+        );
         let mut frames = vec![observation(1), complete.clone()];
         frames.extend(std::iter::repeat_n(complete, 10));
         let mut source = RecordedObservationFeed::new(frames);
@@ -474,5 +543,91 @@ mod tests {
         );
         assert!(matches!(host.lifecycle(), HostLifecycle::Degraded(_)));
         assert_eq!(host.readiness(), Readiness::NotReady);
+    }
+
+    #[test]
+    fn operational_session_reset_revokes_readiness_until_new_session_state_arrives() {
+        let mut host = reference_host();
+        let mut initial = RecordedObservationFeed::new([
+            observation(1),
+            complete_observation(
+                reference_source_id(),
+                reference_session_id(),
+                2,
+                Floor::new(4),
+            ),
+        ]);
+        while host.poll(&mut initial) {}
+        assert_eq!(host.lifecycle(), &HostLifecycle::ReadyReadOnly);
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+
+        let next_session = ObservationSessionId::new("headless-fixture-session-B");
+        host.begin_source_session(reference_source_id(), next_session.clone())
+            .expect("operational source explicitly starts a new session");
+        assert_eq!(host.lifecycle(), &HostLifecycle::Synchronizing);
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        assert!(host.engine.car_states().is_empty());
+
+        let mut resumed = RecordedObservationFeed::new([complete_observation(
+            reference_source_id(),
+            next_session,
+            1,
+            Floor::new(4),
+        )]);
+        assert!(host.poll(&mut resumed));
+        assert_eq!(host.lifecycle(), &HostLifecycle::ReadyReadOnly);
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+    }
+
+    #[test]
+    fn auxiliary_sequence_anomaly_is_visible_without_revoking_operational_readiness() {
+        let mut host = reference_host();
+        let mut initial = RecordedObservationFeed::new([complete_observation(
+            reference_source_id(),
+            reference_session_id(),
+            1,
+            Floor::new(4),
+        )]);
+        assert!(host.poll(&mut initial));
+        let operational = host.engine.car_states();
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+
+        let auxiliary_source = ObservationSourceId::new("fixture/auxiliary-rmf");
+        let auxiliary_session = ObservationSessionId::new("auxiliary-session-A");
+        host.engine
+            .bind_observation(
+                auxiliary_source.clone(),
+                reference_car_id(),
+                ObservationBindingRole::Auxiliary,
+            )
+            .expect("auxiliary binding is explicit");
+        host.begin_source_session(auxiliary_source.clone(), auxiliary_session.clone())
+            .expect("auxiliary source starts explicitly");
+        let auxiliary = complete_observation(
+            auxiliary_source.clone(),
+            auxiliary_session.clone(),
+            1,
+            Floor::new(1),
+        );
+        let mut feed = RecordedObservationFeed::new([auxiliary.clone(), auxiliary]);
+        assert!(host.poll(&mut feed));
+        assert!(host.poll(&mut feed));
+
+        let anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+            source: auxiliary_source,
+            session: auxiliary_session,
+            previous: ObservationSequence::new(1),
+            received: ObservationSequence::new(1),
+        };
+        assert!(host.engine.diagnostics().entries().any(|entry| {
+            matches!(&entry.event, DiagnosticEvent::Anomaly(observed) if observed == &anomaly)
+        }));
+        assert!(
+            host.events
+                .contains(&HostEvent::ObservationRejected(anomaly))
+        );
+        assert_eq!(host.engine.car_states(), operational);
+        assert_eq!(host.lifecycle(), &HostLifecycle::ReadyReadOnly);
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
     }
 }

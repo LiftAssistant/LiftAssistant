@@ -137,7 +137,8 @@ pub struct Engine {
     active_source_sessions: BTreeMap<ObservationSourceId, ObservationSessionId>,
     retired_source_sessions: BTreeSet<(ObservationSourceId, ObservationSessionId)>,
     observations: ObservationAssembler,
-    states: BTreeMap<(ObservationSourceId, CarId), CarState>,
+    source_states: BTreeMap<(ObservationSourceId, CarId), CarState>,
+    operational_states: BTreeMap<CarId, CarState>,
     capabilities: BTreeMap<CarId, Capabilities>,
     diagnostics: FlightRecorder,
 }
@@ -158,7 +159,8 @@ impl Engine {
             active_source_sessions: BTreeMap::new(),
             retired_source_sessions: BTreeSet::new(),
             observations: ObservationAssembler::new(),
-            states: BTreeMap::new(),
+            source_states: BTreeMap::new(),
+            operational_states: BTreeMap::new(),
             capabilities: BTreeMap::new(),
             diagnostics: FlightRecorder::new(capacity),
         }
@@ -270,27 +272,40 @@ impl Engine {
                 .insert((source.clone(), previous.clone()));
         }
         self.observations.remove_source(&source);
-        let invalidated_cars = self
-            .states
+        let mut invalidated_cars: BTreeSet<_> = self
+            .source_states
             .keys()
             .filter_map(|(candidate, car)| (candidate == &source).then_some(car.clone()))
             .collect();
-        self.states.retain(|(candidate, _), _| candidate != &source);
+        self.source_states
+            .retain(|(candidate, _), _| candidate != &source);
+        for ((bound_source, car), role) in &self.observation_bindings {
+            if bound_source == &source
+                && *role == ObservationBindingRole::Operational
+                && self.operational_states.remove(car).is_some()
+            {
+                invalidated_cars.insert(car.clone());
+            }
+        }
 
         Ok(SourceSessionTransition {
             source,
             previous_session,
             active_session: session,
-            invalidated_cars,
+            invalidated_cars: invalidated_cars.into_iter().collect(),
         })
     }
 
     pub fn car_states(&self) -> Vec<CarState> {
-        self.states.values().cloned().collect()
+        self.operational_states.values().cloned().collect()
     }
 
-    pub fn car_state(&self, source: &ObservationSourceId, car: &CarId) -> Option<&CarState> {
-        self.states.get(&(source.clone(), car.clone()))
+    pub fn operational_car_state(&self, car: &CarId) -> Option<&CarState> {
+        self.operational_states.get(car)
+    }
+
+    pub fn source_state(&self, source: &ObservationSourceId, car: &CarId) -> Option<&CarState> {
+        self.source_states.get(&(source.clone(), car.clone()))
     }
 
     pub fn evidence(
@@ -307,12 +322,12 @@ impl Engine {
         update: CarObservationUpdate,
     ) -> ObservationIngestResult {
         let key = (update.provenance.source.clone(), update.car.clone());
-        if !self.observation_bindings.contains_key(&key) {
+        let Some(role) = self.observation_bindings.get(&key).copied() else {
             return ObservationIngestResult::Rejected(ObservationIngestError::UnboundObservation {
                 source: update.provenance.source,
                 car: update.car,
             });
-        }
+        };
         let received_session = update.provenance.session.clone();
         let Some(active_session) = self.active_source_sessions.get(&update.provenance.source)
         else {
@@ -332,7 +347,7 @@ impl Engine {
                 },
             );
         }
-        self.diagnostics.record_observation(update.clone());
+        self.diagnostics.record_observation(update.clone(), role);
         let assembled = match self.observations.apply(update) {
             Ok(assembled) => assembled,
             Err(error) => {
@@ -340,16 +355,26 @@ impl Engine {
             }
         };
         let Some(snapshot) = assembled.snapshot() else {
-            self.states.remove(&key);
+            self.source_states.remove(&key);
+            if role == ObservationBindingRole::Operational {
+                self.operational_states.remove(&assembled.car);
+            }
             return ObservationIngestResult::Incomplete(Box::new(assembled));
         };
         let resolution = resolve_car_observation(&snapshot);
         match &resolution {
             CarStateResolution::Resolved(state) => {
-                self.states.insert(key, state.clone());
+                self.source_states.insert(key, state.clone());
+                if role == ObservationBindingRole::Operational {
+                    self.operational_states
+                        .insert(state.id.clone(), state.clone());
+                }
             }
-            CarStateResolution::Unresolved { .. } => {
-                self.states.remove(&key);
+            CarStateResolution::Unresolved { car, .. } => {
+                self.source_states.remove(&key);
+                if role == ObservationBindingRole::Operational {
+                    self.operational_states.remove(car);
+                }
             }
         }
         ObservationIngestResult::Resolution(resolution)
@@ -504,9 +529,9 @@ impl Engine {
 mod tests {
     use super::*;
     use liftassistant_model::{
-        Capabilities, CarId, CarObservationUpdate, CarState, Direction, DoorState, Floor,
-        ObservationProvenance, ObservationSequence, ObservationSessionId, ObservationSourceId,
-        PositionEvidence, ReportedDestination,
+        Capabilities, CarId, CarObservationUpdate, CarState, Direction, DoorEvidence, DoorState,
+        Floor, ObservationProvenance, ObservationSequence, ObservationSessionId,
+        ObservationSourceId, PositionEvidence, ReportedDestination,
     };
     use liftassistant_runtime::RuntimeError;
 
@@ -731,7 +756,7 @@ mod tests {
         );
         assert!(
             engine
-                .car_state(&ObservationSourceId::new("engine-test"), &CarId::new("A"))
+                .source_state(&ObservationSourceId::new("engine-test"), &CarId::new("A"))
                 .is_none()
         );
     }
@@ -896,7 +921,7 @@ mod tests {
             ObservationIngestResult::Resolution(CarStateResolution::Resolved(state_a.clone()))
         );
         assert!(engine.evidence(&source, &car).is_some());
-        assert_eq!(engine.car_state(&source, &car), Some(&state_a));
+        assert_eq!(engine.source_state(&source, &car), Some(&state_a));
 
         assert_eq!(
             engine.begin_source_session(source.clone(), session_b.clone()),
@@ -908,14 +933,14 @@ mod tests {
             })
         );
         assert!(engine.evidence(&source, &car).is_none());
-        assert!(engine.car_state(&source, &car).is_none());
+        assert!(engine.source_state(&source, &car).is_none());
 
         let state_b = CarState::new("A", Floor::new(4));
         assert_eq!(
             engine.ingest_observation_update(update(session_b.clone(), 1, &state_b)),
             ObservationIngestResult::Resolution(CarStateResolution::Resolved(state_b.clone()))
         );
-        assert_eq!(engine.car_state(&source, &car), Some(&state_b));
+        assert_eq!(engine.source_state(&source, &car), Some(&state_b));
         assert!(
             !engine
                 .diagnostics()
@@ -930,7 +955,7 @@ mod tests {
                 received: session_a.clone(),
             })
         );
-        assert_eq!(engine.car_state(&source, &car), Some(&state_b));
+        assert_eq!(engine.source_state(&source, &car), Some(&state_b));
         assert_eq!(
             engine.begin_source_session(source.clone(), session_a.clone()),
             Err(SourceSessionError::RetiredSession {
@@ -994,5 +1019,183 @@ mod tests {
                 .entries()
                 .any(|entry| matches!(entry.event, DiagnosticEvent::Anomaly(_)))
         );
+    }
+
+    #[test]
+    fn operational_view_is_unique_and_auxiliary_state_cannot_change_dispatch() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let controller = ObservationSourceId::new("controller-main");
+        let controller_session = ObservationSessionId::new("controller-session-A");
+        let auxiliary = ObservationSourceId::new("bacnet-read-only");
+        let auxiliary_session = ObservationSessionId::new("bacnet-session-A");
+        for car in [CarId::new("A"), CarId::new("B")] {
+            engine
+                .bind_observation(
+                    controller.clone(),
+                    car.clone(),
+                    ObservationBindingRole::Operational,
+                )
+                .expect("controller has one operational binding per car");
+            engine.set_capabilities(car, Capabilities::reference_defaults());
+        }
+        engine
+            .bind_observation(
+                auxiliary.clone(),
+                CarId::new("A"),
+                ObservationBindingRole::Auxiliary,
+            )
+            .expect("read-only source is explicitly auxiliary");
+        engine
+            .begin_source_session(controller.clone(), controller_session.clone())
+            .expect("controller session starts explicitly");
+        engine
+            .begin_source_session(auxiliary.clone(), auxiliary_session.clone())
+            .expect("auxiliary session starts explicitly");
+
+        for (car, sequence, floor) in [("A", 1, 1), ("B", 2, 5)] {
+            let state = CarState::new(car, Floor::new(floor));
+            engine.ingest_observation_update(CarObservationUpdate::from_state(
+                ObservationProvenance {
+                    source: controller.clone(),
+                    session: controller_session.clone(),
+                    sequence: ObservationSequence::new(sequence),
+                },
+                &state,
+            ));
+        }
+        let contradictory_auxiliary = CarState::new("A", Floor::new(8));
+        engine.ingest_observation_update(CarObservationUpdate::from_state(
+            ObservationProvenance {
+                source: auxiliary.clone(),
+                session: auxiliary_session,
+                sequence: ObservationSequence::new(1),
+            },
+            &contradictory_auxiliary,
+        ));
+
+        assert_eq!(
+            engine.car_states(),
+            vec![
+                CarState::new("A", Floor::new(1)),
+                CarState::new("B", Floor::new(5)),
+            ]
+        );
+        assert_eq!(
+            engine.source_state(&auxiliary, &CarId::new("A")),
+            Some(&contradictory_auxiliary)
+        );
+        assert!(engine.diagnostics().entries().any(|entry| matches!(
+            &entry.event,
+            DiagnosticEvent::Observation {
+                update,
+                role: ObservationBindingRole::Auxiliary,
+            } if update.provenance.source == auxiliary && update.car == CarId::new("A")
+        )));
+        let mut backend = TestBackend {
+            intents: Vec::new(),
+        };
+        engine.submit_call(
+            HallCall {
+                floor: Floor::new(8),
+                direction: Direction::Down,
+            },
+            &mut backend,
+        );
+        assert_eq!(
+            backend.intents,
+            vec![Intent::ServeFloor {
+                car: CarId::new("B"),
+                floor: Floor::new(8),
+            }]
+        );
+    }
+
+    #[test]
+    fn incomplete_operational_evidence_is_not_fused_with_complete_auxiliary_state() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let controller = ObservationSourceId::new("controller-main");
+        let controller_session = ObservationSessionId::new("controller-session-A");
+        let auxiliary = ObservationSourceId::new("open-rmf-read-only");
+        let auxiliary_session_a = ObservationSessionId::new("rmf-session-A");
+        let car = CarId::new("A");
+        engine
+            .bind_observation(
+                controller.clone(),
+                car.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .expect("controller is the observation authority");
+        engine
+            .bind_observation(
+                auxiliary.clone(),
+                car.clone(),
+                ObservationBindingRole::Auxiliary,
+            )
+            .expect("Open-RMF is inspection-only");
+        engine
+            .begin_source_session(controller.clone(), controller_session.clone())
+            .expect("controller session starts explicitly");
+        engine
+            .begin_source_session(auxiliary.clone(), auxiliary_session_a.clone())
+            .expect("auxiliary session starts explicitly");
+
+        let operational = CarState::new("A", Floor::new(3));
+        engine.ingest_observation_update(CarObservationUpdate::from_state(
+            ObservationProvenance {
+                source: controller.clone(),
+                session: controller_session.clone(),
+                sequence: ObservationSequence::new(1),
+            },
+            &operational,
+        ));
+        let mut auxiliary_complete = CarState::new("A", Floor::new(7));
+        auxiliary_complete.door = DoorState::Open;
+        engine.ingest_observation_update(CarObservationUpdate::from_state(
+            ObservationProvenance {
+                source: auxiliary.clone(),
+                session: auxiliary_session_a,
+                sequence: ObservationSequence::new(1),
+            },
+            &auxiliary_complete,
+        ));
+        assert_eq!(engine.operational_car_state(&car), Some(&operational));
+
+        let mut operational_incomplete = CarObservationUpdate::from_state(
+            ObservationProvenance {
+                source: controller.clone(),
+                session: controller_session.clone(),
+                sequence: ObservationSequence::new(2),
+            },
+            &operational,
+        );
+        operational_incomplete.door = Some(DoorEvidence::Unknown);
+        assert!(matches!(
+            engine.ingest_observation_update(operational_incomplete),
+            ObservationIngestResult::Resolution(CarStateResolution::Unresolved { .. })
+        ));
+        assert!(engine.operational_car_state(&car).is_none());
+        assert!(engine.car_states().is_empty());
+        assert_eq!(
+            engine.source_state(&auxiliary, &car),
+            Some(&auxiliary_complete)
+        );
+
+        engine.ingest_observation_update(CarObservationUpdate::from_state(
+            ObservationProvenance {
+                source: controller,
+                session: controller_session,
+                sequence: ObservationSequence::new(3),
+            },
+            &operational,
+        ));
+        let auxiliary_transition = engine
+            .begin_source_session(
+                auxiliary.clone(),
+                ObservationSessionId::new("rmf-session-B"),
+            )
+            .expect("auxiliary source may explicitly restart");
+        assert_eq!(auxiliary_transition.invalidated_cars, vec![car.clone()]);
+        assert_eq!(engine.operational_car_state(&car), Some(&operational));
+        assert!(engine.source_state(&auxiliary, &car).is_none());
     }
 }

@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4.9 Observation Semantics Hardening is implemented through M4.9d. Its HUMAN-CHECK was accepted by the explicit M4.10 authorization on 2026-11-16.
 
-M4.10 Source / Entity Binding & Observation Authority is in progress. M4.10a explicit logical-car/source binding and M4.10b explicit source sessions are implemented; M4.10c Operational/Auxiliary state ownership is READY. The live read-only external-input blocker remains unchanged, so M5 is not READY.
+M4.10 Source / Entity Binding & Observation Authority is in progress. M4.10a explicit logical-car/source binding, M4.10b explicit source sessions, and M4.10c Operational/Auxiliary state ownership are implemented; M4.10d capability ownership cleanup is READY. The live read-only external-input blocker remains unchanged, so M5 is not READY.
 
 ## Validated baseline
 
@@ -552,7 +552,7 @@ Validation: formatting, warning-free workspace clippy, all 71 workspace tests, a
 
 ## M4.10 — Source / Entity Binding & Observation Authority
 
-**IN PROGRESS — M4.10a–M4.10b implemented; M4.10c READY. M5 is not READY.**
+**IN PROGRESS — M4.10a–M4.10c implemented; M4.10d READY. M5 is not READY.**
 
 Observation authority in this milestone selects the configured observation stream that may become Engine operational truth. It does not grant command/write authority, change `IntentSink`, or establish failover.
 
@@ -587,9 +587,24 @@ Validation: focused session-restart and source-global ordering regressions, all 
 
 ### M4.10c — Operational vs Auxiliary state ownership
 
+**IMPLEMENTED.**
+
+- Engine now maintains a unique operational state map keyed only by logical `CarId`, plus a separate per-source state/evidence view for inspection;
+- `car_states()`, Core dispatch, and readiness-relevant headless state consume only the configured Operational binding. Multiple sources reporting one car cannot create duplicate operational entries;
+- bound Auxiliary observations still assemble, resolve, and enter the Flight Recorder with source, session, sequence, logical car, and binding role context, while remaining excluded from operational state and dispatch;
+- complete but contradictory Auxiliary state cannot change dispatch selection, overwrite authority state, or become an automatic backup;
+- when Operational evidence becomes incomplete or unresolved, its logical car leaves the operational view even if a complete Auxiliary state exists. No per-field or whole-state fusion occurs;
+- restarting an Auxiliary source clears only its own evidence/source state and preserves healthy authority state; restarting an Operational source invalidates that car's operational state;
+- headless lifecycle follows the same boundary: Operational session reset revokes `ReadyReadOnly` until the new session supplies complete state, while an Auxiliary sequence anomaly remains visible in diagnostics/events without revoking healthy operational readiness;
+- no automatic promotion, failover, disagreement alarm, timestamp comparison, equipment-fault inference, or write authority was introduced.
+
+Validation: focused uniqueness/dispatch isolation and no-fusion regressions, focused headless Operational-reset and Auxiliary-anomaly regressions, all 80 workspace tests, all six TUI scenarios, and the headless read-only lifecycle scenario pass.
+
+### M4.10d — Capability ownership cleanup
+
 **READY.**
 
-Next: make `car_states()`, dispatch, and readiness-relevant state unique by logical `CarId` and sourced only from its configured Operational binding. Preserve per-source Auxiliary evidence/state for inspection without field fusion, failover, or dispatch influence.
+Next: separate observation coverage from execution capability only as far as current callers require. Core dispatch must consume execution capability alone, and adding an Auxiliary read-only observation source must not disable a logical car's execution capability.
 
 ## M4 exit / M5 promotion rule after audit
 

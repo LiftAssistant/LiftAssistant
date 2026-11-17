@@ -5,7 +5,7 @@ use liftassistant_model::{
 };
 use liftassistant_runtime::RuntimeEvent;
 
-use crate::EngineEvent;
+use crate::{EngineEvent, ObservationBindingRole};
 
 const INCIDENT_BEFORE_ENTRIES: usize = 8;
 const INCIDENT_AFTER_ENTRIES: usize = 2;
@@ -36,7 +36,10 @@ pub enum DiagnosticAnomaly {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum DiagnosticEvent {
-    Observation(CarObservationUpdate),
+    Observation {
+        update: CarObservationUpdate,
+        role: ObservationBindingRole,
+    },
     Engine(EngineEvent),
     Anomaly(DiagnosticAnomaly),
 }
@@ -97,8 +100,12 @@ impl FlightRecorder {
         self.incidents.iter()
     }
 
-    pub(crate) fn record_observation(&mut self, update: CarObservationUpdate) {
-        self.record(DiagnosticEvent::Observation(update));
+    pub(crate) fn record_observation(
+        &mut self,
+        update: CarObservationUpdate,
+        role: ObservationBindingRole,
+    ) {
+        self.record(DiagnosticEvent::Observation { update, role });
     }
 
     pub(crate) fn record_engine_events(&mut self, events: &[EngineEvent]) {
@@ -186,10 +193,10 @@ struct SequenceDetector {
 impl SequenceDetector {
     fn observe(&mut self, event: &DiagnosticEvent) -> Vec<DiagnosticAnomaly> {
         match event {
-            DiagnosticEvent::Observation(observation) => {
-                let source = &observation.provenance.source;
-                let session = &observation.provenance.session;
-                let received = observation.provenance.sequence;
+            DiagnosticEvent::Observation { update, .. } => {
+                let source = &update.provenance.source;
+                let session = &update.provenance.session;
+                let received = update.provenance.sequence;
                 let key = (source.clone(), session.clone());
                 match self.last_observation_sequence.get(&key).copied() {
                     Some(previous) if received <= previous => {
