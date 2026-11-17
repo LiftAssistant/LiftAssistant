@@ -96,6 +96,8 @@ cargo run -p liftassistant-headless -- --scenario headless-incident-capsule-repl
 
 The production RMF command may additionally receive `--incident-capsule-out <path>` to create one bounded capsule at the first payload-stale trigger. Files are created without overwriting an existing path and can be replayed with `liftassistant-headless --replay-incident-capsule <path>`. The JSON wire representation is private, experimental, size-bounded, and explicitly versioned; it is not a stable/public schema or an unbounded telemetry archive.
 
+Create a separately written candidate for manual review with `liftassistant-headless --sanitize-incident-capsule <private.json> <candidate.json>`. The deterministic private profile pseudonymizes source/session/car identities and remaps floor relationships, then requires the candidate to reproduce the same trigger in a fresh host before writing it. The source file is never modified. The candidate embeds `manual_review_required=true`; this path does not claim perfect anonymization, security certification, or permission to upload/publish the result.
+
 Run the non-interactive headless/read-only lifecycle proof:
 
 ~~~bash

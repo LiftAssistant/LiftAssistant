@@ -123,6 +123,8 @@ Production diagnostics now pair the Engine's bounded canonical Flight Recorder w
 
 The headless host now records a bounded replay-action window and can freeze an opt-in internal incident capsule containing version/context, topology, explicit bindings, source/session actions, canonical observation updates, explicit invalidations, trigger, and expected lifecycle/readiness. Replay always builds a fresh host/Engine and refuses action windows that lack explicit session lifecycle; it never infers a source restart from sequence or payload fields. The current JSON format is private, size-bounded, create-new, and experimental, with no stability, database, upload, or public-schema promise.
 
+A deterministic sanitization step can produce a separate candidate capsule without mutating the private source. It preserves ordering and source/session/car relationships through stable pseudonyms, remaps topology/floor evidence consistently, and must reproduce the same trigger before being written. The candidate carries an explicit manual-review requirement; LiftAssistant makes no perfect-anonymization, security-certification, or automatic-sharing claim.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

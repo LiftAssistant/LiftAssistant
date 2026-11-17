@@ -43,8 +43,10 @@ const LIFECYCLE_SCENARIO: &str = "headless-read-only-lifecycle";
 const RMF_LIVE_SCENARIO: &str = "headless-rmf-live-proof";
 const RMF_FRESHNESS_SCENARIO: &str = "headless-rmf-freshness-proof";
 const INCIDENT_CAPSULE_SCENARIO: &str = "headless-incident-capsule-replay";
+const SANITIZED_CAPSULE_SCENARIO: &str = "headless-sanitized-capsule-replay";
 const RMF_READ_ONLY_HOST_COMMAND: &str = "--run-rmf-read-only";
 const REPLAY_INCIDENT_CAPSULE_COMMAND: &str = "--replay-incident-capsule";
+const SANITIZE_INCIDENT_CAPSULE_COMMAND: &str = "--sanitize-incident-capsule";
 const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const HOST_DIAGNOSTIC_CAPACITY: usize = 256;
 const INCIDENT_ACTION_CAPACITY: usize = 128;
@@ -905,6 +907,7 @@ enum HeadlessCommand {
     Scenario(String),
     RunRmfReadOnly(RmfHostConfig),
     ReplayIncidentCapsule(PathBuf),
+    SanitizeIncidentCapsule { input: PathBuf, output: PathBuf },
 }
 
 fn main() -> ExitCode {
@@ -936,6 +939,20 @@ fn run_command(command: HeadlessCommand) -> Result<(), String> {
             println!("{}", report.render());
             Ok(())
         }
+        HeadlessCommand::SanitizeIncidentCapsule { input, output } => {
+            let private = IncidentCapsule::read(&input)?;
+            let private_replay = private.replay()?;
+            let (candidate, report) = private.sanitize_candidate()?;
+            let sanitized_replay = candidate.replay()?;
+            if private_replay.trigger_id != sanitized_replay.trigger_id {
+                return Err("sanitized candidate changed the deterministic trigger".into());
+            }
+            candidate.write_new(&output)?;
+            println!("{}", report.render());
+            println!("{}", sanitized_replay.render());
+            println!("shareable candidate path={output:?} manual_review=REQUIRED");
+            Ok(())
+        }
     }
 }
 
@@ -949,13 +966,19 @@ fn parse_command(args: impl Iterator<Item = String>) -> Result<HeadlessCommand, 
         Some(REPLAY_INCIDENT_CAPSULE_COMMAND) if args.len() == 2 => Ok(
             HeadlessCommand::ReplayIncidentCapsule(PathBuf::from(&args[1])),
         ),
+        Some(SANITIZE_INCIDENT_CAPSULE_COMMAND) if args.len() == 3 => {
+            Ok(HeadlessCommand::SanitizeIncidentCapsule {
+                input: PathBuf::from(&args[1]),
+                output: PathBuf::from(&args[2]),
+            })
+        }
         _ => Err(headless_usage()),
     }
 }
 
 fn headless_usage() -> String {
     format!(
-        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}|{INCIDENT_CAPSULE_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal] [--incident-capsule-out <path>]\n       liftassistant-headless {REPLAY_INCIDENT_CAPSULE_COMMAND} <internal-capsule.json>"
+        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}|{INCIDENT_CAPSULE_SCENARIO}|{SANITIZED_CAPSULE_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal] [--incident-capsule-out <path>]\n       liftassistant-headless {REPLAY_INCIDENT_CAPSULE_COMMAND} <internal-capsule.json>\n       liftassistant-headless {SANITIZE_INCIDENT_CAPSULE_COMMAND} <private-capsule.json> <candidate.json>"
     )
 }
 
@@ -1421,8 +1444,115 @@ fn run_scenario(name: &str) -> Result<String, String> {
         RMF_LIVE_SCENARIO => run_rmf_live_scenario(),
         RMF_FRESHNESS_SCENARIO => run_rmf_freshness_scenario(),
         INCIDENT_CAPSULE_SCENARIO => run_incident_capsule_scenario(),
+        SANITIZED_CAPSULE_SCENARIO => run_sanitized_capsule_scenario(),
         _ => Err(format!(
-            "unknown scenario {name:?}; available scenarios: {LIFECYCLE_SCENARIO}, {RMF_LIVE_SCENARIO}, {RMF_FRESHNESS_SCENARIO}, {INCIDENT_CAPSULE_SCENARIO}"
+            "unknown scenario {name:?}; available scenarios: {LIFECYCLE_SCENARIO}, {RMF_LIVE_SCENARIO}, {RMF_FRESHNESS_SCENARIO}, {INCIDENT_CAPSULE_SCENARIO}, {SANITIZED_CAPSULE_SCENARIO}"
+        )),
+    }
+}
+
+fn run_sanitized_capsule_scenario() -> Result<String, String> {
+    let private = capture_reference_incident_capsule()?;
+    let private_json = private.to_json()?;
+    let (first_candidate, report) = private.sanitize_candidate()?;
+    let (second_candidate, second_report) = private.sanitize_candidate()?;
+    if first_candidate != second_candidate || report != second_report {
+        return Err("sanitization was not deterministic".into());
+    }
+    if !report.manual_review_required {
+        return Err("sanitized candidate omitted the manual-review requirement".into());
+    }
+    let candidate_json = first_candidate.to_json()?;
+    for private_value in [
+        "fixture/capsule-source",
+        "capsule-session-A",
+        "capsule-session-B",
+        "capsule-car",
+    ] {
+        if candidate_json.contains(private_value) {
+            return Err(format!(
+                "sanitized candidate retained private identifier {private_value:?}"
+            ));
+        }
+    }
+    if !candidate_json.contains("\"manual_review_required\": true") {
+        return Err("sanitized candidate did not embed its manual-review marker".into());
+    }
+    let private_replay = private.replay()?;
+    let candidate_replay = first_candidate.replay()?;
+    if private_replay.trigger_id != candidate_replay.trigger_id {
+        return Err("sanitized candidate changed the replay trigger".into());
+    }
+
+    let base = format!("liftassistant-sanitization-{}", std::process::id());
+    let private_path = env::temp_dir().join(format!("{base}-private.json"));
+    let candidate_path = env::temp_dir().join(format!("{base}-candidate.json"));
+    private.write_new(&private_path)?;
+    let child_result = (|| {
+        let executable = env::current_exe()
+            .map_err(|error| format!("failed to locate headless executable: {error}"))?;
+        let output = Command::new(executable)
+            .arg(SANITIZE_INCIDENT_CAPSULE_COMMAND)
+            .arg(&private_path)
+            .arg(&candidate_path)
+            .output()
+            .map_err(|error| format!("failed to start sanitization process: {error}"))?;
+        if !output.status.success() {
+            return Err(format!(
+                "sanitization process failed: status={} stdout={} stderr={}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+        let stdout = String::from_utf8(output.stdout)
+            .map_err(|error| format!("sanitization output was not UTF-8: {error}"))?;
+        if !stdout.contains("manual_review=REQUIRED") || !stdout.contains("incident replay: PASS") {
+            return Err(format!(
+                "sanitization process omitted review/replay evidence: {stdout:?}"
+            ));
+        }
+        let private_after = std::fs::read_to_string(&private_path)
+            .map_err(|error| format!("failed to reread private capsule: {error}"))?;
+        if private_after != private_json {
+            return Err("sanitization mutated the private source capsule".into());
+        }
+        let candidate = IncidentCapsule::read(&candidate_path)?;
+        let replay = candidate.replay()?;
+        if replay.trigger_id != private_replay.trigger_id {
+            return Err("written shareable candidate changed the replay trigger".into());
+        }
+        Ok(())
+    })();
+    let private_cleanup = remove_temporary_capsule(&private_path);
+    let candidate_cleanup = remove_temporary_capsule(&candidate_path);
+    child_result?;
+    private_cleanup?;
+    candidate_cleanup?;
+
+    Ok([
+        format!("scenario: {SANITIZED_CAPSULE_SCENARIO}"),
+        "scope: deterministic pseudonymization candidate; not perfect or security-certified anonymization".into(),
+        "source preservation: PASS (private capsule remained byte-identical)".into(),
+        "relationship preservation: PASS (source/session/car/floor mappings and action ordering retained)".into(),
+        format!(
+            "candidate replay: PASS (trigger={})",
+            candidate_replay.trigger_id
+        ),
+        "manual review: REQUIRED before sharing".into(),
+        "automatic upload/publication: NONE".into(),
+        "temporary artifact cleanup: PASS".into(),
+        String::new(),
+    ]
+    .join("\n"))
+}
+
+fn remove_temporary_capsule(path: &std::path::Path) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "failed to remove temporary capsule {path:?}: {error}"
         )),
     }
 }
@@ -1492,7 +1622,7 @@ fn capture_reference_incident_capsule() -> Result<IncidentCapsule, String> {
     let session_a = ObservationSessionId::new("capsule-session-A");
     let session_b = ObservationSessionId::new("capsule-session-B");
     let mut host = ReadOnlyHost::new(
-        BuildingTopology::new([Floor::new(1), Floor::new(2)])
+        BuildingTopology::new([Floor::new(3), Floor::new(7)])
             .expect("capsule fixture topology is valid"),
     );
     host.bind_observation(
@@ -1504,7 +1634,7 @@ fn capture_reference_incident_capsule() -> Result<IncidentCapsule, String> {
     host.begin_source_session(source.clone(), session_a.clone())
         .map_err(|error| format!("capsule fixture session A failed: {error:?}"))?;
 
-    let mut initial = complete_observation(source.clone(), session_a.clone(), 1, Floor::new(1));
+    let mut initial = complete_observation(source.clone(), session_a.clone(), 1, Floor::new(3));
     initial.car = car.clone();
     host.ingest_observation(initial.into());
     if host.readiness() != Readiness::ReadOnly {
@@ -1516,7 +1646,7 @@ fn capture_reference_incident_capsule() -> Result<IncidentCapsule, String> {
     if host.readiness() != Readiness::NotReady {
         return Err("capsule fixture freshness invalidation did not revoke readiness".into());
     }
-    let mut recovered = complete_observation(source.clone(), session_a, 2, Floor::new(1));
+    let mut recovered = complete_observation(source.clone(), session_a, 2, Floor::new(3));
     recovered.car = car.clone();
     host.ingest_observation(recovered.into());
     if host.readiness() != Readiness::ReadOnly {
@@ -1532,7 +1662,7 @@ fn capture_reference_incident_capsule() -> Result<IncidentCapsule, String> {
             sequence: ObservationSequence::new(1),
         },
         car: car.clone(),
-        position: Some(PositionEvidence::FloorReference(Floor::new(2))),
+        position: Some(PositionEvidence::FloorReference(Floor::new(7))),
         motion: None,
         door: None,
         mode: None,
@@ -1543,7 +1673,7 @@ fn capture_reference_incident_capsule() -> Result<IncidentCapsule, String> {
         return Err("capsule fixture incomplete evidence unexpectedly became ready".into());
     }
 
-    let mut complete = complete_observation(source.clone(), session_b.clone(), 2, Floor::new(2));
+    let mut complete = complete_observation(source.clone(), session_b.clone(), 2, Floor::new(7));
     complete.car = car.clone();
     host.ingest_observation(complete.clone().into());
     if host.readiness() != Readiness::ReadOnly {
@@ -2544,6 +2674,55 @@ mod tests {
         let cleanup = std::fs::remove_file(&path);
         cleanup.expect("fixture capsule is removed");
         assert_eq!(report.trigger_id, "source.payload-stale");
+    }
+
+    #[test]
+    fn sanitization_is_deterministic_replayable_and_requires_manual_review() {
+        let private = capture_reference_incident_capsule()
+            .expect("deterministic fixture produces a private capsule");
+        let private_before = private.to_json().expect("private capsule encodes");
+        let (first, report) = private
+            .sanitize_candidate()
+            .expect("private capsule produces a candidate");
+        let (second, second_report) = private
+            .sanitize_candidate()
+            .expect("sanitization is repeatable");
+        assert_eq!(first, second);
+        assert_eq!(report, second_report);
+        assert!(report.manual_review_required);
+        assert!(report.render().contains("manual_review=REQUIRED"));
+
+        let candidate_json = first.to_json().expect("candidate encodes");
+        for private_value in [
+            "fixture/capsule-source",
+            "capsule-session-A",
+            "capsule-session-B",
+            "capsule-car",
+        ] {
+            assert!(!candidate_json.contains(private_value));
+        }
+        assert!(candidate_json.contains("deterministic-pseudonymization/1"));
+        assert!(candidate_json.contains("\"manual_review_required\": true"));
+        assert_eq!(
+            first
+                .replay()
+                .expect("candidate reproduces the incident")
+                .trigger_id,
+            private
+                .replay()
+                .expect("private capsule reproduces the incident")
+                .trigger_id
+        );
+        assert_eq!(
+            private.to_json().expect("private capsule still encodes"),
+            private_before
+        );
+        assert!(
+            first
+                .sanitize_candidate()
+                .expect_err("candidate cannot be silently sanitized twice")
+                .contains("already a sanitized candidate")
+        );
     }
 
     #[test]

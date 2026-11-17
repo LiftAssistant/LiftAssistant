@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.5 are implemented: the Rust-native Open-RMF adapter and long-running headless composition have passed official Hotel ingestion, stale/recovery, readiness, graceful-shutdown, bounded production diagnostics, and fresh-process incident replay. **M5.6 — Sanitization / Community Fixture Path is READY.** No later M5 slice is READY merely because it appears in the roadmap.
+M5.1 through M5.6 are implemented: the Rust-native Open-RMF adapter and long-running headless composition have passed official Hotel ingestion, stale/recovery, readiness, graceful-shutdown, bounded production diagnostics, fresh-process incident replay, and deterministic sanitization/replay. **M5.7 — Adapter Validation Profiles is READY.** No later M5 slice is READY merely because it appears in the roadmap.
 
 ## Validated baseline
 
@@ -786,8 +786,24 @@ Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clip
 
 ### M5.6 — Sanitization / Community Fixture Path
 
+**IMPLEMENTED.**
+
+Implemented behavior and evidence:
+
+- `--sanitize-incident-capsule <private> <candidate>` reads but never mutates the private capsule and writes a distinct create-new candidate only after both private and candidate replay pass;
+- the private `deterministic-pseudonymization/1` profile maps sorted source identities to stable `source-NNN`, preserves per-source session lifetimes through stable `session-NNN`, maps shared logical cars consistently to `car-NNN`, and remaps sorted topology floors to `1..N`;
+- floor references and reported destinations use the same floor map. Exact continuous positions preserve their offset from the remapped nearest floor instead of retaining the original site floor coordinate;
+- binding roles, source-to-car relationships, one source's session structure, source-global sequences, omitted-vs-unknown evidence, action ordering, invalidations, trigger kind, and expected lifecycle/readiness remain intact. Candidate replay must reproduce the same deterministic trigger;
+- every candidate embeds `profile=deterministic-pseudonymization/1` and `manual_review_required=true`. Already-sanitized candidates are rejected from silent re-sanitization;
+- the executable `headless-sanitized-capsule-replay` proof performs sanitization in a separate process, verifies that private identifiers are absent from the candidate, checks the source capsule remains byte-identical, replays the written candidate, reports the manual-review gate, and removes both temporary artifacts;
+- no artifact is uploaded, published, added to a fixture corpus, or called perfectly/security-certified anonymized. The candidate remains internal/experimental until a human reviews it.
+
+Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 107 workspace tests, all six TUI scenarios, all three non-live headless scenarios, dependency/wall-clock/write-boundary checks, private/candidate temporary-artifact cleanup, and Podman-absence checks pass.
+
+### M5.7 — Adapter Validation Profiles
+
 **READY.**
 
-Add a deterministic sanitization step from a private capsule to a separately written shareable candidate fixture, while preserving action ordering, source/session structure, logical-car relationships, and replay reproduction. Require explicit manual review before the candidate can be treated as shareable.
+Build the smallest internal adapter-validation profiles justified by the repeated RMF live/recorded behavior and the existing recorded BACnet family. Check explicit native-to-logical mapping, required binding, explicit session lifecycle, source-global sequence, incremental/ambiguity semantics, restart invalidation, canonical-path ownership, and absence of writes.
 
-Do not claim perfect anonymization or security-certified sanitization, automatically upload/publish artifacts, mutate the private source capsule, or generate a large fictional fixture corpus. M5.7 and later remain not READY until the sanitized candidate itself replays the same deterministic trigger and the manual-review boundary is explicit.
+Do not call profiles certified/conformant/safety-validated, freeze a public adapter SDK/schema, build a generic plugin framework, or manufacture live-source evidence. M5.8 and later remain not READY until the same bounded contract can exercise RMF plus the existing recorded second family without hiding source-specific ambiguity.

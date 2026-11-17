@@ -122,6 +122,13 @@ observation. The JSON representation is versioned, size-bounded, create-new, and
 it is neither a public schema nor a telemetry database. Production capture is opt-in and the
 current RMF host writes at most the first configured payload-stale capsule.
 
+Sanitization is a separate deterministic transformation from a private capsule to a new
+create-only candidate. It applies stable pseudonyms to source/session/car identities and
+relationship-preserving floor remapping, then replays the candidate and requires the same
+deterministic trigger before writing. The private source is not mutated. Every candidate
+embeds a mandatory manual-review marker: the transformation is not perfect anonymization,
+security certification, publication approval, or an automatic upload path.
+
 The headless host keeps lifecycle and readiness separate: a live process begins
 `Starting/NotReady`, incomplete Operational evidence remains `Synchronizing/NotReady`,
 and sufficient Operational evidence permits `ReadyReadOnly/ReadOnly`. Restart or an

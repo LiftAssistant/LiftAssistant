@@ -98,6 +98,7 @@ impl IncidentRecorder {
                     .map(|floor| floor.index())
                     .collect(),
                 bindings: self.bindings.values().cloned().collect(),
+                sanitization: None,
             },
             actions: self.actions.iter().cloned().collect(),
             trigger,
@@ -241,6 +242,108 @@ impl IncidentCapsule {
         })
     }
 
+    pub(super) fn sanitize_candidate(
+        &self,
+    ) -> Result<(IncidentCapsule, SanitizationReport), String> {
+        self.validate()?;
+        if self.context.sanitization.is_some() {
+            return Err("incident capsule is already a sanitized candidate".into());
+        }
+
+        let source_map = self
+            .context
+            .bindings
+            .iter()
+            .map(|binding| binding.source.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .enumerate()
+            .map(|(index, source)| (source, format!("source-{:03}", index + 1)))
+            .collect::<BTreeMap<_, _>>();
+        let car_map = self
+            .context
+            .bindings
+            .iter()
+            .map(|binding| binding.car.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .enumerate()
+            .map(|(index, car)| (car, format!("car-{:03}", index + 1)))
+            .collect::<BTreeMap<_, _>>();
+        let mut sessions_by_source = BTreeMap::<String, BTreeSet<String>>::new();
+        for action in &self.actions {
+            match action {
+                CapsuleAction::BeginSourceSession { source, session }
+                | CapsuleAction::InvalidateSource { source, session } => {
+                    sessions_by_source
+                        .entry(source.clone())
+                        .or_default()
+                        .insert(session.clone());
+                }
+                CapsuleAction::Observation { update } => {
+                    sessions_by_source
+                        .entry(update.source.clone())
+                        .or_default()
+                        .insert(update.session.clone());
+                }
+            }
+        }
+        let session_map = sessions_by_source
+            .into_iter()
+            .flat_map(|(source, sessions)| {
+                sessions
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(index, session)| {
+                        (
+                            (source.clone(), session),
+                            format!("session-{:03}", index + 1),
+                        )
+                    })
+            })
+            .collect::<BTreeMap<_, _>>();
+        let floor_map = self
+            .context
+            .topology
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, floor)| (floor, (index + 1) as i16))
+            .collect::<BTreeMap<_, _>>();
+
+        let mut candidate = self.clone();
+        candidate.context.topology = candidate
+            .context
+            .topology
+            .iter()
+            .map(|floor| mapped_floor(&floor_map, *floor))
+            .collect::<Result<Vec<_>, _>>()?;
+        for binding in &mut candidate.context.bindings {
+            binding.source = mapped_identity(&source_map, &binding.source, "source")?;
+            binding.car = mapped_identity(&car_map, &binding.car, "car")?;
+        }
+        for action in &mut candidate.actions {
+            sanitize_action(action, &source_map, &session_map, &car_map, &floor_map)?;
+        }
+        sanitize_trigger(&mut candidate.trigger, &source_map, &session_map, &car_map)?;
+        candidate.context.sanitization = Some(CapsuleSanitization {
+            profile: "deterministic-pseudonymization/1".into(),
+            manual_review_required: true,
+        });
+        candidate.validate()?;
+
+        Ok((
+            candidate,
+            SanitizationReport {
+                source_count: source_map.len(),
+                session_count: session_map.len(),
+                car_count: car_map.len(),
+                floor_count: floor_map.len(),
+                manual_review_required: true,
+            },
+        ))
+    }
+
     fn validate(&self) -> Result<(), String> {
         if self.version != INCIDENT_CAPSULE_VERSION {
             return Err(format!(
@@ -253,6 +356,12 @@ impl IncidentCapsule {
                 "unsupported incident capsule producer {:?}",
                 self.context.producer
             ));
+        }
+        if let Some(sanitization) = &self.context.sanitization
+            && (sanitization.profile != "deterministic-pseudonymization/1"
+                || !sanitization.manual_review_required)
+        {
+            return Err("incident capsule has unsupported sanitization metadata".into());
         }
         if self.context.topology.is_empty() || self.context.topology.len() > MAX_CAPSULE_FLOORS {
             return Err("incident capsule topology size is outside internal bounds".into());
@@ -318,11 +427,142 @@ impl IncidentCapsule {
     }
 }
 
+fn mapped_identity(
+    mapping: &BTreeMap<String, String>,
+    value: &str,
+    kind: &str,
+) -> Result<String, String> {
+    mapping
+        .get(value)
+        .cloned()
+        .ok_or_else(|| format!("incident capsule {kind} {value:?} has no sanitization mapping"))
+}
+
+fn mapped_session(
+    mapping: &BTreeMap<(String, String), String>,
+    source: &str,
+    session: &str,
+) -> Result<String, String> {
+    mapping
+        .get(&(source.to_owned(), session.to_owned()))
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "incident capsule source/session ({source:?}, {session:?}) has no sanitization mapping"
+            )
+        })
+}
+
+fn mapped_floor(mapping: &BTreeMap<i16, i16>, floor: i16) -> Result<i16, String> {
+    mapping
+        .get(&floor)
+        .copied()
+        .ok_or_else(|| format!("incident capsule floor {floor} is absent from its topology"))
+}
+
+fn sanitize_action(
+    action: &mut CapsuleAction,
+    sources: &BTreeMap<String, String>,
+    sessions: &BTreeMap<(String, String), String>,
+    cars: &BTreeMap<String, String>,
+    floors: &BTreeMap<i16, i16>,
+) -> Result<(), String> {
+    match action {
+        CapsuleAction::BeginSourceSession { source, session }
+        | CapsuleAction::InvalidateSource { source, session } => {
+            let sanitized_source = mapped_identity(sources, source, "source")?;
+            let sanitized_session = mapped_session(sessions, source, session)?;
+            *source = sanitized_source;
+            *session = sanitized_session;
+        }
+        CapsuleAction::Observation { update } => {
+            let sanitized_source = mapped_identity(sources, &update.source, "source")?;
+            let sanitized_session = mapped_session(sessions, &update.source, &update.session)?;
+            update.source = sanitized_source;
+            update.session = sanitized_session;
+            update.car = mapped_identity(cars, &update.car, "car")?;
+            if let Some(position) = update.position.as_mut() {
+                match position {
+                    CapsulePositionEvidence::Exact {
+                        floor_position,
+                        nearest_floor,
+                    } => {
+                        if !floor_position.is_finite() {
+                            return Err(
+                                "incident capsule exact position is not finite and cannot be sanitized"
+                                    .into(),
+                            );
+                        }
+                        let old_nearest = *nearest_floor;
+                        let new_nearest = mapped_floor(floors, old_nearest)?;
+                        *floor_position =
+                            f64::from(new_nearest) + (*floor_position - f64::from(old_nearest));
+                        *nearest_floor = new_nearest;
+                    }
+                    CapsulePositionEvidence::FloorReference { floor } => {
+                        *floor = mapped_floor(floors, *floor)?;
+                    }
+                    CapsulePositionEvidence::Unknown => {}
+                }
+            }
+            if let Some(CapsuleReportedDestination::Known { floor }) =
+                update.reported_destination.as_mut()
+            {
+                *floor = mapped_floor(floors, *floor)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sanitize_trigger(
+    trigger: &mut CapsuleTrigger,
+    sources: &BTreeMap<String, String>,
+    sessions: &BTreeMap<(String, String), String>,
+    cars: &BTreeMap<String, String>,
+) -> Result<(), String> {
+    match trigger {
+        CapsuleTrigger::ObservationSequenceNotIncreasing {
+            source,
+            session,
+            car,
+            ..
+        }
+        | CapsuleTrigger::ObservationUnresolved {
+            source,
+            session,
+            car,
+        } => {
+            let sanitized_source = mapped_identity(sources, source, "source")?;
+            let sanitized_session = mapped_session(sessions, source, session)?;
+            *source = sanitized_source;
+            *session = sanitized_session;
+            *car = mapped_identity(cars, car, "car")?;
+        }
+        CapsuleTrigger::SourcePayloadStale { source, session } => {
+            let sanitized_source = mapped_identity(sources, source, "source")?;
+            let sanitized_session = mapped_session(sessions, source, session)?;
+            *source = sanitized_source;
+            *session = sanitized_session;
+        }
+        CapsuleTrigger::ReadinessChanged { .. } => {}
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 struct CapsuleContext {
     producer: String,
     topology: Vec<i16>,
     bindings: Vec<CapsuleBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sanitization: Option<CapsuleSanitization>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+struct CapsuleSanitization {
+    profile: String,
+    manual_review_required: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -848,6 +1088,24 @@ impl IncidentReplayReport {
         format!(
             "incident replay: PASS version={} trigger={} actions={} lifecycle={:?} readiness={:?}",
             self.version, self.trigger_id, self.action_count, self.lifecycle, self.readiness
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct SanitizationReport {
+    source_count: usize,
+    session_count: usize,
+    car_count: usize,
+    floor_count: usize,
+    pub(super) manual_review_required: bool,
+}
+
+impl SanitizationReport {
+    pub(super) fn render(&self) -> String {
+        format!(
+            "sanitization: PASS profile=deterministic-pseudonymization/1 sources={} sessions={} cars={} floors={} manual_review=REQUIRED",
+            self.source_count, self.session_count, self.car_count, self.floor_count
         )
     }
 }
