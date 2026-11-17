@@ -10,10 +10,12 @@ import 'sse_parser.dart';
 HostTransport createHostTransport({
   required Duration requestTimeout,
   required Duration streamInactivityTimeout,
+  int maxPayloadBytes = maxSnapshotBytes,
 }) {
   return IoHostTransport(
     requestTimeout: requestTimeout,
     streamInactivityTimeout: streamInactivityTimeout,
+    maxPayloadBytes: maxPayloadBytes,
   );
 }
 
@@ -21,10 +23,12 @@ final class IoHostTransport implements HostTransport {
   IoHostTransport({
     this.requestTimeout = const Duration(seconds: 8),
     this.streamInactivityTimeout = const Duration(seconds: 40),
-  });
+    this.maxPayloadBytes = maxSnapshotBytes,
+  }) : assert(maxPayloadBytes > 0, 'maxPayloadBytes must be positive');
 
   final Duration requestTimeout;
   final Duration streamInactivityTimeout;
+  final int maxPayloadBytes;
   final Set<HttpClient> _activeClients = <HttpClient>{};
   bool _disposed = false;
 
@@ -78,15 +82,15 @@ final class IoHostTransport implements HostTransport {
         );
       }
 
-      if (response.contentLength > maxSnapshotBytes) {
-        throw const SnapshotTooLargeException(limitBytes: maxSnapshotBytes);
+      if (response.contentLength > maxPayloadBytes) {
+        throw SnapshotTooLargeException(limitBytes: maxPayloadBytes);
       }
 
       final BytesBuilder builder = BytesBuilder(copy: false);
       await (() async {
         await for (final List<int> chunk in response) {
-          if (builder.length + chunk.length > maxSnapshotBytes) {
-            throw const SnapshotTooLargeException(limitBytes: maxSnapshotBytes);
+          if (builder.length + chunk.length > maxPayloadBytes) {
+            throw SnapshotTooLargeException(limitBytes: maxPayloadBytes);
           }
           builder.add(chunk);
         }
@@ -179,11 +183,13 @@ final class IoHostTransport implements HostTransport {
         if (closedLocally || outputController.isClosed) {
           return;
         }
+        closedLocally = true;
         outputController.addError(
           const HostStreamDisconnectedException(
             'SSE stream timed out waiting for Host activity or keepalive.',
           ),
         );
+        unawaited(parsedSubscription?.cancel());
         _releaseClient(client, force: true);
         unawaited(outputController.close());
       });
@@ -212,6 +218,7 @@ final class IoHostTransport implements HostTransport {
         parsedSubscription = parseSseSnapshotStream(
           response,
           onByteActivity: resetWatchdog,
+          maxEventBytes: maxPayloadBytes,
         ).listen(
           (String payload) {
             if (!outputController.isClosed) {
@@ -222,11 +229,15 @@ final class IoHostTransport implements HostTransport {
             if (closedLocally || outputController.isClosed) {
               return;
             }
+            closedLocally = true;
             watchdog?.cancel();
+            unawaited(parsedSubscription?.cancel());
             outputController.addError(
-              HostStreamDisconnectedException(
-                'SSE stream interrupted: $error',
-              ),
+              error is HostTransportException
+                  ? error
+                  : HostStreamDisconnectedException(
+                      'SSE stream interrupted: $error',
+                    ),
               stackTrace,
             );
             _releaseClient(client, force: true);

@@ -105,9 +105,11 @@ abstract interface class HostTransport {
 HostTransport createPlatformHostTransport({
   Duration requestTimeout = const Duration(seconds: 8),
   Duration streamInactivityTimeout = const Duration(seconds: 40),
+  int maxPayloadBytes = maxSnapshotBytes,
 }) {
   return platform_transport.createHostTransport(
     requestTimeout: requestTimeout,
     streamInactivityTimeout: streamInactivityTimeout,
+    maxPayloadBytes: maxPayloadBytes,
   );
 }

@@ -247,5 +247,92 @@ void main() {
       );
       expect(redirectFollowed, isFalse);
     });
+
+    test('enforces maxPayloadBytes on snapshot and preserves SnapshotTooLargeException on SSE stream', () async {
+      final HttpServer server = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(() => server.close(force: true));
+
+      final List<HttpResponse> openStreams = <HttpResponse>[];
+      addTearDown(() async {
+        for (final HttpResponse r in openStreams) {
+          try {
+            await r.close();
+          } catch (_) {}
+        }
+      });
+
+      server.listen((HttpRequest request) async {
+        if (request.uri.path.endsWith('/snapshot')) {
+          request.response.statusCode = HttpStatus.ok;
+          request.response.bufferOutput = false;
+          request.response.headers.contentType = ContentType.json;
+          request.response.write('{"oversized":"${'a' * 128}"}');
+          await request.response.close();
+          return;
+        }
+
+        request.response.statusCode = HttpStatus.ok;
+        request.response.bufferOutput = false;
+        request.response.headers.set(
+          HttpHeaders.contentTypeHeader,
+          'text/event-stream',
+        );
+        openStreams.add(request.response);
+        request.response.write('event: snapshot\ndata: {"rev":1}\n\n');
+        await request.response.flush();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        request.response.write(
+          'event: snapshot\ndata: {"oversized":"${'b' * 128}"}\n\n',
+        );
+        try {
+          await request.response.flush();
+        } catch (_) {}
+      });
+
+      final HostEndpoint endpoint = HostEndpoint.parse(
+        'http://127.0.0.1:${server.port}',
+      );
+      final IoHostTransport transport = IoHostTransport(maxPayloadBytes: 64);
+      addTearDown(transport.dispose);
+
+      await expectLater(
+        transport.fetchSnapshotJson(endpoint),
+        throwsA(
+          isA<SnapshotTooLargeException>().having(
+            (SnapshotTooLargeException e) => e.limitBytes,
+            'limitBytes',
+            64,
+          ),
+        ),
+      );
+
+      final HostSseConnection sse = await transport.openSnapshotEvents(
+        endpoint,
+      );
+      final List<String> received = <String>[];
+      final List<Object> errors = <Object>[];
+      final Completer<void> done = Completer<void>();
+
+      sse.snapshots.listen(
+        received.add,
+        onError: errors.add,
+        onDone: done.complete,
+      );
+
+      await done.future.timeout(const Duration(seconds: 3));
+      expect(received, <String>['{"rev":1}']);
+      expect(errors, hasLength(1));
+      expect(
+        errors.single,
+        isA<SnapshotTooLargeException>().having(
+          (SnapshotTooLargeException e) => e.limitBytes,
+          'limitBytes',
+          64,
+        ),
+      );
+    });
   });
 }

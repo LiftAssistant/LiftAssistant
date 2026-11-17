@@ -285,6 +285,29 @@ void main() {
       expect(controller.state.error?.kind, ClientErrorKind.malformedResponse);
       expect(controller.state.isSnapshotLive, isFalse);
       expect(controller.state.snapshot?.revision, 5);
+
+      // Reconnect, then inject SnapshotTooLargeException from SSE transport -> non-retryable protocolError.
+      final StreamController<String> sseAfterReconnect =
+          StreamController<String>();
+      addTearDown(sseAfterReconnect.close);
+      transport.onOpenEvents = (_) async => HostSseConnection(
+        snapshots: sseAfterReconnect.stream,
+        onClose: () async {},
+      );
+      await controller.reconnectNow();
+      await _waitUntil(() => controller.state.phase == ConnectionPhase.live);
+
+      sseAfterReconnect.addError(
+        const SnapshotTooLargeException(limitBytes: 64),
+      );
+      await _waitUntil(
+        () => controller.state.phase == ConnectionPhase.protocolError,
+      );
+      expect(controller.state.error?.kind, ClientErrorKind.malformedResponse);
+      expect(controller.state.nextRetryDelay, isNull);
+      expect(controller.state.isSnapshotLive, isFalse);
+      expect(controller.state.hasRetainedStaleSnapshot, isTrue);
+      expect(controller.state.snapshot?.revision, 5);
     });
 
     test('increments reconnect backoff when snapshot succeeds but SSE open or initial stream fails repeatedly', () async {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
@@ -58,10 +59,12 @@ extension type _JSReadResult._(JSObject _) implements JSObject {
 HostTransport createHostTransport({
   required Duration requestTimeout,
   required Duration streamInactivityTimeout,
+  int maxPayloadBytes = maxSnapshotBytes,
 }) {
   return WebHostTransport(
     requestTimeout: requestTimeout,
     streamInactivityTimeout: streamInactivityTimeout,
+    maxPayloadBytes: maxPayloadBytes,
   );
 }
 
@@ -69,10 +72,12 @@ final class WebHostTransport implements HostTransport {
   WebHostTransport({
     this.requestTimeout = const Duration(seconds: 8),
     this.streamInactivityTimeout = const Duration(seconds: 40),
-  });
+    this.maxPayloadBytes = maxSnapshotBytes,
+  }) : assert(maxPayloadBytes > 0, 'maxPayloadBytes must be positive');
 
   final Duration requestTimeout;
   final Duration streamInactivityTimeout;
+  final int maxPayloadBytes;
   final Set<_JSAbortController> _activeControllers = <_JSAbortController>{};
   bool _disposed = false;
 
@@ -148,16 +153,51 @@ final class WebHostTransport implements HostTransport {
           response.headers.get('content-length'.toJS)?.toDart;
       final int? contentLength =
           contentLengthRaw == null ? null : int.tryParse(contentLengthRaw);
-      if (contentLength != null && contentLength > maxSnapshotBytes) {
+      if (contentLength != null && contentLength > maxPayloadBytes) {
         abortController.abort();
-        throw const SnapshotTooLargeException(limitBytes: maxSnapshotBytes);
+        throw SnapshotTooLargeException(limitBytes: maxPayloadBytes);
+      }
+
+      final _JSReadableStream? body = response.body;
+      if (body != null) {
+        final _JSReadableStreamDefaultReader reader = body.getReader();
+        final BytesBuilder builder = BytesBuilder(copy: false);
+        try {
+          await (() async {
+            while (true) {
+              final _JSReadResult chunk = await reader.read().toDart;
+              if (chunk.done) {
+                break;
+              }
+              final JSUint8Array? bytes = chunk.value;
+              if (bytes != null) {
+                final Uint8List dartBytes = bytes.toDart;
+                if (builder.length + dartBytes.length > maxPayloadBytes) {
+                  abortController.abort();
+                  unawaited(
+                    reader.cancel().toDart.then<void>((_) {}, onError: (_) {}),
+                  );
+                  throw SnapshotTooLargeException(limitBytes: maxPayloadBytes);
+                }
+                if (dartBytes.isNotEmpty) {
+                  builder.add(dartBytes);
+                }
+              }
+            }
+          })().timeout(requestTimeout);
+          return utf8.decode(builder.takeBytes());
+        } on FormatException catch (error) {
+          throw HostUnreachableException(
+            'Invalid UTF-8 response from ${endpoint.origin}: ${error.message}',
+          );
+        }
       }
 
       final JSString bodyText =
           await response.text().toDart.timeout(requestTimeout);
       final String dartText = bodyText.toDart;
-      if (dartText.length > maxSnapshotBytes) {
-        throw const SnapshotTooLargeException(limitBytes: maxSnapshotBytes);
+      if (utf8.encode(dartText).length > maxPayloadBytes) {
+        throw SnapshotTooLargeException(limitBytes: maxPayloadBytes);
       }
       return dartText;
     } on HostTransportException {
@@ -285,7 +325,10 @@ final class WebHostTransport implements HostTransport {
             break;
           }
           final JSUint8Array? bytes = chunk.value;
-          if (bytes != null && !byteController.isClosed) {
+          if (bytes != null &&
+              !closedLocally &&
+              !byteController.isClosed &&
+              byteController.hasListener) {
             final Uint8List dartBytes = bytes.toDart;
             if (dartBytes.isNotEmpty) {
               byteController.add(dartBytes);
@@ -337,6 +380,7 @@ final class WebHostTransport implements HostTransport {
         parsedSubscription = parseSseSnapshotStream(
           byteController.stream,
           onByteActivity: resetWatchdog,
+          maxEventBytes: maxPayloadBytes,
         ).listen(
           (String payload) {
             if (!outputController.isClosed) {
@@ -347,12 +391,23 @@ final class WebHostTransport implements HostTransport {
             if (closedLocally || outputController.isClosed) {
               return;
             }
+            closedLocally = true;
             watchdog?.cancel();
+            abortController.abort();
             _activeControllers.remove(abortController);
+            unawaited(
+              reader.cancel().toDart.then<void>((_) {}, onError: (_) {}),
+            );
+            unawaited(parsedSubscription?.cancel());
+            if (!byteController.isClosed) {
+              unawaited(byteController.close());
+            }
             outputController.addError(
-              HostStreamDisconnectedException(
-                'SSE stream interrupted: $error',
-              ),
+              error is HostTransportException
+                  ? error
+                  : HostStreamDisconnectedException(
+                      'SSE stream interrupted: $error',
+                    ),
               stackTrace,
             );
             unawaited(outputController.close());
