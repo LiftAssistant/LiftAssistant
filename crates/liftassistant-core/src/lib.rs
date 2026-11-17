@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use liftassistant_model::{
     BuildingTopology, CallId, CallRecord, CallState, CarId, CarLocation, CarState, Direction,
-    ExecutionCapabilities, Floor, HallCall, Intent, OperatingMode, ReportedDestination,
+    ExecutionCapabilities, Floor, HallCall, Intent, MotionState, OperatingMode,
+    ReportedDestination,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -230,10 +231,18 @@ pub fn dispatch(
             if car.mode != OperatingMode::Normal {
                 rejections.push(DispatchRejection::Mode(car.mode));
             }
-            // Only an explicit controller report of no destination can contribute idle
-            // evidence. Unknown reported state stays conservative, while Engine-owned
-            // call assignments independently preserve desired/control occupancy.
-            let busy = car.reported_destination != ReportedDestination::None
+            // A stopped car may keep reporting its current floor as its destination.
+            // Unknown destination evidence stays conservative, while Engine-owned call
+            // assignments independently preserve desired/control occupancy.
+            let reported_busy = match car.reported_destination {
+                ReportedDestination::Known(destination) => {
+                    destination != car.location.floor_reference()
+                }
+                ReportedDestination::None => false,
+                ReportedDestination::Unknown => true,
+            };
+            let busy = car.motion != MotionState::Stopped
+                || reported_busy
                 || occupied_cars.contains(&car.id);
             if busy {
                 rejections.push(DispatchRejection::Busy);
@@ -541,6 +550,82 @@ mod tests {
                 floor: Floor::new(7),
             })
         );
+        assert_eq!(
+            decision.candidates[0].rejections,
+            vec![DispatchRejection::Busy]
+        );
+    }
+
+    #[test]
+    fn stopped_car_reporting_its_current_floor_is_not_busy_from_destination_alone() {
+        let mut a = CarState::new("A", Floor::new(7));
+        a.reported_destination = ReportedDestination::Known(Floor::new(7));
+        let cars = vec![a, CarState::new("B", Floor::new(1))];
+        let call = HallCall {
+            floor: Floor::new(7),
+            direction: Direction::Up,
+        };
+
+        let decision = dispatch(&call, &cars, &capabilities(&cars), &BTreeSet::new());
+
+        assert_eq!(
+            decision.intent,
+            Some(Intent::ServeFloor {
+                car: CarId::new("A"),
+                floor: Floor::new(7),
+            })
+        );
+        assert!(!decision.candidates[0].busy);
+        assert!(decision.candidates[0].rejections.is_empty());
+    }
+
+    #[test]
+    fn moving_car_is_busy_even_when_reported_destination_is_its_current_floor() {
+        let mut a = CarState::new("A", Floor::new(7));
+        a.motion = MotionState::Moving(Direction::Up);
+        a.reported_destination = ReportedDestination::Known(Floor::new(7));
+        let cars = vec![a, CarState::new("B", Floor::new(1))];
+        let call = HallCall {
+            floor: Floor::new(7),
+            direction: Direction::Up,
+        };
+
+        let decision = dispatch(&call, &cars, &capabilities(&cars), &BTreeSet::new());
+
+        assert_eq!(
+            decision.intent,
+            Some(Intent::ServeFloor {
+                car: CarId::new("B"),
+                floor: Floor::new(7),
+            })
+        );
+        assert!(decision.candidates[0].busy);
+        assert_eq!(
+            decision.candidates[0].rejections,
+            vec![DispatchRejection::Busy]
+        );
+    }
+
+    #[test]
+    fn engine_call_occupancy_is_busy_even_with_idle_external_evidence() {
+        let a = CarState::new("A", Floor::new(7));
+        let cars = vec![a, CarState::new("B", Floor::new(1))];
+        let call = HallCall {
+            floor: Floor::new(7),
+            direction: Direction::Up,
+        };
+        let occupied = BTreeSet::from([CarId::new("A")]);
+
+        let decision = dispatch(&call, &cars, &capabilities(&cars), &occupied);
+
+        assert_eq!(
+            decision.intent,
+            Some(Intent::ServeFloor {
+                car: CarId::new("B"),
+                floor: Floor::new(7),
+            })
+        );
+        assert!(decision.candidates[0].busy);
         assert_eq!(
             decision.candidates[0].rejections,
             vec![DispatchRejection::Busy]
