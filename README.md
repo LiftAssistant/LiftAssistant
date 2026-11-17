@@ -114,6 +114,21 @@ cargo run -p liftassistant-headless -- --scenario headless-rmf-freshness-proof
 
 This proof keeps one subscription active, asks the operator to stop and restart only the official simulation source, and verifies `ReadyReadOnly -> Synchronizing/NotReady -> ReadyReadOnly`. The configured duration is deliberately source-specific and has no default. It begins measuring silence only after the subscription has received a payload, so DDS discovery delay remains distinct from a previously active data plane becoming stale.
 
+Run the long-lived experimental RMF read-only host with explicit minimal configuration:
+
+~~~bash
+cargo run -p liftassistant-headless -- --run-rmf-read-only \
+  --domain-id 47 \
+  --source-id rmf/site-main \
+  --max-silence-ms 3000 \
+  --floor L1=1 --floor L2=2 --floor L3=3 \
+  --bind Lift1=A:operational \
+  --bind Lift2=B:operational \
+  --agv-as-normal
+~~~
+
+The host creates an adapter-owned source session, reports lifecycle/readiness changes, revokes stale operational truth, reconnects for same-session recovery, and handles SIGINT/SIGTERM cooperatively even before the first payload arrives. Every floor, native-to-logical binding, binding role, interaction-mode projection, and freshness duration is explicit. This CLI is internal/experimental rather than a stable configuration or public API, and it remains subscription-only.
+
 Controls:
 
 - Up/Down select a floor; U/D create an UP/DOWN hall call.

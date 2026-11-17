@@ -117,6 +117,8 @@ Freshness is adapter/host-owned and source-specific; observation sequence remain
 
 The read-only host separates transport/discovery evidence, payload activity, source-session activity, per-car observation availability, and Engine readiness rather than collapsing them into one health flag. The RMF payload-silence policy has no default and starts only after that subscription has received payload, so reader discovery delay is not a false stale event. Official Hotel validation established Operational stale/readiness revocation and same-session recovery. Auxiliary staleness remains diagnostic/inspectable and cannot revoke a healthy Operational authority or trigger failover/fusion.
 
+`liftassistant-headless` now has a long-running experimental RMF read-only composition in addition to its executable proofs. Its minimal CLI requires explicit ROS domain, source identity, source-specific freshness, floor labels, native-to-logical car bindings with Operational/Auxiliary roles, and any AGV/HUMAN-to-Normal projection. The host generates an opaque adapter-lifetime session using host process context rather than RMF payload fields, reports readiness transitions, reconnects after stale invalidation, and exits cooperatively on SIGINT/SIGTERM even before payload discovery. This is an internal deployment surface, not a stable public configuration/API, and it has no publisher or `IntentSink`.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

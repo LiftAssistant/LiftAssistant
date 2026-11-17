@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 and M5.2 are implemented: the Rust-native Open-RMF adapter has passed official Hotel live read-only ingestion plus stale/recovery validation through Engine-owned state. **M5.3 — Production Read-only Host is READY.** No later M5 slice is READY merely because it appears in the roadmap.
+M5.1 through M5.3 are implemented: the Rust-native Open-RMF adapter and long-running headless composition have passed official Hotel ingestion, stale/recovery, readiness, and graceful-shutdown validation. **M5.4 — Production Diagnostics is READY.** No later M5 slice is READY merely because it appears in the roadmap.
 
 ## Validated baseline
 
@@ -735,8 +735,26 @@ Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clip
 
 ### M5.3 — Production Read-only Host
 
+**IMPLEMENTED.**
+
+Implemented behavior and evidence:
+
+- `liftassistant-headless --run-rmf-read-only` is a real long-running composition using the existing RMF subscriber/mapper, canonical update path, Engine state, health/readiness supervision, and stale invalidation;
+- its internal CLI requires an explicit ROS domain, source identity, nonzero source-specific silence setting, at least one configured floor, explicit `native lift_name = logical CarId : Operational/Auxiliary` bindings, and optional source-local AGV/HUMAN projections. Missing freshness, duplicate native identity, and an Auxiliary-only host are rejected before transport starts;
+- the host creates an opaque ingestion-lifetime source session from host process context. RMF `session_id`, `lift_time`, and observation sequence never become that session token;
+- the process reports `Starting/NotReady`, `Synchronizing/NotReady`, and `ReadyReadOnly/ReadOnly` changes. On payload stale or transport/mapping failure it revokes current source truth before reconnecting or exiting;
+- after stale invalidation it reconnects under the same adapter lifetime/session, keeps source-global sequence ordering, and requires sufficient new canonical evidence before readiness returns;
+- SIGINT/SIGTERM use cooperative flags. Shutdown supervision is independent of freshness and is checked both on a short host-control interval and after every payload, so no-publisher startup and high-rate payload flow cannot prevent graceful exit;
+- the composition contains no RMF publisher, `LiftRequest`, `IntentSink`, plugin/config framework, database, daemon protocol, or stable public API.
+
+Live official Hotel validation with explicit `Lift1 -> A` and `Lift2 -> B` Operational bindings reached `Starting -> Synchronizing -> ReadyReadOnly`, then handled SIGTERM with a successful graceful exit. A second run on a domain with no publisher also exited successfully from `Starting/NotReady` before any payload, proving shutdown is not dependent on discovery or data flow.
+
+Validation: `cargo fmt --all -- --check`, warning-free workspace all-target clippy, all 100 workspace tests, all six TUI scenarios, the headless lifecycle scenario, invalid production-config rejection, dependency/write-boundary checks, the official live production composition, and the no-publisher shutdown path pass. The named Podman container and image were removed; no global prune was used.
+
+### M5.4 — Production Diagnostics
+
 **READY.**
 
-Evolve `liftassistant-headless` from proof-only hard-coded compositions into the smallest long-running read-only host: load minimal explicit source/binding/freshness configuration, create Engine/RMF adapter/session ownership, supervise payload freshness, report readiness, and shut down gracefully on SIGINT/SIGTERM. Preserve the existing canonical ingestion and authority boundaries.
+Advance the existing bounded Flight Recorder and host health/lifecycle evidence into a coherent read-only operator/developer diagnostic view. Preserve distinct Transport, Source/session, Mapping, Observation/resolution, and Engine-readiness contexts with machine-readable internal identities and source/session/car context.
 
-Do not create a universal configuration DSL, plugin framework, database, daemon-control protocol, stable public API, or any write path. M5.4 and later remain not READY until this composition exists and its lifecycle/failure paths are validated.
+Do not turn transport/source/mapping failures into elevator faults, infer root causes or maintenance actions, freeze a public registry/schema, add a database/cloud telemetry service, or make every Auxiliary diagnostic revoke readiness. M5.5 and later remain not READY until production diagnostics can explain the M5.1-M5.3 failure paths without collapsing their meanings.

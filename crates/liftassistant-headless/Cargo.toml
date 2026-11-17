@@ -11,3 +11,4 @@ liftassistant-engine = { path = "../liftassistant-engine" }
 liftassistant-model = { path = "../liftassistant-model" }
 liftassistant-rmf = { path = "../liftassistant-rmf" }
 liftassistant-runtime = { path = "../liftassistant-runtime" }
+signal-hook = "0.3"

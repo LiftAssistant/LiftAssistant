@@ -105,13 +105,18 @@ then replay that evidence through the same detector. Diagnostic anomalies remain
 distinct from equipment faults, alarms, root causes, and maintenance actions. No
 durable store, telemetry service, or stable public diagnostic schema is implied.
 
-The headless proof keeps lifecycle and readiness separate: a live process begins
+The headless host keeps lifecycle and readiness separate: a live process begins
 `Starting/NotReady`, incomplete Operational evidence remains `Synchronizing/NotReady`,
 and sufficient Operational evidence permits `ReadyReadOnly/ReadOnly`. Restart or an
 invariant violation from the Operational authority revokes readiness, while an
 Auxiliary anomaly remains diagnostic evidence without revoking a healthy authority's
-readiness. These internal states do not grant write authority and are not a frozen
-public lifecycle model.
+readiness. Its first long-running RMF composition accepts only explicit source identity,
+ROS domain, floor mappings, native-to-logical bindings and roles, interaction-mode
+projection, and source-specific freshness. It generates the ingestion-lifetime source
+session internally, reconnects after stale invalidation without changing that session,
+and handles SIGINT/SIGTERM cooperatively even while awaiting its first payload. These
+internal states and CLI inputs do not grant write authority and are not a frozen public
+lifecycle or configuration model.
 
 ## Semantic design method
 

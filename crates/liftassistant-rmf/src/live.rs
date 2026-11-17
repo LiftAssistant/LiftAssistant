@@ -1,4 +1,8 @@
-use std::{error::Error, fmt, time::Duration};
+use std::{
+    error::Error,
+    fmt,
+    time::{Duration, Instant},
+};
 
 use futures::StreamExt;
 use ros2_client::{
@@ -100,6 +104,7 @@ impl Error for RmfFreshnessPolicyError {}
 pub enum RmfReceiveOutcome {
     HandlerStopped,
     PayloadStale { max_silence: Duration },
+    ShutdownRequested,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -162,9 +167,9 @@ impl RmfLiveSubscriber {
         self,
         handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
     ) -> Result<(), RmfTransportError> {
-        match self.receive(None, handler)? {
+        match self.receive(None, None, None, handler)? {
             RmfReceiveOutcome::HandlerStopped => Ok(()),
-            RmfReceiveOutcome::PayloadStale { .. } => {
+            RmfReceiveOutcome::PayloadStale { .. } | RmfReceiveOutcome::ShutdownRequested => {
                 unreachable!("receive_until has no payload-silence policy")
             }
         }
@@ -180,12 +185,38 @@ impl RmfLiveSubscriber {
         policy: RmfFreshnessPolicy,
         handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
     ) -> Result<RmfReceiveOutcome, RmfTransportError> {
-        self.receive(Some(policy), handler)
+        self.receive(Some(policy), None, None, handler)
+    }
+
+    /// Receives payloads with freshness and cooperative process-shutdown supervision.
+    ///
+    /// `shutdown_poll_interval` controls only how quickly the host notices its own shutdown
+    /// flag. It does not affect source freshness and must be nonzero.
+    pub fn receive_until_stale_or_shutdown(
+        self,
+        policy: RmfFreshnessPolicy,
+        shutdown_poll_interval: Duration,
+        mut should_shutdown: impl FnMut() -> bool,
+        handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+    ) -> Result<RmfReceiveOutcome, RmfTransportError> {
+        if shutdown_poll_interval.is_zero() {
+            return Err(RmfTransportError::Create(
+                "Open-RMF shutdown poll interval must be greater than zero".into(),
+            ));
+        }
+        self.receive(
+            Some(policy),
+            Some(shutdown_poll_interval),
+            Some(&mut should_shutdown),
+            handler,
+        )
     }
 
     fn receive(
         mut self,
         freshness: Option<RmfFreshnessPolicy>,
+        shutdown_poll_interval: Option<Duration>,
+        mut should_shutdown: Option<&mut dyn FnMut() -> bool>,
         mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
     ) -> Result<RmfReceiveOutcome, RmfTransportError> {
         let spinner = self
@@ -195,11 +226,24 @@ impl RmfLiveSubscriber {
         let receive = async {
             let stream = self.subscription.async_stream();
             futures::pin_mut!(stream);
-            let mut payload_seen = false;
+            let mut last_payload_at = None;
             loop {
-                let next = if let Some(policy) = freshness.filter(|_| payload_seen) {
+                if should_shutdown.as_mut().is_some_and(|check| check()) {
+                    return Ok(RmfReceiveOutcome::ShutdownRequested);
+                }
+                let freshness_remaining = last_payload_at.and_then(|last: Instant| {
+                    freshness
+                        .map(|policy| policy.max_payload_silence().saturating_sub(last.elapsed()))
+                });
+                let wait = match (freshness_remaining, shutdown_poll_interval) {
+                    (Some(freshness), Some(shutdown)) => Some(freshness.min(shutdown)),
+                    (Some(freshness), None) => Some(freshness),
+                    (None, Some(shutdown)) => Some(shutdown),
+                    (None, None) => None,
+                };
+                let next = if let Some(wait) = wait {
                     smol::future::race(async { Some(stream.next().await) }, async {
-                        smol::Timer::after(policy.max_payload_silence()).await;
+                        smol::Timer::after(wait).await;
                         None
                     })
                     .await
@@ -207,10 +251,17 @@ impl RmfLiveSubscriber {
                     Some(stream.next().await)
                 };
                 let Some(next) = next else {
-                    let policy = freshness.expect("a silence timer exists only with a policy");
-                    return Ok(RmfReceiveOutcome::PayloadStale {
-                        max_silence: policy.max_payload_silence(),
-                    });
+                    if should_shutdown.as_mut().is_some_and(|check| check()) {
+                        return Ok(RmfReceiveOutcome::ShutdownRequested);
+                    }
+                    if let (Some(policy), Some(last)) = (freshness, last_payload_at)
+                        && last.elapsed() >= policy.max_payload_silence()
+                    {
+                        return Ok(RmfReceiveOutcome::PayloadStale {
+                            max_silence: policy.max_payload_silence(),
+                        });
+                    }
+                    continue;
                 };
                 let Some(result) = next else {
                     return Err(RmfTransportError::Receive(
@@ -219,7 +270,7 @@ impl RmfLiveSubscriber {
                 };
                 let (message, _) =
                     result.map_err(|error| RmfTransportError::Receive(error.to_string()))?;
-                payload_seen = true;
+                last_payload_at = Some(Instant::now());
                 if handler(message.into_payload()) == RmfReceiveControl::Stop {
                     return Ok(RmfReceiveOutcome::HandlerStopped);
                 }

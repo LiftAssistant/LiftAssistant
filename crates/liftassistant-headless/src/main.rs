@@ -4,7 +4,12 @@ use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
     env, io,
     process::ExitCode,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
+    time::SystemTime,
 };
 
 use liftassistant_engine::{
@@ -24,10 +29,16 @@ use liftassistant_rmf::{
     RmfSourceContext,
 };
 use liftassistant_runtime::{CarStateResolution, UnresolvedCarStateReason};
+use signal_hook::{
+    consts::{SIGINT, SIGTERM},
+    flag,
+};
 
 const LIFECYCLE_SCENARIO: &str = "headless-read-only-lifecycle";
 const RMF_LIVE_SCENARIO: &str = "headless-rmf-live-proof";
 const RMF_FRESHNESS_SCENARIO: &str = "headless-rmf-freshness-proof";
+const RMF_READ_ONLY_HOST_COMMAND: &str = "--run-rmf-read-only";
+const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Readiness {
@@ -420,12 +431,32 @@ struct ProofRun {
     incidents: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RmfHostBinding {
+    native_lift_name: String,
+    logical_car: CarId,
+    role: ObservationBindingRole,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RmfHostConfig {
+    domain_id: u16,
+    source: ObservationSourceId,
+    max_payload_silence: Duration,
+    floor_labels: BTreeMap<String, Floor>,
+    bindings: Vec<RmfHostBinding>,
+    agv_as_normal: bool,
+    human_as_normal: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum HeadlessCommand {
+    Scenario(String),
+    RunRmfReadOnly(RmfHostConfig),
+}
+
 fn main() -> ExitCode {
-    match parse_scenario(env::args().skip(1))
-        .and_then(|name| run_scenario(&name))
-        .map(|report| {
-            println!("{report}");
-        }) {
+    match parse_command(env::args().skip(1)).and_then(run_command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error}");
@@ -434,13 +465,369 @@ fn main() -> ExitCode {
     }
 }
 
+fn run_command(command: HeadlessCommand) -> Result<(), String> {
+    match command {
+        HeadlessCommand::Scenario(name) => {
+            println!("{}", run_scenario(&name)?);
+            Ok(())
+        }
+        HeadlessCommand::RunRmfReadOnly(config) => {
+            let shutdown = Arc::new(AtomicBool::new(false));
+            flag::register(SIGINT, Arc::clone(&shutdown))
+                .map_err(|error| format!("failed to register SIGINT handler: {error}"))?;
+            flag::register(SIGTERM, Arc::clone(&shutdown))
+                .map_err(|error| format!("failed to register SIGTERM handler: {error}"))?;
+            run_rmf_read_only_host(config, shutdown)
+        }
+    }
+}
+
+fn parse_command(args: impl Iterator<Item = String>) -> Result<HeadlessCommand, String> {
+    let args = args.collect::<Vec<_>>();
+    match args.first().map(String::as_str) {
+        Some("--scenario") => parse_scenario(args.into_iter()).map(HeadlessCommand::Scenario),
+        Some(RMF_READ_ONLY_HOST_COMMAND) => {
+            parse_rmf_host_config(args.into_iter().skip(1)).map(HeadlessCommand::RunRmfReadOnly)
+        }
+        _ => Err(headless_usage()),
+    }
+}
+
+fn headless_usage() -> String {
+    format!(
+        "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}>\n       liftassistant-headless {RMF_READ_ONLY_HOST_COMMAND} --domain-id <u16> --source-id <id> --max-silence-ms <u64> --floor <label=i16>... --bind <native=logical:operational|auxiliary>... [--agv-as-normal] [--human-as-normal]"
+    )
+}
+
 fn parse_scenario(mut args: impl Iterator<Item = String>) -> Result<String, String> {
     match (args.next(), args.next(), args.next()) {
         (Some(flag), Some(name), None) if flag == "--scenario" => Ok(name),
-        _ => Err(format!(
-            "usage: liftassistant-headless --scenario <{LIFECYCLE_SCENARIO}|{RMF_LIVE_SCENARIO}|{RMF_FRESHNESS_SCENARIO}>"
-        )),
+        _ => Err(headless_usage()),
     }
+}
+
+fn parse_rmf_host_config(mut args: impl Iterator<Item = String>) -> Result<RmfHostConfig, String> {
+    let mut domain_id = None;
+    let mut source = None;
+    let mut max_payload_silence = None;
+    let mut floor_labels = BTreeMap::new();
+    let mut bindings = Vec::new();
+    let mut native_names = BTreeSet::new();
+    let mut agv_as_normal = false;
+    let mut human_as_normal = false;
+
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--domain-id" => {
+                set_once(
+                    &mut domain_id,
+                    parse_value(&mut args, "--domain-id")?
+                        .parse::<u16>()
+                        .map_err(|error| format!("--domain-id must fit in u16: {error}"))?,
+                    "--domain-id",
+                )?;
+            }
+            "--source-id" => {
+                let value = parse_value(&mut args, "--source-id")?;
+                if value.is_empty() {
+                    return Err("--source-id cannot be empty".into());
+                }
+                set_once(&mut source, ObservationSourceId::new(value), "--source-id")?;
+            }
+            "--max-silence-ms" => {
+                let milliseconds = parse_value(&mut args, "--max-silence-ms")?
+                    .parse::<u64>()
+                    .map_err(|error| format!("--max-silence-ms must fit in u64: {error}"))?;
+                let policy = RmfFreshnessPolicy::new(Duration::from_millis(milliseconds))
+                    .map_err(|error| format!("invalid --max-silence-ms: {error}"))?;
+                set_once(
+                    &mut max_payload_silence,
+                    policy.max_payload_silence(),
+                    "--max-silence-ms",
+                )?;
+            }
+            "--floor" => {
+                let value = parse_value(&mut args, "--floor")?;
+                let (label, floor) = value
+                    .split_once('=')
+                    .ok_or_else(|| format!("--floor {value:?} must be <label=i16>"))?;
+                if label.is_empty() {
+                    return Err("--floor label cannot be empty".into());
+                }
+                let floor = floor
+                    .parse::<i16>()
+                    .map(Floor::new)
+                    .map_err(|error| format!("--floor {value:?} has invalid i16 index: {error}"))?;
+                if floor_labels.insert(label.to_owned(), floor).is_some() {
+                    return Err(format!("duplicate --floor label {label:?}"));
+                }
+            }
+            "--bind" => {
+                let binding = parse_rmf_host_binding(&parse_value(&mut args, "--bind")?)?;
+                if !native_names.insert(binding.native_lift_name.clone()) {
+                    return Err(format!(
+                        "duplicate --bind native lift name {:?}",
+                        binding.native_lift_name
+                    ));
+                }
+                bindings.push(binding);
+            }
+            "--agv-as-normal" => {
+                if std::mem::replace(&mut agv_as_normal, true) {
+                    return Err("duplicate --agv-as-normal".into());
+                }
+            }
+            "--human-as-normal" => {
+                if std::mem::replace(&mut human_as_normal, true) {
+                    return Err("duplicate --human-as-normal".into());
+                }
+            }
+            other => {
+                return Err(format!(
+                    "unknown RMF host option {other:?}\n{}",
+                    headless_usage()
+                ));
+            }
+        }
+    }
+
+    let domain_id = domain_id.ok_or("missing required --domain-id")?;
+    let source = source.ok_or("missing required --source-id")?;
+    let max_payload_silence = max_payload_silence.ok_or("missing required --max-silence-ms")?;
+    if floor_labels.is_empty() {
+        return Err("at least one --floor is required".into());
+    }
+    if bindings.is_empty() {
+        return Err("at least one --bind is required".into());
+    }
+    if !bindings
+        .iter()
+        .any(|binding| binding.role == ObservationBindingRole::Operational)
+    {
+        return Err("at least one Operational --bind is required for host readiness".into());
+    }
+
+    Ok(RmfHostConfig {
+        domain_id,
+        source,
+        max_payload_silence,
+        floor_labels,
+        bindings,
+        agv_as_normal,
+        human_as_normal,
+    })
+}
+
+fn parse_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<String, String> {
+    args.next()
+        .ok_or_else(|| format!("{flag} requires a value"))
+}
+
+fn set_once<T>(slot: &mut Option<T>, value: T, flag: &str) -> Result<(), String> {
+    if slot.replace(value).is_some() {
+        return Err(format!("duplicate {flag}"));
+    }
+    Ok(())
+}
+
+fn parse_rmf_host_binding(value: &str) -> Result<RmfHostBinding, String> {
+    let (native_lift_name, logical_and_role) = value
+        .split_once('=')
+        .ok_or_else(|| format!("--bind {value:?} must be <native=logical:role>"))?;
+    let (logical_car, role) = logical_and_role
+        .rsplit_once(':')
+        .ok_or_else(|| format!("--bind {value:?} must be <native=logical:role>"))?;
+    if native_lift_name.is_empty() || logical_car.is_empty() {
+        return Err(format!("--bind {value:?} contains an empty identity"));
+    }
+    let role = match role {
+        "operational" => ObservationBindingRole::Operational,
+        "auxiliary" => ObservationBindingRole::Auxiliary,
+        _ => {
+            return Err(format!(
+                "--bind {value:?} role must be operational or auxiliary"
+            ));
+        }
+    };
+    Ok(RmfHostBinding {
+        native_lift_name: native_lift_name.to_owned(),
+        logical_car: CarId::new(logical_car),
+        role,
+    })
+}
+
+fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> Result<(), String> {
+    let topology = BuildingTopology::new(config.floor_labels.values().copied())
+        .map_err(|error| format!("invalid configured topology: {error:?}"))?;
+    let mut host = ReadOnlyHost::new(topology.clone());
+    let mut adapter_bindings = Vec::new();
+    for binding in &config.bindings {
+        host.bind_observation(
+            config.source.clone(),
+            binding.logical_car.clone(),
+            binding.role,
+        )
+        .map_err(|error| {
+            format!(
+                "invalid observation binding for native {:?}: {error:?}",
+                binding.native_lift_name
+            )
+        })?;
+        adapter_bindings.push((
+            binding.native_lift_name.clone(),
+            RmfLiftBinding::new(binding.logical_car.clone(), config.floor_labels.clone()),
+        ));
+    }
+
+    let mut projection = RmfInteractionModeProjection::conservative();
+    if config.agv_as_normal {
+        projection = projection.with_agv_as_normal();
+    }
+    if config.human_as_normal {
+        projection = projection.with_human_as_normal();
+    }
+    let session = new_host_source_session()?;
+    let mut adapter = RmfObservationAdapter::new(
+        config.source.clone(),
+        session.clone(),
+        projection,
+        adapter_bindings,
+    )
+    .map_err(|error| format!("invalid RMF adapter configuration: {error}"))?;
+    host.begin_source_session(config.source.clone(), session.clone())
+        .map_err(|error| format!("failed to begin RMF source session: {error:?}"))?;
+    let freshness = RmfFreshnessPolicy::new(config.max_payload_silence)
+        .map_err(|error| format!("invalid RMF freshness configuration: {error}"))?;
+
+    println!("LiftAssistant RMF read-only host starting");
+    println!(
+        "source={} session={} domain={} freshness_ms={} bindings={} floors={}",
+        config.source,
+        session.as_str(),
+        config.domain_id,
+        config.max_payload_silence.as_millis(),
+        config.bindings.len(),
+        topology.served_floors().len()
+    );
+    println!(
+        "readiness={:?} lifecycle={:?}",
+        host.readiness(),
+        host.lifecycle()
+    );
+    let mut reported_lifecycle = host.lifecycle().clone();
+    let mut connection_generation = 0_u64;
+
+    while !shutdown.load(Ordering::Relaxed) {
+        connection_generation = connection_generation
+            .checked_add(1)
+            .ok_or("RMF subscriber connection generation exhausted")?;
+        let node_name = format!(
+            "rmf_read_only_host_{}_{}",
+            std::process::id(),
+            connection_generation
+        );
+        let subscriber = RmfLiveSubscriber::connect(config.domain_id, &node_name)
+            .map_err(|error| format!("failed to create RMF read-only subscriber: {error}"))?;
+        host.note_transport_subscriber_created(adapter.source());
+        let mut ingestion_error = None;
+        let outcome = subscriber.receive_until_stale_or_shutdown(
+            freshness,
+            SHUTDOWN_POLL_INTERVAL,
+            || shutdown.load(Ordering::Relaxed),
+            |payload| {
+                host.note_transport_discovery(adapter.source());
+                let mapped = match adapter.map(&payload.state) {
+                    Ok(mapped) => mapped,
+                    Err(error) => {
+                        ingestion_error = Some(error.to_string());
+                        return RmfReceiveControl::Stop;
+                    }
+                };
+                if mapped.topology != topology {
+                    ingestion_error = Some(format!(
+                        "source topology {:?} differs from configured host topology {:?}",
+                        mapped.topology.served_floors(),
+                        topology.served_floors()
+                    ));
+                    return RmfReceiveControl::Stop;
+                }
+                host.ingest_observation(mapped.update);
+                if host.lifecycle() != &reported_lifecycle {
+                    reported_lifecycle = host.lifecycle().clone();
+                    println!(
+                        "readiness={:?} lifecycle={:?}",
+                        host.readiness(),
+                        host.lifecycle()
+                    );
+                }
+                RmfReceiveControl::Continue
+            },
+        );
+
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                host.mark_source_payload_stale(config.source.clone(), session.clone())
+                    .map_err(|invalidation| {
+                        format!(
+                            "RMF transport failed ({error}) and source invalidation failed: {invalidation:?}"
+                        )
+                    })?;
+                println!(
+                    "readiness={:?} lifecycle={:?} reason=transport-error",
+                    host.readiness(),
+                    host.lifecycle()
+                );
+                return Err(format!("RMF read-only subscription failed: {error}"));
+            }
+        };
+        match outcome {
+            RmfReceiveOutcome::ShutdownRequested => break,
+            RmfReceiveOutcome::PayloadStale { max_silence } => {
+                host.mark_source_payload_stale(config.source.clone(), session.clone())
+                    .map_err(|error| {
+                        format!("failed to revoke stale RMF observations: {error:?}")
+                    })?;
+                reported_lifecycle = host.lifecycle().clone();
+                println!(
+                    "readiness={:?} lifecycle={:?} reason=payload-stale silence_ms={}",
+                    host.readiness(),
+                    host.lifecycle(),
+                    max_silence.as_millis()
+                );
+            }
+            RmfReceiveOutcome::HandlerStopped => {
+                let error = ingestion_error
+                    .unwrap_or_else(|| "RMF payload handler stopped unexpectedly".into());
+                host.mark_source_payload_stale(config.source.clone(), session.clone())
+                    .map_err(|invalidation| {
+                        format!(
+                            "RMF ingestion failed ({error}) and source invalidation failed: {invalidation:?}"
+                        )
+                    })?;
+                println!(
+                    "readiness={:?} lifecycle={:?} reason=ingestion-error",
+                    host.readiness(),
+                    host.lifecycle()
+                );
+                return Err(error);
+            }
+        }
+    }
+
+    println!("LiftAssistant RMF read-only host stopped gracefully");
+    Ok(())
+}
+
+fn new_host_source_session() -> Result<ObservationSessionId, String> {
+    let since_epoch = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(|error| format!("host clock is before UNIX epoch: {error}"))?;
+    Ok(ObservationSessionId::new(format!(
+        "rmf-host-{}-{}",
+        std::process::id(),
+        since_epoch.as_nanos()
+    )))
 }
 
 fn run_scenario(name: &str) -> Result<String, String> {
@@ -1107,6 +1494,112 @@ fn render_report(run: &ProofRun) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn command_args(values: &[&str]) -> impl Iterator<Item = String> {
+        values
+            .iter()
+            .map(|value| (*value).to_owned())
+            .collect::<Vec<_>>()
+            .into_iter()
+    }
+
+    #[test]
+    fn production_rmf_configuration_is_explicit_and_preserves_binding_roles() {
+        let command = parse_command(command_args(&[
+            RMF_READ_ONLY_HOST_COMMAND,
+            "--domain-id",
+            "48",
+            "--source-id",
+            "rmf/hotel-production",
+            "--max-silence-ms",
+            "3000",
+            "--floor",
+            "L1=1",
+            "--floor",
+            "L2=2",
+            "--bind",
+            "Lift1=A:operational",
+            "--bind",
+            "Lift2=B:auxiliary",
+            "--agv-as-normal",
+        ]))
+        .expect("minimal production RMF configuration is valid");
+        let HeadlessCommand::RunRmfReadOnly(config) = command else {
+            panic!("expected production host command");
+        };
+
+        assert_eq!(config.domain_id, 48);
+        assert_eq!(
+            config.source,
+            ObservationSourceId::new("rmf/hotel-production")
+        );
+        assert_eq!(config.max_payload_silence, Duration::from_secs(3));
+        assert_eq!(
+            config.floor_labels,
+            BTreeMap::from([
+                ("L1".to_owned(), Floor::new(1)),
+                ("L2".to_owned(), Floor::new(2)),
+            ])
+        );
+        assert_eq!(config.bindings.len(), 2);
+        assert_eq!(config.bindings[0].logical_car, CarId::new("A"));
+        assert_eq!(config.bindings[0].role, ObservationBindingRole::Operational);
+        assert_eq!(config.bindings[1].logical_car, CarId::new("B"));
+        assert_eq!(config.bindings[1].role, ObservationBindingRole::Auxiliary);
+        assert!(config.agv_as_normal);
+        assert!(!config.human_as_normal);
+    }
+
+    #[test]
+    fn production_rmf_configuration_rejects_implicit_or_nonoperational_hosts() {
+        let missing_freshness = parse_command(command_args(&[
+            RMF_READ_ONLY_HOST_COMMAND,
+            "--domain-id",
+            "48",
+            "--source-id",
+            "rmf/hotel-production",
+            "--floor",
+            "L1=1",
+            "--bind",
+            "Lift1=A:operational",
+        ]))
+        .expect_err("freshness must be explicit");
+        assert!(missing_freshness.contains("missing required --max-silence-ms"));
+
+        let auxiliary_only = parse_command(command_args(&[
+            RMF_READ_ONLY_HOST_COMMAND,
+            "--domain-id",
+            "48",
+            "--source-id",
+            "rmf/hotel-production",
+            "--max-silence-ms",
+            "3000",
+            "--floor",
+            "L1=1",
+            "--bind",
+            "Lift1=A:auxiliary",
+        ]))
+        .expect_err("a production host needs configured operational truth");
+        assert!(auxiliary_only.contains("at least one Operational --bind"));
+
+        let duplicate_native = parse_command(command_args(&[
+            RMF_READ_ONLY_HOST_COMMAND,
+            "--domain-id",
+            "48",
+            "--source-id",
+            "rmf/hotel-production",
+            "--max-silence-ms",
+            "3000",
+            "--floor",
+            "L1=1",
+            "--bind",
+            "Lift1=A:operational",
+            "--bind",
+            "Lift1=B:operational",
+        ]))
+        .expect_err("native identity mappings must be unique");
+        assert!(duplicate_native.contains("duplicate --bind native lift name"));
+    }
 
     #[test]
     fn a_started_process_is_not_ready_before_synchronization() {

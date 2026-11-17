@@ -992,6 +992,7 @@ dependencies = [
  "liftassistant-model",
  "liftassistant-rmf",
  "liftassistant-runtime",
+ "signal-hook",
 ]
 
 [[package]]
