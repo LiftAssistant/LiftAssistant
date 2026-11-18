@@ -45,7 +45,11 @@ The live Open-RMF adapter maps every configured native `lift_name` explicitly to
 
 Official Open-RMF Hotel validation confirms that one source/publisher may carry periodic complete snapshots for several source-native lift identities, including unchanged idle state. It also exercises adapter/source restart, old-state invalidation, new-session sequence restart, delayed-old-session rejection, and real simulation motion/door transitions through Engine-owned state. Transport discovery and DDS graph presence remain diagnostic evidence, not proof that payloads are flowing and not the sole authority for session lifecycle. Source timestamps and Open-RMF control `session_id` remain payload context; neither is promoted to LiftAssistant source generation.
 
-Freshness policy stays outside Core and is source-specific rather than derived from observation sequence or a universal timeout. The RMF adapter accepts an explicit maximum payload-silence setting with no default and arms it only after that subscription has observed payload, keeping discovery/reader startup separate from an active data plane becoming stale. A host-owned timer produces an explicit deterministic Engine invalidation action; Engine calls no wall clock. Invalidation removes current source evidence/resolved state and Operational truth while retaining the active session and its ordering watermark, so delayed or duplicate samples cannot restore stale state. A newer sample in that same adapter lifetime may rebuild evidence; a new adapter lifetime still requires an explicit new source session.
+The ingestion-lifecycle owner supplies a fresh incarnation token for every new lifetime. Engine fences input by equality with the current token and retains one current token per configured source. The production Host obtains 128 random bits per incarnation from the system RNG. Observation ordering, arrival deadlines, Host revision and diagnostic sequence each have separate state.
+
+Freshness policy stays outside Core and Engine. RMF applies the configured maximum arrival silence to both the feed and each bound car that has produced a payload. Before its first payload a car awaits data. A silent car can lose its evidence while a sibling stays current. The Host translates time into deterministic single-car or whole-source invalidation actions. Either scope preserves the active token and source-global ordering watermark. A newer same-session sample can rebuild evidence. Recreating the subscriber resets current transport discovery to subscriber-created and keeps stale payload state until actual data arrives.
+
+`BuildingTopology` provides the building-level floor universe. Each RMF lift's reported `available_floors` may cover a subset. Explicit mapping and containment keep out-of-building floors invalid. Unconfigured RMF entities produce diagnostic evidence and are ignored. Mapping failures for a configured lift revoke only that binding. Transport failure can revoke the whole source. Per-lift floor context stays on the read side.
 
 Runtime health is not one `healthy` flag. The current host keeps transport/discovery evidence, payload activity, adapter-session activity, per-car observation availability, and Engine readiness distinct. A stale Operational source revokes readiness without becoming an elevator equipment fault. A stale Auxiliary source remains visible but cannot revoke a healthy Operational authority, be promoted automatically, or supply missing fields. Last known observations remain bounded diagnostic evidence after current operational truth is revoked.
 
@@ -139,7 +143,10 @@ reapplies only recorded explicit session, observation, and invalidation actions.
 missing an explicit source-session action is rejected rather than inferring lifecycle from an
 observation. The JSON representation is versioned, size-bounded, create-new, and experimental;
 it is neither a public schema nor a telemetry database. Production capture is opt-in and the
-current RMF host writes at most the first configured payload-stale capsule.
+current RMF host attempts at most the first configured payload-stale capsule. A failed
+optional output attempt emits a warning and leaves the Host's observation lifecycle intact.
+The action window supports explicit single-car revocation and checks that each source
+incarnation begins at most once within the artifact.
 
 Sanitization is a separate deterministic transformation from a private capsule to a new
 create-only candidate. It applies stable pseudonyms to source/session/car identities and

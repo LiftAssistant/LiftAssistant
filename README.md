@@ -102,7 +102,7 @@ Exercise the internal versioned incident-capsule path, including a fresh replay 
 cargo run -p liftassistant-headless -- --scenario headless-incident-capsule-replay
 ~~~
 
-The production RMF command may additionally receive `--incident-capsule-out <path>` to create one bounded capsule at the first payload-stale trigger. Files are created without overwriting an existing path and can be replayed with `liftassistant-headless --replay-incident-capsule <path>`. The JSON wire representation is private, experimental, size-bounded, and explicitly versioned; it is not a stable/public schema or an unbounded telemetry archive.
+The production RMF command may additionally receive `--incident-capsule-out <path>` to attempt one bounded capsule at the first feed-wide payload-stale trigger. A failed attempt warns and observation continues. Files are created exclusively and can be replayed with `liftassistant-headless --replay-incident-capsule <path>`. The JSON format is private, experimental, size-bounded and versioned.
 
 Create a separately written candidate for manual review with `liftassistant-headless --sanitize-incident-capsule <private.json> <candidate.json>`. The deterministic private profile pseudonymizes source/session/car identities and remaps floor relationships, then requires the candidate to reproduce the same trigger in a fresh host before writing it. The source file is never modified. The candidate embeds `manual_review_required=true`; this path does not claim perfect anonymization, security certification, or permission to upload/publish the result.
 
@@ -180,6 +180,8 @@ cargo run -p liftassistant-headless -- --run-rmf-read-only \
   --api-listen 127.0.0.1:8080 \
   --agv-as-normal
 ~~~
+
+The configured floors define the building universe. Each RMF lift may report a different subset. `--max-silence-ms` applies to the feed and individually to each bound lift after its first payload. A silent or malformed lift can lose its own read-side state while other lifts continue updating.
 
 The host creates an adapter-owned source session, reports lifecycle/readiness changes, revokes stale operational truth, reconnects for same-session recovery, and handles SIGINT/SIGTERM cooperatively even before the first payload arrives. Every floor, native-to-logical binding, binding role, interaction-mode projection, and freshness duration is explicit. The API is disabled when `--api-listen` is omitted. Binding a non-loopback address is allowed only as an explicit operator choice and emits a warning because this experimental read-only API has no authentication, TLS, or RBAC; it also does not enable wildcard CORS. This CLI and wire format are internal/experimental rather than stable public contracts, and the host remains subscription-only.
 
