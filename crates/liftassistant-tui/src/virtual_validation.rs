@@ -323,6 +323,40 @@ fn restart() -> Result<(), String> {
     )
 }
 
+fn restart_without_receipt_lookup() -> Result<(), String> {
+    let mut lab = Lab::new(true);
+    lab.controller.set_next_behavior(VirtualBehavior {
+        receipt: VirtualReceipt::Lost,
+        ..VirtualBehavior::default()
+    });
+    let request = lab.issue(6);
+    check(
+        lab.submit(&request) == Admission::Admitted,
+        "submit before losing command link",
+    )?;
+    let saved = lab.engine.into_virtual_checkpoint();
+    lab.controller = lab.controller.restart();
+    lab.controller.advance(Duration::ZERO);
+    lab.controller.advance(Duration::from_secs(2));
+    lab.engine = Engine::restore_virtual(saved);
+    check(
+        lab.engine
+            .resynchronize_intent(request.id(), &lab.controller)
+            .is_none(),
+        "command lookup worked while disconnected",
+    )?;
+    for update in lab.controller.observe_current() {
+        lab.engine.ingest_observation_update(update);
+    }
+    let record = lab.engine.intent_record(request.id()).unwrap();
+    check(
+        record.receipt == Receipt::Indeterminate
+            && record.reconciliation == Reconciliation::Satisfied
+            && lab.controller.submissions() == 1,
+        "restart could not settle a physical outcome independently from receipt lookup",
+    )
+}
+
 fn isolation() -> Result<(), String> {
     let mut lab = Lab::new(false);
     let another = PrincipalId::new("competing-writer");
@@ -668,6 +702,7 @@ fn recover_older_request_for_other_car() -> Result<(), String> {
 pub fn run() -> Result<String, String> {
     check(delivery()? == delivery()?, "independent replay diverged")?;
     restart()?;
+    restart_without_receipt_lookup()?;
     isolation()?;
     withdrawal_and_divergence()?;
     bounded_history()?;
