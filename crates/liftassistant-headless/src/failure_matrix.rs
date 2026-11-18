@@ -2,7 +2,7 @@ use super::*;
 
 use serde_json::Value;
 
-pub(super) fn source(index: usize) -> ObservationSourceId {
+fn source(index: usize) -> ObservationSourceId {
     ObservationSourceId::new(format!("matrix-source-{index}"))
 }
 
@@ -14,7 +14,7 @@ fn car(index: usize) -> CarId {
     CarId::new(format!("car-{index:03}"))
 }
 
-pub(super) fn profile(cars: usize, sources: usize) -> ReadOnlyHost {
+fn profile(cars: usize, sources: usize) -> ReadOnlyHost {
     let mut host = ReadOnlyHost::new(BuildingTopology::reference_eight_floor());
     let operational_sources = sources / 2;
     for index in 0..cars {
@@ -49,7 +49,7 @@ pub(super) fn profile(cars: usize, sources: usize) -> ReadOnlyHost {
     host
 }
 
-pub(super) fn update(
+fn update(
     source_index: usize,
     generation: u64,
     sequence: u64,
@@ -64,6 +64,106 @@ pub(super) fn update(
         },
         &liftassistant_model::CarState::new(car(car_index).as_str(), Floor::new(floor)),
     )
+}
+
+// Child of tests/m5_soak.py. Uses the real Host projection and listener with synthetic inputs.
+#[test]
+#[ignore = "driven by tests/m5_soak.py over stdin and real loopback HTTP"]
+fn api_soak_child() {
+    use std::io::{BufRead, Write};
+    use std::time::Instant;
+
+    let cars = env::var("LIFTASSISTANT_SOAK_CARS")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    let sources = env::var("LIFTASSISTANT_SOAK_SOURCES")
+        .unwrap()
+        .parse::<usize>()
+        .unwrap();
+    assert!(matches!((cars, sources), (4, 2) | (32, 8) | (128, 16)));
+    let stride = sources / 2;
+    let mut host = profile(cars, sources);
+    let mut sequence = (cars / stride) as u64;
+    for _ in 0..HOST_DIAGNOSTIC_CAPACITY {
+        sequence += 1;
+        host.ingest_observation(update(0, 0, sequence, 0, 1));
+    }
+    let requested_port = env::var("LIFTASSISTANT_SOAK_PORT")
+        .unwrap()
+        .parse::<u16>()
+        .unwrap();
+    let listener = TcpListener::bind(("127.0.0.1", requested_port)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let publisher = http_api::ReadModelPublisher::new(host.read_model());
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let server_shutdown = Arc::clone(&shutdown);
+    let server_publisher = publisher.clone();
+    let server =
+        thread::spawn(move || http_api::serve(listener, server_publisher, server_shutdown));
+    println!("SOAK {{\"port\":{port}}}");
+    io::stdout().flush().unwrap();
+
+    let mut auxiliary_generation = 0;
+    for command in io::stdin().lock().lines() {
+        let command = command.unwrap();
+        let start = Instant::now();
+        match command.as_str() {
+            "tick" => {
+                sequence += 1;
+                host.ingest_observation(update(0, 0, sequence, 0, 1 + (sequence % 2) as i16));
+            }
+            "roll" => {
+                let auxiliary = source(stride);
+                host.mark_source_payload_stale(auxiliary.clone(), session(auxiliary_generation))
+                    .unwrap();
+                host.record_transport_failure(
+                    auxiliary.clone(),
+                    session(auxiliary_generation),
+                    "synthetic transport failure".into(),
+                );
+                auxiliary_generation += 1;
+                host.begin_source_session(auxiliary, session(auxiliary_generation))
+                    .unwrap();
+                host.ingest_observation(update(stride, auxiliary_generation, 1, 0, 8));
+            }
+            "measure" => {
+                let model = host.read_model();
+                let start = Instant::now();
+                let bytes = serde_json::to_vec(&model).unwrap();
+                println!(
+                    "SOAK {{\"bytes\":{},\"serialize_ns\":{}}}",
+                    bytes.len(),
+                    start.elapsed().as_nanos()
+                );
+                io::stdout().flush().unwrap();
+                continue;
+            }
+            "stop" => break,
+            other => panic!("unknown soak command {other:?}"),
+        }
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+        assert_eq!(host.engine.car_states().len(), cars);
+        assert_eq!(
+            host.diagnostics().entries().count(),
+            HOST_DIAGNOSTIC_CAPACITY
+        );
+        assert_eq!(host.engine.diagnostics().entries().count(), 128);
+        let model = host.read_model();
+        let revision = model.revision();
+        let publish_ns = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        assert!(publisher.publish(model));
+        println!(
+            "SOAK {{\"revision\":{revision},\"publish_ns\":{publish_ns},\"update_publish_ns\":{}}}",
+            start.elapsed().as_nanos()
+        );
+        io::stdout().flush().unwrap();
+    }
+    shutdown.store(true, Ordering::Relaxed);
+    server.join().unwrap().unwrap();
 }
 
 fn refill(host: &mut ReadOnlyHost, cars: usize, stride: usize, generation: u64, offset: u64) {

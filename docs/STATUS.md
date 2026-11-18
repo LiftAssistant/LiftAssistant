@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.11 are implemented. HUMAN accepted the M5.11 first-version client boundary for backend progression on 2026-11-18. M5.12 HA/BMS is deferred and conditional. **M5.13 — Failure / Soak Matrix is READY.** M5.14 requires a passing M5.13. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING` outside the M5 completion gate.
+M5.1 through M5.11 are implemented. HUMAN accepted the M5.11 first-version client boundary for backend progression on 2026-11-18. M5.12 HA/BMS is deferred and conditional. **M5.13 has a HUMAN_PENDING resource bound. M5.14 is not READY. Completion mode: HUMAN-CHECK.** Second-family live validation remains `EXTERNAL_VALIDATION_PENDING` outside the M5 completion gate.
 
 ## Validated baseline
 
@@ -939,11 +939,24 @@ Validation: `cargo fmt --all -- --check`, warning-free workspace all-target `car
 
 The M5.11 first-version checkpoint was accepted for backend progression on 2026-11-18. Its three-platform evidence applies to the validated client, Host and test environment.
 
+### M5.12 — HA/BMS Observation Integration
+
+**DEFERRED / CONDITIONAL.** Outside the M5 completion gate.
+
 ### M5.13 — Failure / Soak Matrix
 
-**IN PROGRESS.**
+**MATRIX EXECUTED — HUMAN_PENDING on the Engine session-retirement bound.**
 
 - **Rust 1.85.0:** The actual compiler initially rejected let chains in the existing workspace. Equivalent 1.85-compatible conditions restore a passing local `cargo check --workspace --all-targets --locked`. The CI workflow now runs that command with Rust 1.85.0 alongside its existing stable job.
 - **Source/session and data plane:** The synthetic matrix passed 32 rounds each at 4 cars / 2 sources, 32 / 8 and 128 / 16. Interleaved cars preserve source-global order across same-session staleness and sequence restart across explicit session changes. Late retired observations leave current evidence unchanged. Existing Host policy records Operational late samples as degradation until a valid current-session update. Conflicting healthy Auxiliary evidence neither fills missing Operational door evidence nor keeps a stale Operational source ready. Transport failure is diagnostic evidence; explicit invalidation revokes operational state while preserving the active session and discovery evidence. The compacted stale capsule replayed at each scale.
 - **Retention finding:** Session churn used to grow the Flight Recorder's sequence detector map despite eviction from the recorder. The detector now drops each retired stream's watermark on session replacement. A 1,024-session regression retains one active detector watermark, 128 Flight Recorder entries and eight incident snapshots. Engine's separate retired-identity set still grew to 1,023 entries: it implements permanent rejection of reactivating an arbitrary opaque session ID. Exact indefinite rejection needs growing history under the current contract. The RMF Host uses one adapter session per process and reconnects under that session, but unconstrained explicit rollover requires a HUMAN retention/lifecycle decision before this resource gate can pass.
 - **API shutdown:** A loopback SSE peer that stopped reading with a pending socket write reproduced an indefinite graceful drain. The API first attempts graceful shutdown, then closes remaining connections after a two-second drain deadline. The same stalled-peer regression now finishes while the peer is still open and verifies listener release.
+- **API/client churn.** The real RMF Host on an idle domain reported subscriber-created, payload-awaiting and NotReady through five independently started CLI subscribers. SIGTERM closed an active SSE response and the listener. The separate synthetic Host process served all static profiles, kept authoritative state independent of client churn, and delivered the newest complete snapshot to both a fast client and a paused client after a 192-publication burst. The paused client received 36 post-initial snapshots. Both connections closed on shutdown. Restart on the same endpoint reset revision from 1707 to the same fresh-fixture value of 411.
+- **Resource soak.** A 45.44-second Linux loopback run used five waves of 20 SSE clients at a target 20 Hz, 900 publications and five Auxiliary stale/failure/session rollovers. Host RSS started at 11,964 KiB and ranged from 17,040 to 17,304 KiB at the post-wave idle samples. At 20 clients the Host held 27 FDs and 21 sockets, returning to seven FDs and one listener every wave. Thread count stayed at 19. The rolling watch channel retained its latest value, Host diagnostics capped at 256, Engine Flight Recorder entries at 128 and incidents at eight. The Host recorder uses a 128-action rolling window with a compacted baseline; stale capsules at all three profiles replayed within the existing format bounds.
+- **Performance.** On Linux x86-64 with an unoptimized Rust build, warm snapshots for 4/2, 32/8 and 128/16 measured 47,896, 57,110 and 86,500 bytes. Compact JSON serialization p95 was 2.476, 2.677 and 4.628 ms, respectively, from 15 samples per profile. The 32/8 run crossed 1, 5 and 20 clients with target rates of 1, 10 and 20 Hz and observed 0.99–19.88 Hz. Update through publish p95 was 0.605–1.066 ms, publish to localhost receipt 6.498–32.725 ms and Python client JSON parse 1.205–1.784 ms. At 20 clients and 20 Hz Host process CPU was about 3.13 core-equivalents. Each SSE connection encodes its own complete snapshots. These are local measurements with no production capacity or latency guarantee.
+
+Reproduce the synthetic Linux process proof with `python3 crates/liftassistant-headless/tests/m5_soak.py` from the repository root. Formatting, locked all-target workspace Clippy, 129 workspace tests, all seven TUI scenarios and four non-live headless scenarios passed. The ignored Rust soak child was exercised by the Python driver. The hosted `msrv` job passed on the initial workflow change, and the final local all-target workspace check passed with actual Rust 1.85.0. Official Hotel live payload and timing proofs were **NOT RE-RUN IN THIS PASS**. No new second-family live evidence was supplied.
+
+### M5.14 — M5 Completion Audit
+
+**NOT READY.** M5.13 needs a decision on how to bound explicit rollover while preventing reactivation of retired sessions. The bounded run and CI evidence do not close that semantic/resource question. M5 stays open. HA/BMS, second-family live validation, production TLS/auth, a stable public API and write authority remain outside the implemented read-only scope.
