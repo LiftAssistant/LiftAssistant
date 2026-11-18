@@ -132,9 +132,8 @@ impl IncidentRecorder {
     }
 
     fn push(&mut self, action: CapsuleAction) {
-        if self.actions.len() == self.capacity
-            && let Some(evicted) = self.actions.pop_front()
-        {
+        if self.actions.len() == self.capacity {
+            let evicted = self.actions.pop_front().expect("full action window");
             self.baseline.apply_evicted(&self.bindings, evicted);
         }
         self.actions.push_back(action);
@@ -365,8 +364,10 @@ impl CapsuleBaseline {
                     }
                     return;
                 }
-                if let Some((previous_seq, watermark_car)) = &source_state.last_sequence
-                    && update.sequence <= *previous_seq
+                if let Some((previous_seq, watermark_car)) = source_state
+                    .last_sequence
+                    .as_ref()
+                    .filter(|(previous, _)| update.sequence <= *previous)
                 {
                     if is_operational {
                         self.degrading = Some(BaselineDegradation {
@@ -435,8 +436,10 @@ impl CapsuleBaseline {
                 is_operational_binding(bindings, source, car)
                     || trigger_car == Some((source.as_str(), car.as_str()))
             });
-            if referenced_sources.contains(source.as_str())
-                && let Some((max_seq, max_car)) = &state.last_sequence
+            if let Some((max_seq, max_car)) = state
+                .last_sequence
+                .as_ref()
+                .filter(|_| referenced_sources.contains(source.as_str()))
             {
                 let invalidated_watermark = state
                     .invalidated_at
@@ -482,9 +485,13 @@ impl CapsuleBaseline {
             self.saw_operational_activity && !active_emits_operational;
 
         for (source, state) in &self.sources {
-            if need_prior_synchronizing
-                && let Some(prior_session) = &state.prior_session
-                && let Some(op_car) = first_operational_car(bindings, source)
+            if let Some((prior_session, op_car)) = state
+                .prior_session
+                .as_ref()
+                .filter(|_| need_prior_synchronizing)
+                .and_then(|session| {
+                    first_operational_car(bindings, source).map(|car| (session, car))
+                })
             {
                 preamble.push(CapsuleAction::BeginSourceSession {
                     source: source.clone(),
@@ -952,9 +959,14 @@ impl IncidentCapsule {
                 self.context.producer
             ));
         }
-        if let Some(sanitization) = &self.context.sanitization
-            && (sanitization.profile != "deterministic-pseudonymization/1"
-                || !sanitization.manual_review_required)
+        if self
+            .context
+            .sanitization
+            .as_ref()
+            .is_some_and(|sanitization| {
+                sanitization.profile != "deterministic-pseudonymization/1"
+                    || !sanitization.manual_review_required
+            })
         {
             return Err("incident capsule has unsupported sanitization metadata".into());
         }

@@ -129,13 +129,16 @@ impl ObservationAssembler {
             reported_destination,
         } = update;
         let stream = (provenance.source.clone(), provenance.session.clone());
-        if let Some(previous) = self.last_sequence.get(&stream)
-            && provenance.sequence <= *previous
+        if let Some(previous) = self
+            .last_sequence
+            .get(&stream)
+            .copied()
+            .filter(|previous| provenance.sequence <= *previous)
         {
             return Err(ObservationAssemblyError::NonIncreasingSequence {
                 source: provenance.source,
                 session: provenance.session,
-                previous: *previous,
+                previous,
                 received: provenance.sequence,
             });
         }

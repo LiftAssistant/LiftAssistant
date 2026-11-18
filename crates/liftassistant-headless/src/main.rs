@@ -636,8 +636,8 @@ impl ReadOnlyHost {
         }
 
         let accepted_availability = observation_availability(&resolution);
-        if let Some(availability) = accepted_availability
-            && let Some(health) = self.source_health.get_mut(&observation_source)
+        if let Some((availability, health)) =
+            accepted_availability.zip(self.source_health.get_mut(&observation_source))
         {
             health.payload = PayloadActivity::Active;
             health.observations.insert(car.clone(), availability);

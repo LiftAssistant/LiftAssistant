@@ -228,8 +228,10 @@ impl Engine {
                 role: *existing,
             });
         }
-        if role == ObservationBindingRole::Operational
-            && let Some(existing_source) = self.operational_authorities.get(&car)
+        if let Some(existing_source) = self
+            .operational_authorities
+            .get(&car)
+            .filter(|_| role == ObservationBindingRole::Operational)
         {
             return Err(ObservationBindingError::OperationalAuthorityConflict {
                 car,

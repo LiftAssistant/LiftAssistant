@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.11 are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING`. **Completion mode: HUMAN-CHECK.** M5.11 LiftAssistant Client first version is implemented and runtime-validated against the real Host across Android, Linux, and Web; further milestone progression awaits HUMAN review.
+M5.1 through M5.11 are implemented. HUMAN accepted the M5.11 first-version client boundary for backend progression on 2026-11-18. M5.12 HA/BMS is deferred and conditional. **M5.13 — Failure / Soak Matrix is READY.** M5.14 requires a passing M5.13. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING` outside the M5 completion gate.
 
 ## Validated baseline
 
@@ -937,4 +937,10 @@ Platform build and runtime validation against real `liftassistant-headless`:
 
 Validation: `cargo fmt --all -- --check`, warning-free workspace all-target `cargo clippy`, all 126 Rust workspace tests, `dart analyze --fatal-infos` (zero issues), all 28 Flutter VM tests plus 21 Chrome-platform tests, and real process-level runtime proofs on Linux, Web (Chrome JS & Wasm), and Android Emulator pass. All test processes, listeners, temporary Chrome profiles, and Android emulator instances were cleaned up.
 
-Stop at `HUMAN-CHECK` after M5.11 first-version delivery and real three-platform Host validation.
+The M5.11 first-version checkpoint was accepted for backend progression on 2026-11-18. Its three-platform evidence applies to the validated client, Host and test environment.
+
+### M5.13 — Failure / Soak Matrix
+
+**IN PROGRESS.**
+
+- **Rust 1.85.0:** The actual compiler initially rejected let chains in the existing workspace. Equivalent 1.85-compatible conditions restore a passing local `cargo check --workspace --all-targets --locked`. The CI workflow now runs that command with Rust 1.85.0 alongside its existing stable job.

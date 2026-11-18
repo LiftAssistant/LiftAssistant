@@ -261,8 +261,9 @@ impl RmfLiveSubscriber {
                     if should_shutdown.as_mut().is_some_and(|check| check()) {
                         return Ok(RmfReceiveOutcome::ShutdownRequested);
                     }
-                    if let (Some(policy), Some(last)) = (freshness, last_payload_at)
-                        && last.elapsed() >= policy.max_payload_silence()
+                    if let Some((policy, _)) = freshness
+                        .zip(last_payload_at)
+                        .filter(|(policy, last)| last.elapsed() >= policy.max_payload_silence())
                     {
                         return Ok(RmfReceiveOutcome::PayloadStale {
                             max_silence: policy.max_payload_silence(),
