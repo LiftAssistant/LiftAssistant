@@ -9,7 +9,8 @@ mod rmf_host;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    env, io,
+    env, fmt,
+    io::{self, Write},
     net::{SocketAddr, TcpListener},
     path::PathBuf,
     process::{Command, ExitCode},
@@ -1023,11 +1024,13 @@ impl ExperimentalApiServer {
             .local_addr()
             .map_err(|error| format!("failed to inspect experimental API listener: {error}"))?;
         if !local_addr.ip().is_loopback() {
-            eprintln!(
+            report_host_warning(format_args!(
                 "warning: experimental unauthenticated read-only API is exposed on {local_addr}"
-            );
+            ));
         }
-        println!("experimental read-only API listening on http://{local_addr}");
+        report_host_status(format_args!(
+            "experimental read-only API listening on http://{local_addr}"
+        ));
         let publisher = http_api::ReadModelPublisher::new(host.read_model());
         let server_publisher = publisher.clone();
         let server_shutdown = Arc::clone(&shutdown);
@@ -1035,7 +1038,9 @@ impl ExperimentalApiServer {
             .name("liftassistant-experimental-api".into())
             .spawn(move || {
                 if let Err(error) = http_api::serve(listener, server_publisher, server_shutdown) {
-                    eprintln!("warning: experimental read-only API stopped: {error}");
+                    report_host_warning(format_args!(
+                        "warning: experimental read-only API stopped: {error}"
+                    ));
                 }
             })
             .map_err(|error| format!("failed to start experimental API thread: {error}"))?;
@@ -1056,7 +1061,9 @@ impl Drop for ExperimentalApiServer {
         self.shutdown.store(true, Ordering::Relaxed);
         if let Some(thread) = self.thread.take() {
             if thread.join().is_err() {
-                eprintln!("warning: experimental read-only API thread panicked");
+                report_host_warning(format_args!(
+                    "warning: experimental read-only API thread panicked"
+                ));
             }
         }
     }
@@ -1419,8 +1426,8 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
         .map(|listen| ExperimentalApiServer::start(listen, &host, Arc::clone(&shutdown)))
         .transpose()?;
 
-    println!("LiftAssistant RMF read-only host starting");
-    println!(
+    report_host_status(format_args!("LiftAssistant RMF read-only host starting"));
+    report_host_status(format_args!(
         "source={} session={} domain={} freshness_ms={} bindings={} floors={}",
         config.source,
         session.as_str(),
@@ -1428,12 +1435,12 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
         config.max_payload_silence.as_millis(),
         config.bindings.len(),
         topology.served_floors().len()
-    );
-    println!(
+    ));
+    report_host_status(format_args!(
         "readiness={:?} lifecycle={:?}",
         host.readiness(),
         host.lifecycle()
-    );
+    ));
     let mut reported_lifecycle = host.lifecycle().clone();
     let mut reported_diagnostic_sequence = 0;
     let mut incident_capsule_out = config.incident_capsule_out.clone();
@@ -1491,11 +1498,11 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                 }
                 if host.lifecycle() != &reported_lifecycle {
                     reported_lifecycle = host.lifecycle().clone();
-                    println!(
+                    report_host_status(format_args!(
                         "readiness={:?} lifecycle={:?}",
                         host.readiness(),
                         host.lifecycle()
-                    );
+                    ));
                 }
                 RmfReceiveControl::Continue
             },
@@ -1524,11 +1531,11 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     io::stderr().lock(),
                 );
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
-                println!(
+                report_host_status(format_args!(
                     "readiness={:?} lifecycle={:?} reason=transport-error",
                     host.readiness(),
                     host.lifecycle()
-                );
+                ));
                 return Err(format!("RMF read-only subscription failed: {error}"));
             }
         };
@@ -1549,12 +1556,12 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                 );
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 reported_lifecycle = host.lifecycle().clone();
-                println!(
+                report_host_status(format_args!(
                     "readiness={:?} lifecycle={:?} reason=payload-stale silence_ms={}",
                     host.readiness(),
                     host.lifecycle(),
                     max_silence.as_millis()
-                );
+                ));
             }
             RmfReceiveOutcome::HandlerStopped => {
                 let error = ingestion_error
@@ -1574,17 +1581,19 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     io::stderr().lock(),
                 );
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
-                println!(
+                report_host_status(format_args!(
                     "readiness={:?} lifecycle={:?} reason=ingestion-error",
                     host.readiness(),
                     host.lifecycle()
-                );
+                ));
                 return Err(error);
             }
         }
     }
 
-    println!("LiftAssistant RMF read-only host stopped gracefully");
+    report_host_status(format_args!(
+        "LiftAssistant RMF read-only host stopped gracefully"
+    ));
     Ok(())
 }
 
@@ -1618,7 +1627,9 @@ fn write_source_stale_capsule(
         .capture_incident(CapsuleTrigger::source_payload_stale(source, session))
         .write_new(&path)
     {
-        Ok(()) => println!("incident capsule captured path={path:?} trigger=source.payload-stale"),
+        Ok(()) => report_host_status(format_args!(
+            "incident capsule captured path={path:?} trigger=source.payload-stale"
+        )),
         Err(error) => {
             let _ = writeln!(
                 warnings,
@@ -1635,9 +1646,23 @@ fn emit_new_host_diagnostics(host: &ReadOnlyHost, reported_sequence: &mut u64) {
         .entries()
         .filter(|entry| entry.sequence > after_sequence)
     {
-        println!("{}", render_host_diagnostic(entry));
+        report_host_status(format_args!("{}", render_host_diagnostic(entry)));
         *reported_sequence = entry.sequence;
     }
+}
+
+fn write_host_line(mut output: impl Write, line: fmt::Arguments<'_>) {
+    // Logging is a side effect of observation. A closed diagnostic pipe must not
+    // unwind the Host or interrupt API shutdown.
+    let _ = writeln!(output, "{line}");
+}
+
+fn report_host_status(line: fmt::Arguments<'_>) {
+    write_host_line(io::stdout().lock(), line);
+}
+
+fn report_host_warning(line: fmt::Arguments<'_>) {
+    write_host_line(io::stderr().lock(), line);
 }
 
 fn render_host_diagnostic(entry: &HostDiagnosticEntry) -> String {
@@ -2594,6 +2619,20 @@ fn render_report(run: &ProofRun) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closed_host_log_sink_is_nonfatal() {
+        struct ClosedPipe;
+        impl Write for ClosedPipe {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+        }
+        write_host_line(ClosedPipe, format_args!("diagnostic"));
+    }
     use liftassistant_sim::{
         BacnetDoorStatus, BacnetLiftCarDirection, BacnetLiftCarMode, BacnetMappingError,
         RecordedBacnetLiftProperties, map_bacnet_lift_properties,

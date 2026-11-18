@@ -97,7 +97,9 @@ pub(super) fn serve(
                 result.map_err(|error| format!("experimental API server failed: {error}")),
             () = drain_deadline => {
                 // Returning drops this API runtime and its remaining connection tasks.
-                eprintln!("warning: experimental API shutdown drain timed out; closing remaining connections");
+                crate::report_host_warning(format_args!(
+                    "warning: experimental API shutdown drain timed out; closing remaining connections"
+                ));
                 Ok(())
             }
         }

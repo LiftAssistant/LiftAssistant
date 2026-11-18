@@ -964,3 +964,5 @@ Reproduce the synthetic Linux process proof with `python3 crates/liftassistant-h
 ### M5.14 — M5 Completion Audit
 
 **READY.** Review the corrected M5 ownership, fault boundaries, state retention and claims before the HUMAN checkpoint.
+
+The diagnostics audit reproduced a production Host panic on a broken stdout pipe. Host status and API lifecycle logs now use best-effort writes. A real idle-domain Host with both output pipes closed continued serving snapshot/SSE and exited successfully on SIGTERM.
