@@ -15,6 +15,8 @@ CiA's [417 application profile](https://can-cia.org/can-knowledge/cia-417-series
 
 [Kafka protocol fencing](https://kafka.apache.org/35/design/protocol/) is supporting evidence for stable retry identity and a bounded active generation. [AWS Device Shadow](https://docs.aws.amazon.com/iot/latest/developerguide/iot-device-shadows.html) provides a separate desired/reported pattern. The virtual lab adopts typed correlation, authority fencing and observation reconciliation. Vendor topic names, physical safety actions, door encoding/holding, service registration, timeouts, offline/emergency policy, transport response codes and production restart guarantees stay outside the canonical vocabulary.
 
+[Kafka's message format](https://kafka.apache.org/21/implementation/message-format/) retains producer sequence information for partition duplicate checking. The analogous local scope is the controlled car. Its execution watermark can fence retired operation IDs without coupling admission across independent cars.
+
 ## M5 read-only lifecycle corrections
 
 - [Kubernetes object UIDs](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids) and [systemd invocation IDs](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html) distinguish stable names from individual lifetimes. [Kafka producer fencing](https://kafka.apache.org/35/design/protocol/) rejects superseded producers using current identity/epoch. LiftAssistant takes the fresh opaque incarnation and current-token fence. Its token carries no numeric epoch or event order. Bounded replay artifacts can check uniqueness separately.

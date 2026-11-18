@@ -1,6 +1,6 @@
 # Project memory
 
-Last consolidated: 2026-11-18
+Last consolidated: 2026-11-19
 
 This file contains durable project facts and decisions only.
 
@@ -43,6 +43,7 @@ It is not primarily a new elevator brand and not merely a monitoring dashboard.
 14. Production debugging/diagnostics, incident evidence, and deterministic replay are first-class platform concerns rather than optional logging features.
 15. Complete operational state should not be weakened merely to fit incomplete external sources; external uncertainty should be represented before operational-state resolution.
 16. Production deployment must remain safe when LiftAssistant or one of its user-facing components is unavailable; the lower execution/safety domain remains independently responsible for elevator safety.
+17. The virtual intent lab establishes separate call and operation identities, explicit per-car writer grants, and separate receipt, desired withdrawal, and observation-based reconciliation. Bounded histories and per-car admission fences preserve idempotency through the virtual restart proof. External controller behavior and durable crash recovery require separate evidence.
 
 ## Product philosophy
 

@@ -149,14 +149,13 @@ This checkpoint is not permission for low-level brake/drive/safety actuation.
 
 Goal: validate high-level write semantics without using passenger production as the experiment.
 
-M6A covers the software/virtual phase through the completion audit. M6B candidate
-external validation requires another HUMAN architecture review.
-
-Entry requires a new HUMAN architecture review. Before a general call or write workload,
-separate active calls from bounded completed-call history, define intent identity and
-receipts, idempotency, expiry, cancellation/supersession, write readiness/authority and
-restart reconciliation. Where cars have different service sets, establish evidence-backed
-per-car execution floor capabilities before dispatch or writes depend on them.
+M6A establishes the software/virtual phase. M6B external validation requires another
+HUMAN architecture review and an explicitly approved test environment. Before selecting
+a lower controller, verify its per-car execution floors, authority/holder mapping,
+receipt correlation under uncertain delivery, cancellation limits and restart evidence.
+Confirm its physical satisfaction predicate and reconcile unresolved operations before
+allowing any real execution. Durable process-crash recovery and explicit supersession
+remain design decisions for the relevant authorized workload.
 
 Progression should be evidence-driven:
 
@@ -168,7 +167,7 @@ Simulator
 -> controlled non-passenger environment
 ~~~
 
-Candidate work:
+M6A laboratory evidence:
 
 - explicit intent identity/receipt lifecycle;
 - desired-versus-reported reconciliation;
@@ -177,7 +176,6 @@ Candidate work:
 - write readiness/authority gate;
 - deterministic restart/resynchronization tests;
 - write-capable adapter validation profiles;
-- shadow comparison between commanded and observed behavior;
 - incident capture around rejected/failed/inconsistent intents.
 
 Only high-level intents belong here. Raw brake, motor torque, safety-chain bypass, door-lock bypass, or comparable safety primitives remain outside LiftAssistant Core semantics.

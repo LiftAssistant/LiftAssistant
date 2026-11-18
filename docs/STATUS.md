@@ -4,17 +4,24 @@ Updated: 2026-11-19
 
 ## Current milestone
 
-**M5 — Production Read-only Platform**
+**M6A — Controlled Intent Semantics (virtual) is COMPLETE. Completion mode is HUMAN-CHECK.**
 
 M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-**M6A — Controlled Intent Semantics (virtual).** M5 remains complete at its read-only milestone boundary. The HUMAN authorization covers M6.0–M6.8 and the M6A audit. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`.
+M5 remains complete at its read-only milestone boundary. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. M6.0–M6.8 are implemented and audited in the virtual lab. M6B awaits a HUMAN decision on an isolated validation target. No next implementation item is READY.
 
-**M6.0–M6.7 implemented.** The executable virtual fault and restart matrix checks lost and rejected receipts, exact identity conflicts, authority and Auxiliary isolation, withdrawal, stalled and divergent movement, and restore with no new execution. The churn case runs 1,024 operations through one car and retains 128 terminal outcomes per owner. A late transport uncertainty signal cannot overwrite a definitive receipt. Unchanged same-floor evidence cannot satisfy a still-queued operation.
+### M6A completion audit
 
-**M6.8 implemented. M6A completion audit is READY.** The internal write-adapter profile runs the fault matrix and checks that a different controller cannot receive the operation and that current Operational evidence alone cannot make a disconnected controller write-ready.
+- **Identity and retry.** `CallId` identifies the hall call and `IntentId` identifies one lower operation. Ten same-ID retries send once. Changed intent or call binding conflicts even after terminal eviction. A retained result can be queried. An evicted request remains fenced. A newer request for one car leaves an unsubmitted request for a different car eligible when its observations recover.
+- **Authority and readiness.** A controlled car needs an explicit controller and one current writer grant. Revocation and restore fence old grants. A controller connection or vendor holder is independent of the Principal. Current Operational evidence, acceptable mode and occupancy, availability, supported operation and configured execution floors gate execution. Lost Operational evidence blocks new work. Auxiliary evidence cannot complete an intent.
+- **Receipt and physical outcome.** An Accepted receipt leaves reconciliation pending. A lost receipt can remain indeterminate while a fresh physical outcome settles the operation. A late uncertainty notification preserves a definitive receipt. Changed reported destinations do not change desired work. Wrong targets produce bounded divergence evidence. A still-queued same-floor intent cannot be settled by an unchanged idle snapshot.
+- **Withdrawal and recovery.** A queued operation can be prevented by the supporting virtual controller. Unknown or underway execution stays conflict-fenced until evidence resolves it. Cancel and expiry do not fabricate a stop. A consume-and-restore checkpoint fences old grants and stale evidence, preserves unresolved identities, and supports receipt lookup and new observations without resending.
+- **Bounds and failure isolation.** One unresolved intent per controlled car. The 1,024-operation churn retains 128 recent terminal outcomes in each of Engine and the virtual controller. A separate 1,024-call run leaves zero active calls after completion and retains 128 recent completions. A stalled car leaves another configured car eligible. Flight Recorder and its incident windows capture identity conflict, unexpected and inconsistent receipts, divergence, authority rejection and readiness loss. Detector replay reproduces the incident classifications, and the executable delivery scenario reproduces its Engine outcomes from fresh instances.
+- **Dependencies and evidence.** Core depends on model only. Engine adds no clock, transport, hardware, filesystem or vendor dependency. The executable write-adapter profile validates typed `ServeFloor` and `ParkAt` against the virtual composition. Headless HTTP remains GET-only and has no simulated controller dependency. M6A introduces no external write interface or new infrastructure.
+
+Validation on the closing implementation includes formatting, locked workspace Clippy, 143 passing workspace tests, the actual Rust 1.85.0 workspace check, nine TUI scenarios, and four non-live headless proofs. The separate-process HTTP/SSE soak also passed, including slow-peer shutdown and same-port restart. Official Hotel live proofs were not re-run. External correlation, hardware/sandbox behavior, and production process-crash durability remain outside this evidence.
 
 ## Validated baseline
 
@@ -980,6 +987,6 @@ Reproduce the synthetic Linux process proof with `python3 crates/liftassistant-h
 - **Evidence.** The 136 workspace tests, all-target locked Clippy, formatting, actual Rust 1.85.0 check, executable scenarios and process proofs support the M5 result. Official Hotel evidence belongs to the earlier live runs. The current RMF timing/fault matrix uses deterministic input. BACnet evidence is recorded. The first Flutter runtime result remains scoped to its previously validated builds/environments.
 - **Scope and documentation.** No generic lifecycle, health, adapter or messaging framework was introduced. The audit reconciled current gates and durable architecture in their owning documents. M5.12 stays conditional and deferred.
 
-**M6 entry blockers.** Separate active calls from bounded completed-call/history retention before the general call workload. Design `IntentId`, receipts, idempotency, expiry/cancellation/supersession, write readiness/authority and restart reconciliation before a write-capable path. Review evidence-backed per-car execution floor coverage before dispatch or writes to cars with different service sets.
+**M6 entry gates from the M5 audit.** The virtual call retention, identity, receipt, expiry/cancellation, write-readiness, authority, recovery and execution-floor checks are closed in M6A. External lower-controller guarantees and any controlled supersession design require separate evidence and review.
 
 **M8 hardening debt.** External RMF string/array bounds, CLI HTTP/SSE payload bounds, Flutter reconnect jitter, HTTP connection/rate limits, remote deployment security (TLS/auth and explicit CORS policy), and stable API compatibility remain deferred. Second-family live production validation stays `EXTERNAL_VALIDATION_PENDING`.
