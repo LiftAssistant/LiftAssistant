@@ -27,8 +27,18 @@ pub struct AuthorityGrantId(u64);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuthorityGrant {
-    pub id: AuthorityGrantId,
-    pub principal: PrincipalId,
+    id: AuthorityGrantId,
+    principal: PrincipalId,
+}
+
+impl AuthorityGrant {
+    pub const fn id(&self) -> AuthorityGrantId {
+        self.id
+    }
+
+    pub fn principal(&self) -> &PrincipalId {
+        &self.principal
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,9 +53,16 @@ pub enum AuthorityError {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct IntentRequest {
-    pub id: IntentId,
+    id: IntentId,
     pub intent: Intent,
     pub call: Option<CallId>,
+    original: (Intent, Option<CallId>),
+}
+
+impl IntentRequest {
+    pub const fn id(&self) -> IntentId {
+        self.id
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,6 +76,7 @@ pub struct IntentRecord {
     baseline: ObservationProvenance,
     started_at: CarLocation,
     saw_progress: bool,
+    saw_closed_at_target: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -128,6 +146,9 @@ pub enum ControlledEvent {
     },
 }
 
+/// In-memory proof of virtual restart. This has no persistence or interchange format.
+pub struct VirtualCheckpoint(Engine);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WriteBlocker {
     AuthorityFenced,
@@ -160,6 +181,7 @@ pub(crate) struct ControlledIntents {
     last_grant: u64,
     active: BTreeMap<CarId, IntentRecord>,
     recent: VecDeque<IntentRecord>,
+    last_issued: u64,
     last_admitted: Option<IntentId>,
 }
 
@@ -264,7 +286,27 @@ impl Engine {
         self.controlled.record(id)
     }
 
-    /// Per-request write readiness. The adapter supplies its current availability.
+    /// Issue an identity and retain its original meaning in the caller's opaque request.
+    /// A retry can therefore be checked even after the outcome leaves recent history.
+    pub fn issue_controlled_intent(
+        &mut self,
+        intent: Intent,
+        call: Option<CallId>,
+    ) -> IntentRequest {
+        self.controlled.last_issued = self
+            .controlled
+            .last_issued
+            .checked_add(1)
+            .expect("virtual intent ID space exhausted");
+        IntentRequest {
+            id: IntentId::new(self.controlled.last_issued),
+            original: (intent.clone(), call),
+            intent,
+            call,
+        }
+    }
+
+    /// Per-car readiness for this operation. Admission separately checks request identity.
     pub fn write_readiness(
         &self,
         request: &IntentRequest,
@@ -353,8 +395,11 @@ impl Engine {
         controller: &ControllerId,
         controller_available: bool,
     ) -> Admission {
-        if let Err(reason) = self.controlled.check_grant(request.intent.car(), grant) {
+        if let Err(reason) = self.controlled.check_grant(request.original.0.car(), grant) {
             return Admission::Blocked(reason);
+        }
+        if request.intent != request.original.0 || request.call != request.original.1 {
+            return Admission::IdentityConflict;
         }
         if let Some(record) = self.controlled.record(request.id) {
             return if record.request == request {
@@ -401,6 +446,7 @@ impl Engine {
                 baseline,
                 started_at,
                 saw_progress: false,
+                saw_closed_at_target: false,
             },
         );
         Admission::Admitted
@@ -514,6 +560,87 @@ impl Engine {
         result
     }
 
+    /// Obtain one explicitly correlated receipt after reconnecting. A query never submits.
+    pub fn resynchronize_intent(
+        &mut self,
+        id: IntentId,
+        backend: &impl ControlledIntentSink,
+    ) -> Option<ReceiptResult> {
+        let expected = &self.intent_record(id)?.controller;
+        if backend.controller_id() != expected {
+            return Some(ReceiptResult::Unexpected);
+        }
+        let receipt = backend.receipt(id)?;
+        if receipt.intent != id {
+            self.diagnostics
+                .record_controlled(ControlledEvent::Receipt {
+                    receipt,
+                    result: ReceiptResult::Unexpected,
+                });
+            return Some(ReceiptResult::Unexpected);
+        }
+        Some(self.receive_intent_receipt(receipt))
+    }
+
+    /// The host reports loss of the command channel independently of observations.
+    pub fn controlled_transport_lost(&mut self, controller: &ControllerId) {
+        for record in self
+            .controlled
+            .active
+            .values_mut()
+            .filter(|r| &r.controller == controller)
+        {
+            let intent = record.request.id;
+            if record.receipt == Receipt::Awaiting {
+                record.receipt = Receipt::Indeterminate;
+                self.diagnostics
+                    .record_controlled(ControlledEvent::Receipt {
+                        receipt: IntentReceipt {
+                            intent,
+                            controller: controller.clone(),
+                            status: ReceiptStatus::Indeterminate,
+                        },
+                        result: ReceiptResult::Recorded,
+                    });
+            }
+            self.diagnostics
+                .record_controlled(ControlledEvent::ReadinessLost {
+                    intent,
+                    reason: WriteBlocker::ControllerUnavailable,
+                });
+        }
+    }
+
+    /// Consume this orchestration lifetime. No delivery or operation is inferred from
+    /// taking a checkpoint.
+    pub fn into_virtual_checkpoint(self) -> VirtualCheckpoint {
+        VirtualCheckpoint(self)
+    }
+
+    pub fn restore_virtual(checkpoint: VirtualCheckpoint) -> Self {
+        let mut engine = checkpoint.0;
+        engine.controlled.grants.clear();
+        for record in engine.controlled.active.values_mut() {
+            if record.receipt == Receipt::Awaiting {
+                record.receipt = Receipt::Indeterminate;
+            }
+            let car = record.request.intent.car();
+            if let Some(source) = engine.operational_authorities.get(car) {
+                if let Some(session) = engine.active_source_sessions.get(source) {
+                    if let Some(evidence) = engine.observations.current(source, session, car) {
+                        record.baseline = evidence.latest_provenance.clone();
+                    }
+                }
+            }
+        }
+        for (source, session) in engine.active_source_sessions.clone() {
+            engine
+                .invalidate_source_observations(source, session)
+                .expect("current source session");
+        }
+        engine
+    }
+
     fn apply_intent_receipt(&mut self, receipt: &IntentReceipt) -> ReceiptResult {
         let Some(record) = self.controlled.record_mut(receipt.intent) else {
             return ReceiptResult::Unexpected;
@@ -527,6 +654,12 @@ impl Engine {
             ReceiptStatus::Indeterminate => Receipt::Indeterminate,
         };
         if record.receipt == next {
+            return ReceiptResult::Duplicate;
+        }
+        if next == Receipt::Indeterminate
+            && matches!(record.receipt, Receipt::Accepted | Receipt::Rejected)
+        {
+            // Transport loss can no longer make an already known receipt uncertain.
             return ReceiptResult::Duplicate;
         }
         match record.receipt {
@@ -599,7 +732,16 @@ impl Engine {
             record.saw_progress |=
                 !stopped || position(state.location) != position(record.started_at);
             if stopped && at_floor && floor == requested {
-                record.reconciliation = Reconciliation::Satisfied;
+                let new_door = evidence
+                    .door
+                    .as_ref()
+                    .is_some_and(|sample| newer(&sample.provenance));
+                record.saw_closed_at_target |= new_door && state.door == DoorState::Closed;
+                if record.saw_progress
+                    || (record.saw_closed_at_target && new_door && state.door == DoorState::Open)
+                {
+                    record.reconciliation = Reconciliation::Satisfied;
+                }
             } else if stopped
                 && at_floor
                 && record.saw_progress
@@ -717,14 +859,13 @@ mod tests {
             .grant_authority(&car, PrincipalId::new("test"))
             .unwrap();
         observe(&mut engine, &CarState::new("A", Floor::new(1)), 1);
-        let request = IntentRequest {
-            id: IntentId::new(1),
-            intent: Intent::ParkAt {
+        let request = engine.issue_controlled_intent(
+            Intent::ParkAt {
                 car,
                 floor: Floor::new(5),
             },
-            call: None,
-        };
+            None,
+        );
         assert_eq!(
             engine.submit_controlled(request.clone(), &grant, &mut backend),
             Admission::Admitted
@@ -741,10 +882,7 @@ mod tests {
             engine.submit_controlled(request.clone(), &grant, &mut backend),
             Admission::Retry
         );
-        let replacement = IntentRequest {
-            id: IntentId::new(2),
-            ..request.clone()
-        };
+        let replacement = engine.issue_controlled_intent(request.intent.clone(), None);
         assert_eq!(
             engine.submit_controlled(replacement, &grant, &mut backend),
             Admission::Blocked(WriteBlocker::ActiveIntent(request.id))
@@ -794,12 +932,8 @@ mod tests {
         else {
             panic!("new call");
         };
-        let id = IntentId::new(1);
-        let request = IntentRequest {
-            id,
-            call: Some(call),
-            intent: Intent::ServeFloor { car, floor },
-        };
+        let request = engine.issue_controlled_intent(Intent::ServeFloor { car, floor }, Some(call));
+        let id = request.id();
         assert_eq!(
             engine.submit_controlled(request, &grant, &mut controller),
             Admission::Admitted
@@ -852,14 +986,13 @@ mod tests {
             engine.grant_authority(&car, PrincipalId::new("other")),
             Err(AuthorityError::AlreadyGranted)
         );
-        let mut request = IntentRequest {
-            id: IntentId::new(1),
-            intent: Intent::ServeFloor {
+        let mut request = engine.issue_controlled_intent(
+            Intent::ServeFloor {
                 car: car.clone(),
                 floor: Floor::new(5),
             },
-            call: None,
-        };
+            None,
+        );
         assert_eq!(
             engine.admit_virtual_intent(request.clone(), &grant, &controller, true),
             Admission::Blocked(WriteBlocker::ObservationUnavailable)

@@ -118,10 +118,19 @@ impl VirtualController {
         self.connected = connected;
     }
 
-    /// The endpoint loses its client connection. Its accepted operations and the
-    /// separate simulated world survive this particular restart fixture.
-    pub fn restart(&mut self) {
-        self.set_connected(false);
+    /// Replace the endpoint, losing its notification queue and volatile fault
+    /// settings. The accepted jobs, receipt lookup, and world survive this fixture.
+    pub fn restart(mut self) -> Self {
+        self.connected = false;
+        self.next_behavior = VirtualBehavior::default();
+        for operation in self
+            .operations
+            .values_mut()
+            .filter(|operation| !operation.receipt_sent)
+        {
+            operation.behavior.receipt = VirtualReceipt::Lost;
+        }
+        self
     }
 
     pub fn submissions(&self) -> u64 {

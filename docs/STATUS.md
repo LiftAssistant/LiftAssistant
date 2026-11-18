@@ -12,7 +12,7 @@ M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slic
 
 **M6A — Controlled Intent Semantics (virtual).** M5 remains complete at its read-only milestone boundary. The HUMAN authorization covers M6.0–M6.8 and the M6A audit. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`.
 
-**M6.0–M6.6 implemented. M6.7 is READY.** Completed calls and terminal intents each retain up to 128 recent records. Dispatch uses explicit per-car floor capabilities. Controlled admission fences revoked grants and explains readiness blocks. Controller receipt by IntentId and reconciliation from new Operational position and motion are independent. A hall call also requires open-door evidence. Withdrawal preserves the conflict guard while outcomes are unresolved. The concrete VirtualController drives delivery faults and delayed jobs around SimRuntime physics.
+**M6.0–M6.7 implemented. M6.8 is READY.** The executable virtual fault and restart matrix checks lost and rejected receipts, exact identity conflicts, authority and Auxiliary isolation, withdrawal, stalled and divergent movement, and restore with no new execution. The churn case runs 1,024 operations through one car and retains 128 terminal outcomes per owner. A late transport uncertainty signal cannot overwrite a definitive receipt. Unchanged same-floor evidence cannot satisfy a still-queued operation.
 
 ## Validated baseline
 

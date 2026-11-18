@@ -300,12 +300,12 @@ impl SequenceDetector {
                         request,
                         result: Admission::IdentityConflict,
                         ..
-                    } => (request.id, Issue::IdentityConflict),
+                    } => (request.id(), Issue::IdentityConflict),
                     ControlledEvent::Admission {
                         request,
                         result: Admission::Blocked(WriteBlocker::AuthorityFenced),
                         ..
-                    } => (request.id, Issue::AuthorityFenced),
+                    } => (request.id(), Issue::AuthorityFenced),
                     ControlledEvent::Receipt {
                         receipt,
                         result: ReceiptResult::Unexpected,

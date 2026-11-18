@@ -5,6 +5,7 @@ mod app;
 mod replay;
 mod scenario;
 mod ui;
+mod virtual_validation;
 
 use std::{env, io, time::Instant};
 
