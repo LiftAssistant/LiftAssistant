@@ -7,7 +7,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub use controlled::{
     Admission, AuthorityError, AuthorityGrant, AuthorityGrantId, ControlledEvent, IntentRecord,
-    IntentRequest, PrincipalId, Receipt, ReceiptResult, Reconciliation, WriteBlocker,
+    IntentRequest, PrincipalId, Receipt, ReceiptResult, Reconciliation, WithdrawalError,
+    WithdrawalReason, WriteBlocker,
 };
 pub use diagnostics::{
     ControlledIssue, DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, DiagnosticSequence,

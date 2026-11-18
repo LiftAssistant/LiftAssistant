@@ -48,11 +48,27 @@ pub struct IntentReceipt {
     pub status: ReceiptStatus,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WithdrawalOutcome {
+    /// The controller can prove execution will not start.
+    Prevented,
+    /// A withdrawal was requested, but physical execution remains uncertain.
+    Requested,
+    Unsupported,
+}
+
 /// A receipt and canonical observations arrive separately from submission.
 pub trait ControlledIntentSink {
     fn controller_id(&self) -> &ControllerId;
     fn available(&self, car: &CarId) -> bool;
     fn submit(&mut self, id: IntentId, intent: &Intent) -> Submission;
+    fn withdraw(&mut self, _id: IntentId) -> WithdrawalOutcome {
+        WithdrawalOutcome::Unsupported
+    }
+
+    fn receipt(&self, _id: IntentId) -> Option<IntentReceipt> {
+        None
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -6,7 +6,7 @@ use liftassistant_model::{
 };
 use liftassistant_runtime::{
     AssembledCarObservation, ControlledIntentSink, ControllerId, IntentReceipt, ReceiptStatus,
-    Submission,
+    Submission, WithdrawalOutcome,
 };
 
 use crate::Engine;
@@ -55,6 +55,7 @@ pub struct IntentRecord {
     pub authority: AuthorityGrant,
     pub receipt: Receipt,
     pub reconciliation: Reconciliation,
+    pub withdrawal: Option<(WithdrawalReason, WithdrawalOutcome)>,
     baseline: ObservationProvenance,
     started_at: CarLocation,
     saw_progress: bool,
@@ -84,6 +85,20 @@ pub enum ReceiptResult {
     Inconsistent,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WithdrawalReason {
+    Cancelled,
+    Expired,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WithdrawalError {
+    Inactive,
+    AlreadyWithdrawn,
+    WrongController,
+    AuthorityFenced,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ControlledEvent {
     Admission {
@@ -105,6 +120,11 @@ pub enum ControlledEvent {
     ReadinessLost {
         intent: IntentId,
         reason: WriteBlocker,
+    },
+    Withdrawn {
+        intent: IntentId,
+        reason: WithdrawalReason,
+        outcome: WithdrawalOutcome,
     },
 }
 
@@ -236,6 +256,7 @@ impl Engine {
             .check_grant(car, grant)
             .map_err(|_| AuthorityError::Fenced)?;
         self.controlled.grants.remove(car);
+        self.note_controlled_readiness_loss(car, WriteBlocker::AuthorityFenced);
         Ok(())
     }
 
@@ -376,6 +397,7 @@ impl Engine {
                 authority: grant.clone(),
                 receipt: Receipt::NotSubmitted,
                 reconciliation: Reconciliation::Pending,
+                withdrawal: None,
                 baseline,
                 started_at,
                 saw_progress: false,
@@ -421,6 +443,68 @@ impl Engine {
             }
         }
         admission
+    }
+
+    pub fn cancel_controlled_intent(
+        &mut self,
+        id: IntentId,
+        grant: &AuthorityGrant,
+        backend: &mut impl ControlledIntentSink,
+    ) -> Result<WithdrawalOutcome, WithdrawalError> {
+        let record = self
+            .controlled
+            .record(id)
+            .ok_or(WithdrawalError::Inactive)?;
+        self.controlled
+            .check_grant(record.request.intent.car(), grant)
+            .map_err(|_| WithdrawalError::AuthorityFenced)?;
+        self.withdraw_controlled(id, WithdrawalReason::Cancelled, backend)
+    }
+
+    /// The host decides when to issue this action and owns the clock.
+    pub fn expire_controlled_intent(
+        &mut self,
+        id: IntentId,
+        backend: &mut impl ControlledIntentSink,
+    ) -> Result<WithdrawalOutcome, WithdrawalError> {
+        self.withdraw_controlled(id, WithdrawalReason::Expired, backend)
+    }
+
+    fn withdraw_controlled(
+        &mut self,
+        id: IntentId,
+        reason: WithdrawalReason,
+        backend: &mut impl ControlledIntentSink,
+    ) -> Result<WithdrawalOutcome, WithdrawalError> {
+        let record = self
+            .controlled
+            .active
+            .values_mut()
+            .find(|record| record.request.id == id)
+            .ok_or(WithdrawalError::Inactive)?;
+        if record.withdrawal.is_some() {
+            return Err(WithdrawalError::AlreadyWithdrawn);
+        }
+        if backend.controller_id() != &record.controller {
+            return Err(WithdrawalError::WrongController);
+        }
+        let outcome = backend.withdraw(id);
+        record.withdrawal = Some((reason, outcome));
+        let car = record.request.intent.car().clone();
+        self.diagnostics
+            .record_controlled(ControlledEvent::Withdrawn {
+                intent: id,
+                reason,
+                outcome,
+            });
+        // Cancellation never changes observed motion. Release only on explicit
+        // prevention or an already-observed physical outcome.
+        if outcome == WithdrawalOutcome::Prevented
+            || record.reconciliation != Reconciliation::Pending
+        {
+            self.controlled.finish(&car);
+        }
+        Ok(outcome)
     }
 
     pub fn receive_intent_receipt(&mut self, receipt: IntentReceipt) -> ReceiptResult {
@@ -551,7 +635,7 @@ impl Engine {
         match record.reconciliation {
             Reconciliation::Pending => return,
             Reconciliation::Satisfied => {
-                if let Some(call) = record.request.call {
+                if let Some(call) = record.request.call.filter(|_| record.withdrawal.is_none()) {
                     if !stopped
                         || !at_floor
                         || floor != requested
@@ -607,6 +691,69 @@ mod tests {
         fn submit(&mut self, _id: IntentId, _intent: &Intent) -> Submission {
             Submission::Submitted
         }
+    }
+
+    #[test]
+    fn unsupported_expiry_keeps_the_uncertain_operation_and_blocks_supersession() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let car = CarId::new("A");
+        let source = ObservationSourceId::new("physical");
+        let mut backend = TestController(ControllerId::new("virtual"));
+        engine
+            .bind_controlled_car(car.clone(), backend.0.clone())
+            .unwrap();
+        engine
+            .bind_observation(
+                source.clone(),
+                car.clone(),
+                crate::ObservationBindingRole::Operational,
+            )
+            .unwrap();
+        engine
+            .begin_source_session(source, ObservationSessionId::new("test-incarnation"))
+            .unwrap();
+        engine.set_execution_capabilities(car.clone(), ExecutionCapabilities::reference_defaults());
+        let grant = engine
+            .grant_authority(&car, PrincipalId::new("test"))
+            .unwrap();
+        observe(&mut engine, &CarState::new("A", Floor::new(1)), 1);
+        let request = IntentRequest {
+            id: IntentId::new(1),
+            intent: Intent::ParkAt {
+                car,
+                floor: Floor::new(5),
+            },
+            call: None,
+        };
+        assert_eq!(
+            engine.submit_controlled(request.clone(), &grant, &mut backend),
+            Admission::Admitted
+        );
+        assert_eq!(
+            engine.expire_controlled_intent(request.id, &mut backend),
+            Ok(WithdrawalOutcome::Unsupported)
+        );
+        assert_eq!(
+            engine.intent_record(request.id).unwrap().withdrawal,
+            Some((WithdrawalReason::Expired, WithdrawalOutcome::Unsupported))
+        );
+        assert_eq!(
+            engine.submit_controlled(request.clone(), &grant, &mut backend),
+            Admission::Retry
+        );
+        let replacement = IntentRequest {
+            id: IntentId::new(2),
+            ..request.clone()
+        };
+        assert_eq!(
+            engine.submit_controlled(replacement, &grant, &mut backend),
+            Admission::Blocked(WriteBlocker::ActiveIntent(request.id))
+        );
+        observe(&mut engine, &CarState::new("A", Floor::new(5)), 2);
+        assert_eq!(
+            engine.intent_record(request.id).unwrap().reconciliation,
+            Reconciliation::Satisfied
+        );
     }
 
     #[test]

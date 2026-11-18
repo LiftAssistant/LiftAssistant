@@ -12,7 +12,7 @@ M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slic
 
 **M6A — Controlled Intent Semantics (virtual).** M5 remains complete at its read-only milestone boundary. The HUMAN authorization covers M6.0–M6.8 and the M6A audit. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`.
 
-**M6.0–M6.4 implemented. M6.5 is READY.** Completed calls and terminal intents each retain up to 128 recent records. Dispatch uses explicit per-car floor capabilities. Controlled admission fences revoked grants and explains readiness blocks. Controller receipt by IntentId and reconciliation from new Operational position and motion are independent. A hall call also requires open-door evidence.
+**M6.0–M6.5 implemented. M6.6 is READY.** Completed calls and terminal intents each retain up to 128 recent records. Dispatch uses explicit per-car floor capabilities. Controlled admission fences revoked grants and explains readiness blocks. Controller receipt by IntentId and reconciliation from new Operational position and motion are independent. A hall call also requires open-door evidence. Explicit cancellation and host-driven expiry preserve the conflict guard until the lower controller proves prevention or the operational evidence resolves the outcome.
 
 ## Validated baseline
 
