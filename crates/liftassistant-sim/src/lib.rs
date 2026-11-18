@@ -2,6 +2,7 @@
 
 mod bacnet_recorded;
 mod recorded;
+mod virtual_controller;
 
 use std::{collections::BTreeMap, time::Duration};
 
@@ -22,6 +23,9 @@ pub use liftassistant_rmf::{
     RmfSourceContext, map_rmf_lift_state, map_rmf_lift_state_with_projection,
 };
 pub use recorded::{ObservationCoverage, RecordedFrame, RecordedRuntime};
+pub use virtual_controller::{
+    VirtualBehavior, VirtualController, VirtualExecution, VirtualReceipt, VirtualStep,
+};
 
 #[derive(Debug)]
 struct SimCar {
@@ -144,10 +148,9 @@ impl SimRuntime {
         self.reject_next_intent = true;
     }
 
-    fn set_target(&mut self, intent: Intent) -> Result<(), RuntimeError> {
-        let (car_id, floor) = match &intent {
-            Intent::ServeFloor { car, floor } | Intent::ParkAt { car, floor } => (car, *floor),
-        };
+    fn set_target(&mut self, intent: &Intent) -> Result<(), RuntimeError> {
+        let car_id = intent.car();
+        let floor = intent.floor();
 
         let state = {
             let sim_car = self
@@ -201,8 +204,6 @@ impl SimRuntime {
         };
 
         self.queue_observation(state);
-        self.pending_events
-            .push(RuntimeEvent::IntentAccepted(intent));
         Ok(())
     }
 
@@ -228,7 +229,10 @@ impl IntentSink for SimRuntime {
                 "simulator injected one-shot intent rejection",
             ));
         }
-        self.set_target(intent)
+        self.set_target(&intent)?;
+        self.pending_events
+            .push(RuntimeEvent::IntentAccepted(intent));
+        Ok(())
     }
 }
 
