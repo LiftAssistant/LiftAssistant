@@ -91,6 +91,14 @@ cargo run -p liftassistant-tui -- --scenario adapter-validation-profiles
 
 The scenario applies one bounded checklist to the concrete Open-RMF adapter and recorded BACnet mapper: explicit native-to-logical identity, Engine binding, source sessions, source-global sequence, ambiguity preservation, restart invalidation, canonical Engine ownership, and an observation-only path. Its report keeps RMF's official live-plus-recorded evidence separate from BACnet's recorded-only evidence. These are deterministic engineering checks, not certification, conformance, safety validation, or evidence of a live BACnet endpoint.
 
+Run the M6A virtual write-adapter profile without a TTY:
+
+```bash
+cargo run -p liftassistant-tui -- --scenario m6a-write-adapter-profile
+```
+
+The profile checks the simulated `ServeFloor` and `ParkAt` boundary for controller binding, per-car execution floors, readiness, grant fencing, IntentId idempotency, correlated receipts, canonical observation reconciliation, cancellation, and restart without resend. It includes the deterministic fault matrix and bounded diagnostic replay. Its evidence applies to VirtualController and SimRuntime inside this process. The headless API and its clients continue to expose read-only observations.
+
 Inspect bounded diagnostic capture and deterministic incident replay:
 
 ~~~bash

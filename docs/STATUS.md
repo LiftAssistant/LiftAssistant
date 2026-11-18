@@ -12,7 +12,9 @@ M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slic
 
 **M6A — Controlled Intent Semantics (virtual).** M5 remains complete at its read-only milestone boundary. The HUMAN authorization covers M6.0–M6.8 and the M6A audit. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`.
 
-**M6.0–M6.7 implemented. M6.8 is READY.** The executable virtual fault and restart matrix checks lost and rejected receipts, exact identity conflicts, authority and Auxiliary isolation, withdrawal, stalled and divergent movement, and restore with no new execution. The churn case runs 1,024 operations through one car and retains 128 terminal outcomes per owner. A late transport uncertainty signal cannot overwrite a definitive receipt. Unchanged same-floor evidence cannot satisfy a still-queued operation.
+**M6.0–M6.7 implemented.** The executable virtual fault and restart matrix checks lost and rejected receipts, exact identity conflicts, authority and Auxiliary isolation, withdrawal, stalled and divergent movement, and restore with no new execution. The churn case runs 1,024 operations through one car and retains 128 terminal outcomes per owner. A late transport uncertainty signal cannot overwrite a definitive receipt. Unchanged same-floor evidence cannot satisfy a still-queued operation.
+
+**M6.8 implemented. M6A completion audit is READY.** The internal write-adapter profile runs the fault matrix and checks that a different controller cannot receive the operation and that current Operational evidence alone cannot make a disconnected controller write-ready.
 
 ## Validated baseline
 

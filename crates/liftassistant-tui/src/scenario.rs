@@ -35,7 +35,8 @@ pub const BACNET_RECORDED_SCENARIO: &str = "bacnet-recorded-read-only";
 pub const DIAGNOSTIC_SCENARIO: &str = "diagnostic-incident-replay";
 pub const ADAPTER_VALIDATION_SCENARIO: &str = "adapter-validation-profiles";
 pub const VIRTUAL_INTENTS_SCENARIO: &str = "m6a-virtual-intents";
-pub const SCENARIOS: [&str; 8] = [
+pub const WRITE_PROFILE_SCENARIO: &str = "m6a-write-adapter-profile";
+pub const SCENARIOS: [&str; 9] = [
     REFERENCE_SCENARIO,
     REJECTION_SCENARIO,
     RECORDED_SCENARIO,
@@ -44,6 +45,7 @@ pub const SCENARIOS: [&str; 8] = [
     DIAGNOSTIC_SCENARIO,
     ADAPTER_VALIDATION_SCENARIO,
     VIRTUAL_INTENTS_SCENARIO,
+    WRITE_PROFILE_SCENARIO,
 ];
 
 pub fn run(name: &str) -> Result<String, String> {
@@ -56,6 +58,7 @@ pub fn run(name: &str) -> Result<String, String> {
         DIAGNOSTIC_SCENARIO => run_diagnostic_scenario(),
         ADAPTER_VALIDATION_SCENARIO => adapter_validation::run(),
         VIRTUAL_INTENTS_SCENARIO => crate::virtual_validation::run(),
+        WRITE_PROFILE_SCENARIO => crate::virtual_validation::run_profile(),
         _ => Err(format!(
             "unknown scenario {name:?}; available scenarios: {}",
             SCENARIOS.join(", ")

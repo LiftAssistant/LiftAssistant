@@ -650,10 +650,41 @@ pub fn run() -> Result<String, String> {
     .to_owned())
 }
 
+pub fn run_profile() -> Result<String, String> {
+    let mut lab = Lab::new(true);
+    let request = lab.issue(7);
+    let mut unbound = VirtualController::new(
+        ControllerId::new("unbound-controller"),
+        SimRuntime::reference_two_car(),
+        false,
+    );
+    check(
+        lab.engine
+            .submit_controlled(request.clone(), &lab.a_grant, &mut unbound)
+            == Admission::Blocked(WriteBlocker::WrongController)
+            && unbound.submissions() == 0,
+        "an unbound backend received an operation",
+    )?;
+    lab.controller.set_connected(false);
+    check(
+        lab.engine.operational_car_state(&lab.a).is_some()
+            && lab.submit(&request) == Admission::Blocked(WriteBlocker::ControllerUnavailable)
+            && lab.controller.submissions() == 0,
+        "read-ready incorrectly implied write-ready",
+    )?;
+    let matrix = run()?;
+    Ok(format!(
+        "M6A VirtualController write-adapter profile PASS (internal engineering only)\n\
+         \x20 explicit controller binding, execution floors, and current write readiness\n\
+         \x20 authority independent of the controller connection and receipts by IntentId\n\
+         \x20 typed virtual ServeFloor and ParkAt boundary\n{matrix}"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
-    fn virtual_failure_and_restart_matrix() {
-        super::run().unwrap();
+    fn virtual_write_adapter_profile() {
+        super::run_profile().unwrap();
     }
 }
