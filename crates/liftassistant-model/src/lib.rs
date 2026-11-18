@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CarId(String);
@@ -204,14 +204,24 @@ impl fmt::Display for ReportedDestination {
 pub struct ExecutionCapabilities {
     pub serve_floor: bool,
     pub park: bool,
+    floors: BTreeSet<Floor>,
 }
 
 impl ExecutionCapabilities {
-    pub const fn reference_defaults() -> Self {
+    pub fn new(serve_floor: bool, park: bool, floors: impl IntoIterator<Item = Floor>) -> Self {
         Self {
-            serve_floor: true,
-            park: true,
+            serve_floor,
+            park,
+            floors: floors.into_iter().collect(),
         }
+    }
+
+    pub fn supports_floor(&self, floor: Floor) -> bool {
+        self.floors.contains(&floor)
+    }
+
+    pub fn reference_defaults() -> Self {
+        Self::new(true, true, (1..=8).map(Floor::new))
     }
 }
 

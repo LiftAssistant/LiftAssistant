@@ -303,6 +303,7 @@ fn rejection_label(rejection: &DispatchRejection) -> &'static str {
         DispatchRejection::Busy => "Busy",
         DispatchRejection::CapabilitiesUnavailable => "CapabilitiesUnknown",
         DispatchRejection::ServeFloorUnsupported => "ServeFloorUnsupported",
+        DispatchRejection::UnsupportedFloor(_) => "UnsupportedFloor",
     }
 }
 

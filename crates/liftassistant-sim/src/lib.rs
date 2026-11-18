@@ -172,6 +172,11 @@ impl SimRuntime {
                     "car {car_id} does not expose {capability}"
                 )));
             }
+            if !sim_car.execution_capabilities.supports_floor(floor) {
+                return Err(RuntimeError::new(format!(
+                    "car {car_id} cannot execute at floor {floor}"
+                )));
+            }
 
             let current = match sim_car.state.location {
                 CarLocation::Floor(floor) => f64::from(floor.index()),
@@ -394,10 +399,7 @@ mod tests {
         let mut runtime = SimRuntime::new(
             [(
                 state,
-                ExecutionCapabilities {
-                    serve_floor: true,
-                    park: false,
-                },
+                ExecutionCapabilities::new(true, false, (1..=8).map(Floor::new)),
             )],
             1.5,
         );
