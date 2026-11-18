@@ -19,6 +19,21 @@ String formatDiagnosticLayerLabel(DiagnosticLayer layer) {
   }
 }
 
+IconData diagnosticLayerIcon(DiagnosticLayer layer) {
+  switch (layer) {
+    case DiagnosticLayer.transport:
+      return Icons.swap_horiz_rounded;
+    case DiagnosticLayer.source:
+      return Icons.hub_outlined;
+    case DiagnosticLayer.mapping:
+      return Icons.account_tree_outlined;
+    case DiagnosticLayer.observation:
+      return Icons.visibility_outlined;
+    case DiagnosticLayer.readiness:
+      return Icons.verified_outlined;
+  }
+}
+
 class DiagnosticsFilterController extends ChangeNotifier {
   DiagnosticsFilterController() {
     searchController.addListener(_onSearchChanged);
@@ -230,6 +245,8 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
                     icon: const Icon(Icons.arrow_forward_rounded, size: 16),
                     label: Text(
                       'Inspect all ${widget.diagnostics.length} diagnostics',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -313,7 +330,6 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
               decoration: BoxDecoration(
                 color: palette.elevatedSurface,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: palette.border),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
@@ -458,7 +474,6 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
           style: FilledButton.styleFrom(
             backgroundColor: palette.elevatedSurface,
             foregroundColor: palette.subtleText,
-            side: BorderSide(color: palette.border),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             minimumSize: const Size(0, 38),
             shape: RoundedRectangleBorder(
@@ -544,6 +559,17 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
                 children: <Widget>[
                   FilterChip(
                     key: const Key('diag-filter-all'),
+                    avatar: constraints.maxWidth >= 560 && textScale <= 1.25
+                        ? Icon(
+                            Icons.apps_rounded,
+                            size: 14,
+                            color:
+                                controller.selectedLayer == null &&
+                                    controller.selectedRole == null
+                                ? palette.info
+                                : palette.mutedText,
+                          )
+                        : null,
                     label: const Text('All'),
                     selected:
                         controller.selectedLayer == null &&
@@ -555,6 +581,15 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
                   for (final DiagnosticLayer layer in DiagnosticLayer.values)
                     FilterChip(
                       key: Key('diag-filter-layer-${layer.wireValue}'),
+                      avatar: constraints.maxWidth >= 560 && textScale <= 1.25
+                          ? Icon(
+                              diagnosticLayerIcon(layer),
+                              size: 14,
+                              color: controller.selectedLayer == layer
+                                  ? palette.info
+                                  : palette.mutedText,
+                            )
+                          : null,
                       label: Text(formatDiagnosticLayerLabel(layer)),
                       selected: controller.selectedLayer == layer,
                       showCheckmark: false,
@@ -707,12 +742,11 @@ class _DiagnosticLogRow extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
-                      vertical: 3,
+                      vertical: 3.5,
                     ),
                     decoration: BoxDecoration(
                       color: palette.elevatedSurface,
                       borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: palette.border),
                     ),
                     child: Text(
                       '#${entry.sequence}',
@@ -728,7 +762,7 @@ class _DiagnosticLogRow extends StatelessWidget {
                     label: formatDiagnosticLayerLabel(entry.layer),
                     foreground: layerFg,
                     background: layerBg,
-                    dotColor: layerFg,
+                    icon: diagnosticLayerIcon(entry.layer),
                     tooltip: 'Diagnostic layer: ${entry.layer.wireValue}',
                   ),
                   Text(
@@ -835,11 +869,10 @@ class _DiagnosticContextChip extends StatelessWidget {
         accentColor ?? Theme.of(context).colorScheme.onSurface;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8.5, vertical: 4.5),
       decoration: BoxDecoration(
         color: palette.elevatedSurface,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: palette.border),
+        borderRadius: BorderRadius.circular(7),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

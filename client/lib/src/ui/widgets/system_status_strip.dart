@@ -5,34 +5,64 @@ import '../../state/client_state.dart';
 import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
 
-(String, Color, Color, bool) describeConnectionPhase(
+(String, Color, Color, IconData) describeConnectionPhase(
   ConnectionPhase phase,
   InstrumentPalette palette,
 ) {
   switch (phase) {
     case ConnectionPhase.live:
-      return ('LIVE SSE', palette.ok, palette.okContainer, false);
+      return (
+        'LIVE SSE',
+        palette.ok,
+        palette.okContainer,
+        Icons.sensors_rounded,
+      );
     case ConnectionPhase.attachingStream:
-      return ('ATTACHING', palette.info, palette.infoContainer, true);
+      return (
+        'ATTACHING',
+        palette.info,
+        palette.infoContainer,
+        Icons.sync_rounded,
+      );
     case ConnectionPhase.connecting:
-      return ('CONNECTING', palette.info, palette.infoContainer, true);
+      return (
+        'CONNECTING',
+        palette.info,
+        palette.infoContainer,
+        Icons.sync_rounded,
+      );
     case ConnectionPhase.reconnecting:
-      return ('RECONNECTING', palette.caution, palette.cautionContainer, true);
+      return (
+        'RECONNECTING',
+        palette.caution,
+        palette.cautionContainer,
+        Icons.sync_problem_rounded,
+      );
     case ConnectionPhase.incompatibleApi:
       return (
         'UNSUPPORTED API',
         palette.danger,
         palette.dangerContainer,
-        false,
+        Icons.block_rounded,
       );
     case ConnectionPhase.protocolError:
-      return ('PROTOCOL ERR', palette.danger, palette.dangerContainer, false);
+      return (
+        'PROTOCOL ERR',
+        palette.danger,
+        palette.dangerContainer,
+        Icons.error_outline_rounded,
+      );
     case ConnectionPhase.disconnected:
-      return ('OFFLINE', palette.neutral, palette.neutralContainer, true);
+      return (
+        'OFFLINE',
+        palette.neutral,
+        palette.neutralContainer,
+        Icons.cloud_off_outlined,
+      );
   }
 }
 
-(String, String, Color, Color, bool, IconData) describeHostLifecycle(
+(String, String, Color, Color, IconData) describeHostLifecycle(
   HostLifecycle lifecycle,
   InstrumentPalette palette,
 ) {
@@ -43,7 +73,6 @@ import 'semantic_badge.dart';
         'Host process started; awaiting initial observation activity.',
         palette.info,
         palette.infoContainer,
-        true,
         Icons.hourglass_top_rounded,
       );
     case HostLifecycle.synchronizing:
@@ -52,7 +81,6 @@ import 'semantic_badge.dart';
         'Ingesting observations; complete operational state not yet established.',
         palette.caution,
         palette.cautionContainer,
-        true,
         Icons.sync_rounded,
       );
     case HostLifecycle.readyReadOnly:
@@ -61,7 +89,6 @@ import 'semantic_badge.dart';
         'Complete operational state established for all configured Operational cars.',
         palette.ok,
         palette.okContainer,
-        false,
         Icons.check_circle_outline_rounded,
       );
     case HostLifecycle.degraded:
@@ -70,13 +97,12 @@ import 'semantic_badge.dart';
         'Operational invariant violation or rejection revoked readiness.',
         palette.danger,
         palette.dangerContainer,
-        false,
         Icons.warning_amber_rounded,
       );
   }
 }
 
-(String, String, Color, Color, bool, IconData) describeHostReadiness(
+(String, String, Color, Color, IconData) describeHostReadiness(
   HostReadiness readiness,
   InstrumentPalette palette,
 ) {
@@ -87,7 +113,6 @@ import 'semantic_badge.dart';
         'Read-side operational projection is synchronized.',
         palette.ok,
         palette.okContainer,
-        false,
         Icons.verified_outlined,
       );
     case HostReadiness.notReady:
@@ -96,7 +121,6 @@ import 'semantic_badge.dart';
         'Process reachable does not mean operational data is ready.',
         palette.caution,
         palette.cautionContainer,
-        true,
         Icons.pending_outlined,
       );
   }
@@ -104,8 +128,8 @@ import 'semantic_badge.dart';
 
 /// Top 4-card M3 Host Status Strip + conditional alert banners.
 /// Displays explicit field labels (`Host Lifecycle`, `Read Readiness`,
-/// `Host Revision`, `Snapshot Summary`) with zero AI prose essays and zero
-/// duplicate `snake_case` wire tags.
+/// `Host Revision`, `Snapshot Summary`) with Material 3 avatars and chips,
+/// zero `●`/`·` cheap separators, and zero duplicate `snake_case` wire tags.
 class SystemStatusStrip extends StatelessWidget {
   const SystemStatusStrip({
     super.key,
@@ -169,7 +193,6 @@ class _HostStatusGrid extends StatelessWidget {
       String lifecycleTip,
       Color lifecycleFg,
       Color lifecycleBg,
-      bool lifecycleHollow,
       IconData lifecycleIcon,
     ) = describeHostLifecycle(
       snapshot.lifecycle,
@@ -181,7 +204,6 @@ class _HostStatusGrid extends StatelessWidget {
       String readinessTip,
       Color readinessFg,
       Color readinessBg,
-      bool readinessHollow,
       IconData readinessIcon,
     ) = describeHostReadiness(
       snapshot.readiness,
@@ -199,101 +221,124 @@ class _HostStatusGrid extends StatelessWidget {
     final int carsCount = snapshot.operationalCars.length;
     final int sourcesCount = snapshot.sources.length;
     final int diagCount = snapshot.recentDiagnostics.length;
-    final String summaryValue =
-        '$carsCount ${carsCount == 1 ? "Car" : "Cars"} · '
+    final String carsBadgeLabel =
+        '$carsCount ${carsCount == 1 ? "Car" : "Cars"}';
+    final String sourcesBadgeLabel =
         '$sourcesCount ${sourcesCount == 1 ? "Source" : "Sources"}';
     final String eventsBadgeLabel =
         '$diagCount ${diagCount == 1 ? "Event" : "Events"}';
-
-    final List<Widget> cards = <Widget>[
-      _StatusStripCard(
-        key: const Key('status-card-lifecycle'),
-        icon: lifecycleIcon,
-        iconForeground: lifecycleFg,
-        iconBackground: lifecycleBg,
-        label: 'Host Lifecycle',
-        value: lifecycleLabel,
-        valueColor: lifecycleFg,
-        dotColor: lifecycleFg,
-        hollowDot: lifecycleHollow,
-        tooltip: 'Host Lifecycle: $lifecycleTip',
-      ),
-      _StatusStripCard(
-        key: const Key('status-card-readiness'),
-        icon: readinessIcon,
-        iconForeground: readinessFg,
-        iconBackground: readinessBg,
-        label: 'Read Readiness',
-        value: readinessLabel,
-        valueColor: readinessFg,
-        dotColor: readinessFg,
-        hollowDot: readinessHollow,
-        tooltip: 'Read Readiness: $readinessTip',
-      ),
-      _StatusStripCard(
-        key: const Key('status-card-revision'),
-        icon: hasReset ? Icons.restart_alt_rounded : Icons.tag_rounded,
-        iconForeground: revFg,
-        iconBackground: revBg,
-        label: 'Host Revision',
-        value: '#${snapshot.revision}',
-        trailingBadge: hasReset
-            ? SemanticBadge(
-                label:
-                    'New lifetime (#${revisionReset!.previousRevision} → #${revisionReset!.newRevision})',
-                foreground: palette.info,
-                background: palette.infoContainer,
-              )
-            : SemanticBadge(
-                label: isLive ? 'Live' : 'Retained',
-                foreground: isLive ? palette.ok : palette.caution,
-                background: isLive
-                    ? palette.okContainer
-                    : palette.cautionContainer,
-                dotColor: isLive ? palette.ok : palette.caution,
-                hollowDot: !isLive,
-              ),
-        tooltip: hasReset
-            ? 'Host restarted with a new process lifetime (#${revisionReset!.previousRevision} → #${revisionReset!.newRevision}).'
-            : 'Host-local revision (${snapshot.apiVersion}); monotonic within one Host process lifetime and resets on Host restart.',
-      ),
-      _StatusStripCard(
-        key: const Key('status-card-summary'),
-        icon: Icons.layers_outlined,
-        iconForeground: palette.info,
-        iconBackground: palette.infoContainer,
-        label: 'Snapshot Summary',
-        value: summaryValue,
-        trailingBadge: SemanticBadge(
-          label: eventsBadgeLabel,
-          foreground: diagCount > 0 ? palette.info : palette.subtleText,
-          background: diagCount > 0
-              ? palette.infoContainer
-              : palette.elevatedSurface,
-          outlined: diagCount == 0,
-        ),
-        tooltip:
-            'Boundary contract ${snapshot.apiVersion} (read-only): $carsCount operational car(s), $sourcesCount observation source(s), $diagCount recent diagnostic event(s).',
-      ),
-    ];
+    final Color onSurfaceColor = Theme.of(context).colorScheme.onSurface;
+    final bool hasMultiDigitSummary =
+        carsCount >= 10 || sourcesCount >= 10 || diagCount >= 10;
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final double width = constraints.maxWidth;
         const double spacing = 12.0;
+        final bool compactSummaryCard =
+            width < 1140 || textScale > 1.15 || hasMultiDigitSummary;
+
+        final List<Widget> cards = <Widget>[
+          _StatusStripCard(
+            key: const Key('status-card-lifecycle'),
+            icon: lifecycleIcon,
+            iconForeground: lifecycleFg,
+            iconBackground: lifecycleBg,
+            label: 'Host Lifecycle',
+            value: lifecycleLabel,
+            valueColor: lifecycleFg,
+            tooltip: 'Host Lifecycle: $lifecycleTip',
+          ),
+          _StatusStripCard(
+            key: const Key('status-card-readiness'),
+            icon: readinessIcon,
+            iconForeground: readinessFg,
+            iconBackground: readinessBg,
+            label: 'Read Readiness',
+            value: readinessLabel,
+            valueColor: readinessFg,
+            tooltip: 'Read Readiness: $readinessTip',
+          ),
+          _StatusStripCard(
+            key: const Key('status-card-revision'),
+            icon: hasReset ? Icons.restart_alt_rounded : Icons.tag_rounded,
+            iconForeground: revFg,
+            iconBackground: revBg,
+            label: 'Host Revision',
+            value: '#${snapshot.revision}',
+            trailingBadge: hasReset
+                ? SemanticBadge(
+                    label:
+                        'New lifetime (#${revisionReset!.previousRevision} → #${revisionReset!.newRevision})',
+                    foreground: palette.info,
+                    background: palette.infoContainer,
+                    icon: Icons.restart_alt_rounded,
+                    compact: true,
+                  )
+                : SemanticBadge(
+                    label: isLive ? 'Live' : 'Retained',
+                    foreground: isLive ? palette.ok : palette.caution,
+                    background: isLive
+                        ? palette.okContainer
+                        : palette.cautionContainer,
+                    icon: isLive ? Icons.bolt_rounded : Icons.history_rounded,
+                    compact: true,
+                  ),
+            tooltip: hasReset
+                ? 'Host restarted with a new process lifetime (#${revisionReset!.previousRevision} → #${revisionReset!.newRevision}).'
+                : 'Host-local revision (${snapshot.apiVersion}); monotonic within one Host process lifetime and resets on Host restart.',
+          ),
+          _StatusStripCard(
+            key: const Key('status-card-summary'),
+            icon: Icons.layers_outlined,
+            iconForeground: palette.info,
+            iconBackground: palette.infoContainer,
+            hideAvatarOnCompactDesktop: compactSummaryCard,
+            label: 'Snapshot Summary',
+            customContent: Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                SemanticBadge(
+                  label: carsBadgeLabel,
+                  foreground: onSurfaceColor,
+                  background: palette.elevatedSurface,
+                  compact: true,
+                ),
+                SemanticBadge(
+                  label: sourcesBadgeLabel,
+                  foreground: onSurfaceColor,
+                  background: palette.elevatedSurface,
+                  compact: true,
+                ),
+                SemanticBadge(
+                  label: eventsBadgeLabel,
+                  foreground: diagCount > 0 ? palette.info : palette.subtleText,
+                  background: diagCount > 0
+                      ? palette.infoContainer
+                      : palette.elevatedSurface,
+                  compact: true,
+                ),
+              ],
+            ),
+            tooltip:
+                'Boundary contract ${snapshot.apiVersion} (read-only): $carsCount operational car(s), $sourcesCount observation source(s), $diagCount recent diagnostic event(s).',
+          ),
+        ];
 
         if (width >= 960 && textScale <= 1.35) {
           return IntrinsicHeight(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Expanded(child: cards[0]),
+                Expanded(flex: 3, child: cards[0]),
                 const SizedBox(width: spacing),
-                Expanded(child: cards[1]),
+                Expanded(flex: 3, child: cards[1]),
                 const SizedBox(width: spacing),
-                Expanded(child: cards[2]),
+                Expanded(flex: 3, child: cards[2]),
                 const SizedBox(width: spacing),
-                Expanded(child: cards[3]),
+                Expanded(flex: 5, child: cards[3]),
               ],
             ),
           );
@@ -356,24 +401,24 @@ class _StatusStripCard extends StatelessWidget {
     required this.iconForeground,
     required this.iconBackground,
     required this.label,
-    required this.value,
     required this.tooltip,
+    this.value,
     this.valueColor,
-    this.dotColor,
-    this.hollowDot = false,
     this.trailingBadge,
+    this.customContent,
+    this.hideAvatarOnCompactDesktop = false,
   });
 
   final IconData icon;
   final Color iconForeground;
   final Color iconBackground;
   final String label;
-  final String value;
   final String tooltip;
+  final String? value;
   final Color? valueColor;
-  final Color? dotColor;
-  final bool hollowDot;
   final Widget? trailingBadge;
+  final Widget? customContent;
+  final bool hideAvatarOnCompactDesktop;
 
   @override
   Widget build(BuildContext context) {
@@ -381,6 +426,7 @@ class _StatusStripCard extends StatelessWidget {
     final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
     final double screenWidth = MediaQuery.sizeOf(context).width;
     final bool compact = screenWidth < 520 || textScale > 1.35;
+    final bool showAvatar = !compact && !hideAvatarOnCompactDesktop;
 
     return Tooltip(
       message: tooltip,
@@ -393,15 +439,12 @@ class _StatusStripCard extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
-              if (!compact) ...<Widget>[
-                Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: iconBackground,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(icon, size: 19, color: iconForeground),
+              if (showAvatar) ...<Widget>[
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: iconBackground,
+                  foregroundColor: iconForeground,
+                  child: Icon(icon, size: 19),
                 ),
                 const SizedBox(width: 12),
               ],
@@ -421,43 +464,32 @@ class _StatusStripCard extends StatelessWidget {
                         color: palette.mutedText,
                       ),
                     ),
-                    const SizedBox(height: 3),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: <Widget>[
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: <Widget>[
-                            if (dotColor != null) ...<Widget>[
-                              StatusDot(
-                                color: dotColor!,
-                                hollow: hollowDot,
-                                size: 8,
-                              ),
-                              const SizedBox(width: 6),
-                            ],
-                            Flexible(
-                              child: Text(
-                                value,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: instrumentTabularStyle(
-                                  context,
-                                  fontSize: 14.5,
-                                  fontWeight: FontWeight.w700,
-                                  color:
-                                      valueColor ??
-                                      Theme.of(context).colorScheme.onSurface,
-                                ),
+                    const SizedBox(height: 4),
+                    if (customContent != null)
+                      customContent!
+                    else
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: <Widget>[
+                          if (value != null)
+                            Text(
+                              value!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: instrumentTabularStyle(
+                                context,
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w700,
+                                color:
+                                    valueColor ??
+                                    Theme.of(context).colorScheme.onSurface,
                               ),
                             ),
-                          ],
-                        ),
-                        ?trailingBadge,
-                      ],
-                    ),
+                          ?trailingBadge,
+                        ],
+                      ),
                   ],
                 ),
               ),

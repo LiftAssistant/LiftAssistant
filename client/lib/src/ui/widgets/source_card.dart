@@ -41,6 +41,21 @@ String formatAvailabilityLabel(ObservationAvailability availability) {
   }
 }
 
+IconData observationAvailabilityIcon(ObservationAvailability availability) {
+  switch (availability) {
+    case ObservationAvailability.awaiting:
+      return Icons.schedule_rounded;
+    case ObservationAvailability.incomplete:
+      return Icons.timelapse_rounded;
+    case ObservationAvailability.unresolved:
+      return Icons.help_outline_rounded;
+    case ObservationAvailability.resolved:
+      return Icons.check_circle_outline_rounded;
+    case ObservationAvailability.revoked:
+      return Icons.cancel_outlined;
+  }
+}
+
 class SourceHealthCard extends StatelessWidget {
   const SourceHealthCard({
     super.key,
@@ -60,50 +75,62 @@ class SourceHealthCard extends StatelessWidget {
       String sessionSubtitle,
       Color sessionColor,
       Color sessionBg,
-      bool sessionHollow,
+      IconData sessionIcon,
     ) = switch (source.session) {
       InactiveSourceSession() => (
         'Inactive',
         'Session: Inactive',
         palette.neutral,
         palette.elevatedSurface,
-        true,
+        Icons.link_off_rounded,
       ),
       ActiveSourceSession(:final session) => (
         'Active',
         'Session: $session',
         palette.ok,
         palette.okContainer,
-        false,
+        Icons.link_rounded,
       ),
     };
 
     final (
       String transportLabel,
       Color transportColor,
-      bool transportHollow,
+      IconData transportIcon,
     ) = switch (source.transport) {
-      TransportState.unknown => ('Unknown', palette.neutral, true),
+      TransportState.unknown => (
+        'Unknown',
+        palette.neutral,
+        Icons.help_outline_rounded,
+      ),
       TransportState.subscriberCreated => (
         'Subscriber Created',
         palette.info,
-        true,
+        Icons.sensors_rounded,
       ),
       TransportState.discoveryObserved => (
         'Discovery Observed',
         palette.ok,
-        false,
+        Icons.radar_rounded,
       ),
     };
 
     final (
       String payloadLabel,
       Color payloadColor,
-      bool payloadHollow,
+      IconData payloadIcon,
     ) = switch (source.payload) {
-      PayloadActivity.awaiting => ('Awaiting', palette.caution, true),
-      PayloadActivity.active => ('Active', palette.ok, false),
-      PayloadActivity.stale => ('Stale', palette.danger, false),
+      PayloadActivity.awaiting => (
+        'Awaiting',
+        palette.caution,
+        Icons.hourglass_top_rounded,
+      ),
+      PayloadActivity.active => ('Active', palette.ok, Icons.bolt_rounded),
+      PayloadActivity.stale => (
+        'Stale',
+        palette.danger,
+        Icons.timer_off_outlined,
+      ),
     };
 
     final bool discoveryWithoutActivePayload =
@@ -167,12 +194,12 @@ class SourceHealthCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 120),
+                  constraints: const BoxConstraints(maxWidth: 128),
                   child: SemanticBadge(
                     label: '${source.observations.length} bound',
                     foreground: palette.subtleText,
                     background: palette.elevatedSurface,
-                    outlined: true,
+                    icon: Icons.elevator_outlined,
                     tooltip:
                         '${source.observations.length} logical car binding(s) on this source',
                   ),
@@ -181,7 +208,7 @@ class SourceHealthCard extends StatelessWidget {
             ),
           ),
 
-          // 2. 3-Column Equal-Width Tonal Health Tiles
+          // 2. 3-Column Equal-Width Borderless M3 Tonal Health Tiles
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
             child: Builder(
@@ -204,8 +231,8 @@ class SourceHealthCard extends StatelessWidget {
                         child: _SourceTonalHealthTile(
                           title: 'Session',
                           value: sessionStateLabel,
-                          dotColor: sessionColor,
-                          hollowDot: sessionHollow,
+                          icon: sessionIcon,
+                          accentColor: sessionColor,
                           tooltip: sessionSubtitle,
                         ),
                       ),
@@ -215,8 +242,8 @@ class SourceHealthCard extends StatelessWidget {
                         child: _SourceTonalHealthTile(
                           title: 'Transport',
                           value: transportLabel,
-                          dotColor: transportColor,
-                          hollowDot: transportHollow,
+                          icon: transportIcon,
+                          accentColor: transportColor,
                           tooltip:
                               'Transport state: ${source.transport.wireValue}',
                         ),
@@ -227,8 +254,8 @@ class SourceHealthCard extends StatelessWidget {
                         child: _SourceTonalHealthTile(
                           title: 'Payload',
                           value: payloadLabel,
-                          dotColor: payloadColor,
-                          hollowDot: payloadHollow,
+                          icon: payloadIcon,
+                          accentColor: payloadColor,
                           tooltip:
                               'Payload activity: ${source.payload.wireValue}',
                         ),
@@ -243,24 +270,24 @@ class SourceHealthCard extends StatelessWidget {
                     _SourceTonalHealthTile(
                       title: 'Session',
                       value: sessionStateLabel,
-                      dotColor: sessionColor,
-                      hollowDot: sessionHollow,
+                      icon: sessionIcon,
+                      accentColor: sessionColor,
                       tooltip: sessionSubtitle,
                     ),
                     const SizedBox(height: 6),
                     _SourceTonalHealthTile(
                       title: 'Transport',
                       value: transportLabel,
-                      dotColor: transportColor,
-                      hollowDot: transportHollow,
+                      icon: transportIcon,
+                      accentColor: transportColor,
                       tooltip: 'Transport state: ${source.transport.wireValue}',
                     ),
                     const SizedBox(height: 6),
                     _SourceTonalHealthTile(
                       title: 'Payload',
                       value: payloadLabel,
-                      dotColor: payloadColor,
-                      hollowDot: payloadHollow,
+                      icon: payloadIcon,
+                      accentColor: payloadColor,
                       tooltip: 'Payload activity: ${source.payload.wireValue}',
                     ),
                   ],
@@ -283,9 +310,6 @@ class SourceHealthCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: palette.cautionContainer,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: palette.caution.withValues(alpha: 0.4),
-                  ),
                 ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -340,15 +364,15 @@ class _SourceTonalHealthTile extends StatelessWidget {
   const _SourceTonalHealthTile({
     required this.title,
     required this.value,
-    required this.dotColor,
-    required this.hollowDot,
+    required this.icon,
+    required this.accentColor,
     required this.tooltip,
   });
 
   final String title;
   final String value;
-  final Color dotColor;
-  final bool hollowDot;
+  final IconData icon;
+  final Color accentColor;
   final String tooltip;
 
   @override
@@ -357,11 +381,10 @@ class _SourceTonalHealthTile extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
         decoration: BoxDecoration(
           color: palette.elevatedSurface,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: palette.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -381,8 +404,8 @@ class _SourceTonalHealthTile extends StatelessWidget {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                StatusDot(color: dotColor, hollow: hollowDot, size: 7),
-                const SizedBox(width: 6),
+                Icon(icon, size: 14.5, color: accentColor),
+                const SizedBox(width: 5.5),
                 Flexible(
                   child: Text(
                     value,
@@ -419,43 +442,31 @@ class _ObservationBindingRow extends StatelessWidget {
       String availLabel,
       Color availFg,
       Color availBg,
-      bool availHollow,
-      bool availOutlined,
     ) = switch (observation.availability) {
       ObservationAvailability.resolved => (
         'Resolved',
         palette.ok,
         palette.okContainer,
-        false,
-        false,
       ),
       ObservationAvailability.awaiting => (
         'Awaiting',
         palette.neutral,
         palette.neutralContainer,
-        true,
-        true,
       ),
       ObservationAvailability.incomplete => (
         'Incomplete',
         palette.caution,
         palette.cautionContainer,
-        true,
-        false,
       ),
       ObservationAvailability.unresolved => (
         'Unresolved',
         palette.caution,
         palette.cautionContainer,
-        true,
-        false,
       ),
       ObservationAvailability.revoked => (
         'Revoked',
         palette.danger,
         palette.dangerContainer,
-        false,
-        false,
       ),
     };
 
@@ -470,10 +481,22 @@ class _ObservationBindingRow extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Icon(
-                Icons.elevator_outlined,
-                size: 16,
-                color: isOperational ? palette.info : palette.mutedText,
+              Container(
+                width: 26,
+                height: 26,
+                decoration: BoxDecoration(
+                  color: isOperational
+                      ? palette.operationalRoleContainer
+                      : palette.elevatedSurface,
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Icon(
+                  Icons.elevator_outlined,
+                  size: 15,
+                  color: isOperational
+                      ? palette.operationalRole
+                      : palette.mutedText,
+                ),
               ),
               const SizedBox(width: 8),
               ConstrainedBox(
@@ -507,7 +530,9 @@ class _ObservationBindingRow extends StatelessWidget {
                 background: isOperational
                     ? palette.operationalRoleContainer
                     : palette.auxiliaryRoleContainer,
-                outlined: !isOperational,
+                icon: isOperational
+                    ? Icons.verified_user_outlined
+                    : Icons.visibility_outlined,
                 tooltip: isOperational
                     ? 'Operational authority: permitted into LiftAssistant operational truth when resolved.'
                     : 'Auxiliary role: inspectable and diagnostic only — excluded from operational truth and never used for automatic failover.',
@@ -516,9 +541,7 @@ class _ObservationBindingRow extends StatelessWidget {
                 label: availLabel,
                 foreground: availFg,
                 background: availBg,
-                dotColor: availFg,
-                hollowDot: availHollow,
-                outlined: availOutlined,
+                icon: observationAvailabilityIcon(observation.availability),
                 tooltip:
                     'Observation availability: ${observation.availability.wireValue}',
               ),

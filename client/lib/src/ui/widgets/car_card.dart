@@ -10,11 +10,13 @@ class OperationalCarCard extends StatelessWidget {
     required this.car,
     this.stretchToRowHeight = false,
     this.useTabularFooter = true,
+    this.compactCard = false,
   });
 
   final OperationalCar car;
   final bool stretchToRowHeight;
   final bool useTabularFooter;
+  final bool compactCard;
 
   (Color iconFg, Color iconBg) _avatarColors(InstrumentPalette palette) {
     if (car.operatingMode == CarOperatingMode.fireService ||
@@ -92,7 +94,7 @@ class OperationalCarCard extends StatelessWidget {
                         .scale(1.0);
                     final double screenWidth = MediaQuery.sizeOf(context).width;
                     final bool compactGraphic =
-                        screenWidth < 380 || textScale > 1.35;
+                        compactCard || screenWidth < 380 || textScale > 1.35;
 
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -125,6 +127,7 @@ class OperationalCarCard extends StatelessWidget {
                 door: car.door,
                 reportedDestination: car.reportedDestination,
                 useTabularColumns: useTabularFooter,
+                compactCard: compactCard,
               ),
             ],
           ),
@@ -148,7 +151,7 @@ class _ModeReadout extends StatelessWidget {
           label: 'Normal',
           foreground: palette.ok,
           background: palette.okContainer,
-          dotColor: palette.ok,
+          icon: Icons.check_circle_outline_rounded,
           tooltip: 'Canonical operating mode: Normal',
         );
       case CarOperatingMode.independent:
@@ -156,7 +159,7 @@ class _ModeReadout extends StatelessWidget {
           label: 'Independent',
           foreground: palette.info,
           background: palette.infoContainer,
-          dotColor: palette.info,
+          icon: Icons.person_outline_rounded,
           tooltip: 'Canonical operating mode: Independent',
         );
       case CarOperatingMode.inspection:
@@ -164,7 +167,7 @@ class _ModeReadout extends StatelessWidget {
           label: 'Inspection',
           foreground: palette.caution,
           background: palette.cautionContainer,
-          dotColor: palette.caution,
+          icon: Icons.engineering_outlined,
           tooltip: 'Canonical operating mode: Inspection',
         );
       case CarOperatingMode.fireService:
@@ -172,7 +175,7 @@ class _ModeReadout extends StatelessWidget {
           label: 'FireService',
           foreground: palette.danger,
           background: palette.dangerContainer,
-          dotColor: palette.danger,
+          icon: Icons.local_fire_department_outlined,
           tooltip: 'Canonical operating mode: FireService',
         );
       case CarOperatingMode.outOfService:
@@ -180,9 +183,7 @@ class _ModeReadout extends StatelessWidget {
           label: 'OutOfService',
           foreground: palette.neutral,
           background: palette.neutralContainer,
-          dotColor: palette.neutral,
-          hollowDot: true,
-          outlined: true,
+          icon: Icons.do_not_disturb_on_outlined,
           tooltip: 'Canonical operating mode: OutOfService',
         );
     }
@@ -226,7 +227,6 @@ class _LocationReadout extends StatelessWidget {
               foreground: palette.subtleText,
               background: palette.elevatedSurface,
               icon: Icons.layers_outlined,
-              outlined: true,
               tooltip: 'Discrete floor association only (kind: floor). Host holds no continuous coordinate for this car.',
             ),
           ],
@@ -280,8 +280,8 @@ class _LocationReadout extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Wrap(
-              spacing: 8,
-              runSpacing: 2,
+              spacing: 6,
+              runSpacing: 4,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: <Widget>[
                 Text(
@@ -295,16 +295,13 @@ class _LocationReadout extends StatelessWidget {
                     color: palette.subtleText,
                   ),
                 ),
-                Text(
-                  signedDelta,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: instrumentTabularStyle(
-                    context,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: isClamped ? palette.caution : palette.info,
-                  ),
+                SemanticBadge(
+                  label: signedDelta,
+                  foreground: isClamped ? palette.caution : palette.info,
+                  background: isClamped
+                      ? palette.cautionContainer
+                      : palette.infoContainer,
+                  compact: true,
                 ),
               ],
             ),
@@ -332,10 +329,13 @@ class _ContinuousOffsetGauge extends StatelessWidget {
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
     final Color markerColor = clamped ? palette.caution : palette.info;
-    final double trackWidth = compact ? 84.0 : 132.0;
-    final double markerX = ((trackWidth - 10) * fraction).clamp(
+    final Color trackColor = clamped
+        ? palette.cautionContainer
+        : palette.infoContainer;
+    final double trackWidth = compact ? 88.0 : 136.0;
+    final double markerX = ((trackWidth - 12) * fraction).clamp(
       0.0,
-      trackWidth - 10,
+      trackWidth - 12,
     );
 
     return Tooltip(
@@ -344,27 +344,26 @@ class _ContinuousOffsetGauge extends StatelessWidget {
           : 'Landing offset $signedDelta within [-0.50, +0.50] window.',
       child: SizedBox(
         width: trackWidth,
-        height: 10,
+        height: 12,
         child: Stack(
           alignment: Alignment.centerLeft,
           children: <Widget>[
             Container(
-              height: 4,
+              height: 6,
               width: trackWidth,
               decoration: BoxDecoration(
-                color: palette.elevatedSurface,
-                borderRadius: BorderRadius.circular(2),
-                border: Border.all(color: palette.border, width: 0.8),
+                color: trackColor,
+                borderRadius: BorderRadius.circular(3),
               ),
             ),
             Positioned(
               left: (trackWidth / 2) - 1,
-              top: 1,
-              bottom: 1,
+              top: 2,
+              bottom: 2,
               child: Container(
                 width: 2,
                 decoration: BoxDecoration(
-                  color: palette.mutedText,
+                  color: markerColor.withValues(alpha: 0.45),
                   borderRadius: BorderRadius.circular(1),
                 ),
               ),
@@ -374,15 +373,11 @@ class _ContinuousOffsetGauge extends StatelessWidget {
               curve: Curves.easeOutCubic,
               left: markerX,
               child: Container(
-                width: 10,
-                height: 10,
+                width: 12,
+                height: 12,
                 decoration: BoxDecoration(
-                  color: clamped ? palette.cautionContainer : markerColor,
-                  borderRadius: BorderRadius.circular(3),
-                  border: Border.all(
-                    color: markerColor,
-                    width: clamped ? 2.0 : 1.2,
-                  ),
+                  color: markerColor,
+                  shape: BoxShape.circle,
                 ),
               ),
             ),
@@ -729,12 +724,14 @@ class _CarTelemetryFooter extends StatelessWidget {
     required this.door,
     required this.reportedDestination,
     required this.useTabularColumns,
+    this.compactCard = false,
   });
 
   final CarMotion motion;
   final CarDoorState door;
   final ReportedDestination reportedDestination;
   final bool useTabularColumns;
+  final bool compactCard;
 
   @override
   Widget build(BuildContext context) {
@@ -782,34 +779,52 @@ class _CarTelemetryFooter extends StatelessWidget {
     final bool showThreeColumns = useTabularColumns && textScale <= 1.35;
 
     if (showThreeColumns) {
+      final double screenWidth = MediaQuery.sizeOf(context).width;
+      final bool compactCols = compactCard || screenWidth < 1100;
+      final double divMargin = compactCols ? 6.0 : 8.0;
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        padding: EdgeInsets.symmetric(
+          horizontal: compactCols ? 10 : 12,
+          vertical: 11,
+        ),
         child: Row(
           children: <Widget>[
             Expanded(
-              flex: 9,
+              flex: compactCols ? 7 : 9,
               child: _FooterMetricTile(
                 icon: Icons.swap_vert_rounded,
                 label: 'Motion',
                 value: motionText,
                 valueColor: motionColor,
                 emphasize: motionEmph,
+                compact: compactCols,
               ),
             ),
-            const SizedBox(width: 6),
+            Container(
+              width: 1,
+              height: 26,
+              margin: EdgeInsets.symmetric(horizontal: divMargin),
+              color: palette.border,
+            ),
             Expanded(
-              flex: 8,
+              flex: compactCols ? 6 : 8,
               child: _FooterMetricTile(
                 icon: Icons.sensor_door_outlined,
                 label: 'Door',
                 value: doorText,
                 valueColor: doorColor,
                 emphasize: doorEmph,
+                compact: compactCols,
               ),
             ),
-            const SizedBox(width: 6),
+            Container(
+              width: 1,
+              height: 26,
+              margin: EdgeInsets.symmetric(horizontal: divMargin),
+              color: palette.border,
+            ),
             Expanded(
-              flex: 12,
+              flex: compactCols ? 12 : 12,
               child: Tooltip(
                 message: destTooltip,
                 child: _FooterMetricTile(
@@ -818,6 +833,7 @@ class _CarTelemetryFooter extends StatelessWidget {
                   value: destText,
                   valueColor: destColor,
                   emphasize: destEmph,
+                  compact: compactCols,
                 ),
               ),
             ),
@@ -869,6 +885,7 @@ class _FooterMetricTile extends StatelessWidget {
     required this.value,
     required this.valueColor,
     required this.emphasize,
+    this.compact = false,
   });
 
   final IconData icon;
@@ -876,14 +893,73 @@ class _FooterMetricTile extends StatelessWidget {
   final String value;
   final Color valueColor;
   final bool emphasize;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
+    if (compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 12.5,
+                color: emphasize ? valueColor : palette.mutedText,
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w500,
+                    color: palette.mutedText,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2.5),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: instrumentTabularStyle(
+              context,
+              fontSize: 12.5,
+              fontWeight: emphasize ? FontWeight.w700 : FontWeight.w600,
+              color: valueColor,
+            ),
+          ),
+        ],
+      );
+    }
+
     return Row(
       children: <Widget>[
-        Icon(icon, size: 16, color: emphasize ? valueColor : palette.mutedText),
-        const SizedBox(width: 6),
+        Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            color: emphasize
+                ? valueColor.withValues(alpha: 0.14)
+                : palette.elevatedSurface,
+            borderRadius: BorderRadius.circular(7),
+          ),
+          child: Icon(
+            icon,
+            size: 15,
+            color: emphasize ? valueColor : palette.mutedText,
+          ),
+        ),
+        const SizedBox(width: 7),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

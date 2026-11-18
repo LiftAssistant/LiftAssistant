@@ -191,12 +191,13 @@ class _ClientShellPageState extends State<ClientShellPage> {
     final double barHeight = (54.0 * textScale.clamp(1.0, 1.35))
         .roundToDouble();
     final bool isCompactTopBar = screenWidth < 420 || textScale > 1.35;
-    final bool showReadOnlyChip = screenWidth >= 620 && textScale <= 1.3;
+    final bool showReadOnlyChip =
+        (isWide ? screenWidth >= 900 : screenWidth >= 620) && textScale <= 1.2;
     final (
       String phaseLabel,
       Color phaseColor,
       Color phaseBg,
-      bool phaseHollow,
+      IconData phaseIcon,
     ) = describeConnectionPhase(
       state.phase,
       palette,
@@ -225,7 +226,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                       children: <Widget>[
                         const _HoistwayBrandMark(),
                         if (!isCompactTopBar || screenWidth >= 360) ...<Widget>[
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 9),
                           const Flexible(
                             child: Text(
                               'LiftAssistant',
@@ -241,13 +242,14 @@ class _ClientShellPageState extends State<ClientShellPage> {
                         ],
                         if (showReadOnlyChip) ...<Widget>[
                           const SizedBox(width: 10),
-                          SemanticBadge(
-                            label: 'Read-Only',
-                            foreground: palette.subtleText,
-                            background: palette.elevatedSurface,
-                            icon: Icons.lock_outline_rounded,
-                            outlined: true,
-                            tooltip: 'Strictly read-only experimental/v0 client; zero elevator write controls.',
+                          Flexible(
+                            child: SemanticBadge(
+                              label: 'Read-Only',
+                              foreground: palette.subtleText,
+                              background: palette.elevatedSurface,
+                              icon: Icons.lock_outline_rounded,
+                              tooltip: 'Strictly read-only experimental/v0 client; zero elevator write controls.',
+                            ),
                           ),
                         ],
                       ],
@@ -257,32 +259,29 @@ class _ClientShellPageState extends State<ClientShellPage> {
                   if (isWide) ...<Widget>[
                     ConstrainedBox(
                       constraints: BoxConstraints(
-                        maxWidth: textScale > 1.35 ? 190 : 240,
+                        maxWidth: screenWidth < 920 || textScale > 1.2
+                            ? 176
+                            : 240,
                       ),
                       child: Material(
                         color: palette.elevatedSurface,
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(8),
                         child: InkWell(
                           key: const Key('topbar-host-button'),
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(8),
                           onTap: () => _openHostConfig(state),
-                          child: Container(
-                            constraints: const BoxConstraints(minHeight: 34),
+                          child: Padding(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 10,
-                              vertical: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: palette.border),
+                              vertical: 4.5,
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: <Widget>[
                                 Icon(
                                   Icons.dns_outlined,
-                                  size: 14.5,
-                                  color: palette.subtleText,
+                                  size: 14,
+                                  color: palette.info,
                                 ),
                                 const SizedBox(width: 6),
                                 Flexible(
@@ -292,7 +291,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                                     overflow: TextOverflow.ellipsis,
                                     style: instrumentTabularStyle(
                                       context,
-                                      fontSize: 12,
+                                      fontSize: 11.5,
                                       fontWeight: FontWeight.w600,
                                       color: Theme.of(context)
                                           .colorScheme
@@ -300,10 +299,10 @@ class _ClientShellPageState extends State<ClientShellPage> {
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 5),
+                                const SizedBox(width: 6),
                                 Icon(
                                   Icons.tune_rounded,
-                                  size: 14,
+                                  size: 13.5,
                                   color: palette.subtleText,
                                 ),
                               ],
@@ -330,8 +329,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                       label: phaseLabel,
                       foreground: phaseColor,
                       background: phaseBg,
-                      dotColor: phaseColor,
-                      hollowDot: phaseHollow,
+                      icon: phaseIcon,
                     ),
                   ),
                   SizedBox(width: isCompactTopBar ? 2 : 4),
@@ -766,7 +764,11 @@ class _ClientShellPageState extends State<ClientShellPage> {
   }) {
     // On desktop viewports, render the classic 2-column Overview (left flex: 6
     // Operational Cars + Observation Sources, right flex: 5 Recent Diagnostics preview).
-    if (isWide && textScale <= 1.45) {
+    final double viewportWidth = MediaQuery.sizeOf(context).width;
+    final bool useTwoColumnOverview =
+        isWide &&
+        (viewportWidth >= 920 ? textScale <= 1.45 : textScale <= 1.15);
+    if (useTwoColumnOverview) {
       return SingleChildScrollView(
         padding: pagePadding,
         child: Center(
@@ -1074,17 +1076,20 @@ class _ClientShellPageState extends State<ClientShellPage> {
         final double width = constraints.maxWidth;
         if (cars.length == 1) {
           final bool useTabularFooter = width >= 280 && textScale <= 1.35;
+          final bool compactCard = width < 430 || textScale > 1.15;
           return OperationalCarCard(
             car: cars.first,
             useTabularFooter: useTabularFooter,
+            compactCard: compactCard,
           );
         }
 
-        final int columns = (width >= 520 && textScale <= 1.45) ? 2 : 1;
+        final int columns = (width >= 600 && textScale <= 1.2) ? 2 : 1;
         final double cardWidth = columns == 1
             ? width
             : (width - spacing) / columns;
         final bool useTabularFooter = cardWidth >= 280 && textScale <= 1.35;
+        final bool compactCard = cardWidth < 430 || textScale > 1.15;
         final int rowCount = (cars.length + columns - 1) ~/ columns;
 
         Widget buildRow(int rowIndex) {
@@ -1092,6 +1097,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
             return OperationalCarCard(
               car: cars[rowIndex],
               useTabularFooter: useTabularFooter,
+              compactCard: compactCard,
             );
           }
           final int start = rowIndex * columns;
@@ -1107,6 +1113,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                             car: cars[start + col],
                             stretchToRowHeight: true,
                             useTabularFooter: useTabularFooter,
+                            compactCard: compactCard,
                           )
                         : const SizedBox.shrink(),
                   ),
@@ -1217,16 +1224,18 @@ class _ClientShellPageState extends State<ClientShellPage> {
       builder: (BuildContext context, SliverConstraints sliverConstraints) {
         final double width = sliverConstraints.crossAxisExtent;
         final bool useTwoColumns =
-            textScale <= 1.45 &&
-            (width >= 680 || (cars.length > 1 && width >= 520));
+            textScale <= 1.2 &&
+            (width >= 680 || (cars.length > 1 && width >= 600));
 
         if (!useTwoColumns) {
           final bool useTabularFooter = width >= 280 && textScale <= 1.35;
+          final bool compactCard = width < 430 || textScale > 1.15;
           if (cars.length == 1) {
             return SliverToBoxAdapter(
               child: OperationalCarCard(
                 car: cars.first,
                 useTabularFooter: useTabularFooter,
+                compactCard: compactCard,
               ),
             );
           }
@@ -1236,6 +1245,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
               final Widget card = OperationalCarCard(
                 car: cars[index],
                 useTabularFooter: useTabularFooter,
+                compactCard: compactCard,
               );
               if (index == 0) {
                 return card;
@@ -1251,6 +1261,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
         const int columns = 2;
         final double cardWidth = (width - spacing) / columns;
         final bool useTabularFooter = cardWidth >= 280 && textScale <= 1.35;
+        final bool compactCard = cardWidth < 430 || textScale > 1.15;
         final int rowCount = (cars.length + columns - 1) ~/ columns;
 
         return SliverList.builder(
@@ -1269,6 +1280,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                               car: cars[start + col],
                               stretchToRowHeight: true,
                               useTabularFooter: useTabularFooter,
+                              compactCard: compactCard,
                             )
                           : const SizedBox.shrink(),
                     ),
@@ -1380,12 +1392,11 @@ class _HoistwayBrandMark extends StatelessWidget {
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
     return Container(
-      width: 28,
-      height: 28,
+      width: 30,
+      height: 30,
       decoration: BoxDecoration(
         color: palette.infoContainer,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: palette.info.withValues(alpha: 0.45)),
+        borderRadius: BorderRadius.circular(9),
       ),
       child: Icon(Icons.elevator_rounded, size: 17, color: palette.info),
     );
@@ -1416,7 +1427,6 @@ class _TopBarIconButton extends StatelessWidget {
         minimumSize: Size(compact ? 28 : 34, compact ? 28 : 34),
         padding: EdgeInsets.all(compact ? 4 : 7),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       icon: Icon(icon, size: compact ? 16 : 18, color: palette.subtleText),
     );
@@ -1450,18 +1460,11 @@ class _EmptyOperationalCarsPanel extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: palette.cautionContainer,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    Icons.hourglass_top_rounded,
-                    size: 17,
-                    color: palette.caution,
-                  ),
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: palette.cautionContainer,
+                  foregroundColor: palette.caution,
+                  child: const Icon(Icons.hourglass_top_rounded, size: 17),
                 ),
                 const SizedBox(width: 10),
                 const Expanded(
@@ -1508,21 +1511,20 @@ class _EmptyOperationalCarsPanel extends StatelessWidget {
                         label: formatAvailabilityLabel(obs.availability),
                         foreground: palette.caution,
                         background: palette.cautionContainer,
-                        dotColor: palette.caution,
-                        hollowDot: true,
+                        icon: observationAvailabilityIcon(obs.availability),
                       ),
                       SemanticBadge(
                         label: 'Source: $sourceId',
                         foreground: palette.subtleText,
                         background: palette.elevatedSurface,
-                        outlined: true,
+                        icon: Icons.hub_outlined,
                       ),
                       SemanticBadge(
                         label:
                             'Payload: ${formatPayloadActivityLabel(payload)}',
                         foreground: palette.subtleText,
                         background: palette.elevatedSurface,
-                        outlined: true,
+                        icon: Icons.sensors_rounded,
                       ),
                     ],
                   ),

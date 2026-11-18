@@ -292,15 +292,103 @@ ThemeData buildInstrumentTheme(Brightness brightness) {
     chipTheme: ChipThemeData(
       backgroundColor: palette.elevatedSurface,
       selectedColor: palette.infoContainer,
-      side: BorderSide(color: palette.border),
+      checkmarkColor: palette.info,
+      iconTheme: IconThemeData(color: palette.subtleText, size: 15),
+      side: WidgetStateBorderSide.resolveWith((Set<WidgetState> states) {
+        if (states.contains(WidgetState.selected)) {
+          return BorderSide(color: palette.info.withValues(alpha: 0.35));
+        }
+        return BorderSide(color: palette.border);
+      }),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       labelStyle: TextStyle(
         fontSize: 12,
         fontWeight: FontWeight.w600,
-        color: onSurface,
+        color: WidgetStateColor.resolveWith((Set<WidgetState> states) {
+          if (states.contains(WidgetState.selected)) {
+            return palette.info;
+          }
+          return onSurface;
+        }),
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+      ),
+      secondaryLabelStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        color: palette.info,
         fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    ),
+    navigationRailTheme: NavigationRailThemeData(
+      backgroundColor: palette.surface,
+      indicatorColor: palette.infoContainer,
+      selectedIconTheme: IconThemeData(color: palette.info, size: 22),
+      unselectedIconTheme: IconThemeData(color: palette.subtleText, size: 22),
+      selectedLabelTextStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
+        color: palette.info,
+      ),
+      unselectedLabelTextStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w500,
+        color: palette.subtleText,
+      ),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      backgroundColor: palette.surface,
+      indicatorColor: palette.infoContainer,
+      iconTheme: WidgetStateProperty.resolveWith<IconThemeData>((
+        Set<WidgetState> states,
+      ) {
+        if (states.contains(WidgetState.selected)) {
+          return IconThemeData(color: palette.info, size: 22);
+        }
+        return IconThemeData(color: palette.subtleText, size: 22);
+      }),
+      labelTextStyle: WidgetStateProperty.resolveWith<TextStyle>((
+        Set<WidgetState> states,
+      ) {
+        if (states.contains(WidgetState.selected)) {
+          return TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: palette.info,
+          );
+        }
+        return TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+          color: palette.subtleText,
+        );
+      }),
+    ),
+    segmentedButtonTheme: SegmentedButtonThemeData(
+      style: ButtonStyle(
+        backgroundColor: WidgetStateProperty.resolveWith<Color?>((
+          Set<WidgetState> states,
+        ) {
+          if (states.contains(WidgetState.selected)) {
+            return palette.infoContainer;
+          }
+          return palette.surface;
+        }),
+        foregroundColor: WidgetStateProperty.resolveWith<Color?>((
+          Set<WidgetState> states,
+        ) {
+          if (states.contains(WidgetState.selected)) {
+            return palette.info;
+          }
+          return palette.subtleText;
+        }),
+        side: WidgetStatePropertyAll<BorderSide>(
+          BorderSide(color: palette.border),
+        ),
+        shape: WidgetStatePropertyAll<OutlinedBorder>(
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      ),
     ),
     tabBarTheme: TabBarThemeData(
       labelColor: palette.info,

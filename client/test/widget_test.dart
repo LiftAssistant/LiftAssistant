@@ -231,13 +231,15 @@ void main() {
       expect(find.text('#12'), findsOneWidget);
       expect(find.text('Live'), findsOneWidget);
       expect(find.text('Snapshot Summary'), findsOneWidget);
-      expect(find.text('2 Cars · 2 Sources'), findsOneWidget);
+      expect(find.text('2 Cars'), findsOneWidget);
+      expect(find.text('2 Sources'), findsOneWidget);
       expect(find.text('2 Events'), findsOneWidget);
 
-      // Verify zero duplicate snake_case wire tags in the UI.
+      // Verify zero duplicate snake_case wire tags or '·' cheap separators in the UI.
       expect(find.text('ready_read_only'), findsNothing);
       expect(find.text('read_only'), findsNothing);
       expect(find.text('live-snapshot'), findsNothing);
+      expect(find.textContaining('·'), findsNothing);
 
       final Rect lifecycleCardRect = tester.getRect(
         find.byKey(const Key('status-card-lifecycle')),
@@ -358,7 +360,21 @@ void main() {
         findsOneWidget,
       );
 
-      // Laptop / tiled desktop widths (1040x800 and 940x720) render without overflow.
+      // Snapshot Summary chips sit on a single horizontal row on desktop.
+      final Rect carsChipRect = tester.getRect(find.text('2 Cars'));
+      final Rect sourcesChipRect = tester.getRect(find.text('2 Sources'));
+      final Rect eventsChipRect = tester.getRect(find.text('2 Events'));
+      expect(
+        (carsChipRect.center.dy - sourcesChipRect.center.dy).abs(),
+        lessThan(2.0),
+      );
+      expect(
+        (carsChipRect.center.dy - eventsChipRect.center.dy).abs(),
+        lessThan(2.0),
+      );
+
+      // Laptop / tiled desktop widths (1040x800 and 940x720) render without overflow
+      // and keep all 3 Snapshot Summary chips on a single line.
       for (final Size compactDesktop in <Size>[
         const Size(1040, 800),
         const Size(940, 720),
@@ -366,6 +382,9 @@ void main() {
         tester.view.physicalSize = compactDesktop;
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
+        final Rect cRect = tester.getRect(find.text('2 Cars'));
+        final Rect eRect = tester.getRect(find.text('2 Events'));
+        expect((cRect.center.dy - eRect.center.dy).abs(), lessThan(2.0));
       }
 
       tester.view.physicalSize = const Size(1366, 900);
@@ -986,6 +1005,21 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+
+      // Intermediate tablet/laptop widths (760px–1000px) with 1.25x–1.35x text scaling
+      // and multi-digit counts (60 Cars, 1 Source, 200 Events) render without overflow.
+      for (final double scale in <double>[1.25, 1.35]) {
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        for (final Size tabletLaptopSize in <Size>[
+          const Size(760, 800),
+          const Size(880, 800),
+          const Size(1000, 800),
+        ]) {
+          tester.view.physicalSize = tabletLaptopSize;
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+        }
+      }
 
       tester.view.physicalSize = const Size(1366, 900);
       tester.platformDispatcher.clearTextScaleFactorTestValue();

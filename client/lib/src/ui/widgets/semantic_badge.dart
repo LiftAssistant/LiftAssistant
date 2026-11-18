@@ -2,32 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../theme/instrument_theme.dart';
 
-class StatusDot extends StatelessWidget {
-  const StatusDot({
-    super.key,
-    required this.color,
-    this.hollow = false,
-    this.size = 7,
-  });
-
-  final Color color;
-  final bool hollow;
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: hollow ? Colors.transparent : color,
-        border: hollow ? Border.all(color: color, width: 1.5) : null,
-      ),
-    );
-  }
-}
-
 class SemanticBadge extends StatelessWidget {
   const SemanticBadge({
     super.key,
@@ -35,10 +9,9 @@ class SemanticBadge extends StatelessWidget {
     required this.foreground,
     required this.background,
     this.icon,
-    this.dotColor,
-    this.hollowDot = false,
     this.monospace = false,
     this.outlined = false,
+    this.compact = false,
     this.tooltip,
   });
 
@@ -46,33 +19,30 @@ class SemanticBadge extends StatelessWidget {
   final Color foreground;
   final Color background;
   final IconData? icon;
-  final Color? dotColor;
-  final bool hollowDot;
   final bool monospace;
   final bool outlined;
+  final bool compact;
   final String? tooltip;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
     final Widget tag = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? (icon == null ? 6.5 : 8) : 10,
+        vertical: compact ? (icon == null ? 3.0 : 3.5) : 4.5,
+      ),
       decoration: BoxDecoration(
         color: outlined ? Colors.transparent : background,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: outlined ? palette.border : foreground.withValues(alpha: 0.28),
-        ),
+        border: outlined ? Border.all(color: palette.border) : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          if (dotColor != null) ...<Widget>[
-            StatusDot(color: dotColor!, hollow: hollowDot, size: 7),
-            const SizedBox(width: 6),
-          ] else if (icon != null) ...<Widget>[
-            Icon(icon, size: 13.5, color: foreground),
-            const SizedBox(width: 5),
+          if (icon != null) ...<Widget>[
+            Icon(icon, size: compact ? 13 : 14, color: foreground),
+            SizedBox(width: compact ? 4.5 : 5.5),
           ],
           Flexible(
             child: Text(
@@ -81,7 +51,7 @@ class SemanticBadge extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: instrumentTabularStyle(
                 context,
-                fontSize: 11.5,
+                fontSize: compact ? (icon == null ? 10.5 : 11) : 11.5,
                 fontWeight: FontWeight.w600,
                 color: foreground,
               ),
@@ -119,8 +89,16 @@ class SectionHeader extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         if (icon != null) ...<Widget>[
-          Icon(icon, size: 17, color: palette.info),
-          const SizedBox(width: 8),
+          Container(
+            width: 26,
+            height: 26,
+            decoration: BoxDecoration(
+              color: palette.infoContainer,
+              borderRadius: BorderRadius.circular(7),
+            ),
+            child: Icon(icon, size: 15, color: palette.info),
+          ),
+          const SizedBox(width: 9),
         ],
         Flexible(
           child: Text(
@@ -193,14 +171,11 @@ class SemanticCalloutBanner extends StatelessWidget {
     final Widget copyRow = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            color: background,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Icon(icon, size: 17, color: accent),
+        CircleAvatar(
+          radius: 16,
+          backgroundColor: background,
+          foregroundColor: accent,
+          child: Icon(icon, size: 17),
         ),
         const SizedBox(width: 12),
         Expanded(
