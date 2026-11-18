@@ -22,6 +22,7 @@ use crate::read_api::ExperimentalReadModel;
 
 pub(super) const SNAPSHOT_PATH: &str = "/api/experimental/v0/snapshot";
 pub(super) const EVENTS_PATH: &str = "/api/experimental/v0/events";
+const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 pub(super) struct ReadModelPublisher {
@@ -85,10 +86,21 @@ pub(super) fn serve(
                 }
             }
         });
-        axum::serve(listener, router(models_rx))
-            .with_graceful_shutdown(wait_for_shutdown(shutdown))
-            .await
-            .map_err(|error| format!("experimental API server failed: {error}"))
+        let drain_deadline = async {
+            wait_for_shutdown(Arc::clone(&shutdown)).await;
+            tokio::time::sleep(SHUTDOWN_DRAIN_TIMEOUT).await;
+        };
+        let server = axum::serve(listener, router(models_rx))
+            .with_graceful_shutdown(wait_for_shutdown(Arc::clone(&shutdown)));
+        tokio::select! {
+            result = server.into_future() =>
+                result.map_err(|error| format!("experimental API server failed: {error}")),
+            () = drain_deadline => {
+                // Returning drops this API runtime and its remaining connection tasks.
+                eprintln!("warning: experimental API shutdown drain timed out; closing remaining connections");
+                Ok(())
+            }
+        }
     })
 }
 
@@ -431,5 +443,48 @@ mod tests {
             .join()
             .expect("server thread joins")
             .expect("server shuts down cleanly with active SSE client");
+    }
+
+    #[test]
+    fn shutdown_releases_listener_even_if_an_sse_peer_stops_reading() {
+        let mut host = ReadOnlyHost::new(BuildingTopology::reference_eight_floor());
+        // A response larger than the loopback send buffers makes the response genuinely pending.
+        host.record_mapping_rejection(
+            crate::ObservationSourceId::new("fixture/backpressure"),
+            crate::ObservationSessionId::new("backpressure-session"),
+            "x".repeat(16 * 1024 * 1024),
+            "synthetic evidence".into(),
+        );
+        let publisher = ReadModelPublisher::new(host.read_model());
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let server_shutdown = Arc::clone(&shutdown);
+        let (finished, outcome) = std::sync::mpsc::sync_channel(1);
+        let server = thread::spawn(move || {
+            finished
+                .send(serve(listener, publisher, server_shutdown))
+                .unwrap();
+        });
+        let mut stalled = TcpStream::connect(address).unwrap();
+        stalled
+            .set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        write!(
+            stalled,
+            "GET {EVENTS_PATH} HTTP/1.1\r\nHost: {address}\r\n\r\n"
+        )
+        .unwrap();
+        read_until(&mut stalled, &mut Vec::new(), "event: snapshot");
+
+        shutdown.store(true, Ordering::Relaxed);
+        let result = outcome.recv_timeout(Duration::from_secs(4));
+        // Allow the unfixed server to stop too, so a failed regression cannot leak a thread.
+        drop(stalled);
+        server.join().unwrap();
+        result
+            .expect("shutdown must finish while the SSE peer is still open")
+            .unwrap();
+        assert!(TcpStream::connect(address).is_err());
     }
 }
