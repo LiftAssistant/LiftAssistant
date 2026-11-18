@@ -10,7 +10,9 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-**M5 is COMPLETE at the read-only milestone boundary. Completion mode is HUMAN-CHECK.** M5.13 is implemented and M5.14 passed. M5.12 HA/BMS is deferred and conditional. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. M6 authority and write semantics await a separate HUMAN review.
+**M6A — Controlled Intent Semantics (virtual).** M5 remains complete at its read-only milestone boundary. The HUMAN authorization covers M6.0–M6.8 and the M6A audit. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`.
+
+**M6.0 implemented. M6.1 is READY.** The prior art and approved virtual semantic boundaries are recorded in PRIOR_ART and ARCHITECTURE.
 
 ## Validated baseline
 

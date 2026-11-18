@@ -149,6 +149,9 @@ This checkpoint is not permission for low-level brake/drive/safety actuation.
 
 Goal: validate high-level write semantics without using passenger production as the experiment.
 
+M6A covers the software/virtual phase through the completion audit. M6B candidate
+external validation requires another HUMAN architecture review.
+
 Entry requires a new HUMAN architecture review. Before a general call or write workload,
 separate active calls from bounded completed-call history, define intent identity and
 receipts, idempotency, expiry, cancellation/supersession, write readiness/authority and

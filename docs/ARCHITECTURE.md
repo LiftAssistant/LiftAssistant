@@ -1,5 +1,13 @@
 # Architecture
 
+## M6A virtual intent boundary
+
+The controlled laboratory composes high-level `ServeFloor` and `ParkAt` with deterministic authority and a virtual lower controller. A hall call retains its `CallId` across dispatch decisions. Each distinct lower operation gets an `IntentId` in a single virtual issuance scope. `Intent` stays the requested operation. Admission, controller receipt, requested withdrawal and reconciliation are separate facts.
+
+An explicit grant authorizes one internal Principal for a controlled car. The grant identity is independent of controller identity and vendor holder/session. Write readiness checks that grant, configured controller binding and availability, current Operational evidence, explicit operation and floor coverage, and incompatible outstanding work. Read-only readiness supplies no write permission. Stale grants, conflict and unknown delivery fail closed. Engine and Core act on explicit inputs and use no wall clock.
+
+Controller receipt is correlated by operation identity. Indeterminate delivery is retained until receipt or observation supplies evidence. Intent satisfaction requires post-dispatch Operational evidence of a stopped car at the exact target. A hall call's separate service completion may additionally need an open door. Reported destination never replaces desired intent. Cancellation or expiry withdraws desired work and cannot assert that physical execution stopped. A pending uncertain operation continues to fence conflicts. Restart restores bounded intent state and reconciles with the controller/observations before new work on that car. This scope uses internal virtual state and preserves read-only network interfaces.
+
 ## Current composition
 
 ~~~text
