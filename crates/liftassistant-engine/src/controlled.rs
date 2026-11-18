@@ -182,7 +182,7 @@ pub(crate) struct ControlledIntents {
     active: BTreeMap<CarId, IntentRecord>,
     recent: VecDeque<IntentRecord>,
     last_issued: u64,
-    last_admitted: Option<IntentId>,
+    last_admitted: BTreeMap<CarId, IntentId>,
 }
 
 impl ControlledIntents {
@@ -408,12 +408,14 @@ impl Engine {
                 Admission::IdentityConflict
             };
         }
-        // M6A uses one deterministically allocated, monotonically issued ID domain.
-        // After bounded outcome retention, the watermark still prevents re-execution.
+        // New executions for each car advance independently. Its watermark still
+        // fences old identities after bounded outcome retention.
+        let car = request.intent.car();
         if self
             .controlled
             .last_admitted
-            .is_some_and(|last| request.id <= last)
+            .get(car)
+            .is_some_and(|last| request.id <= *last)
         {
             return Admission::RetiredIdentity;
         }
@@ -421,7 +423,6 @@ impl Engine {
         {
             return Admission::Blocked(reason);
         }
-        let car = request.intent.car();
         let state = self.operational_car_state(car).expect("ready car");
         let source = self
             .operational_authorities
@@ -433,7 +434,9 @@ impl Engine {
             .latest_provenance
             .clone();
         let started_at = state.location;
-        self.controlled.last_admitted = Some(request.id);
+        self.controlled
+            .last_admitted
+            .insert(car.clone(), request.id);
         self.controlled.active.insert(
             car.clone(),
             IntentRecord {

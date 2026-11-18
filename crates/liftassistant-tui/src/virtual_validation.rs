@@ -632,6 +632,39 @@ fn same_floor() -> Result<(), String> {
     )
 }
 
+fn recover_older_request_for_other_car() -> Result<(), String> {
+    let mut lab = Lab::new(true);
+    let a = lab.issue(7);
+    let (source, session) = lab.controller.observation_source();
+    lab.engine
+        .invalidate_car_observations(&source, &session, &lab.a)
+        .unwrap();
+    check(
+        lab.submit(&a) == Admission::Blocked(WriteBlocker::ObservationUnavailable),
+        "A's request bypassed stale observations",
+    )?;
+    let b = lab.engine.issue_controlled_intent(
+        Intent::ParkAt {
+            car: lab.b.clone(),
+            floor: Floor::new(5),
+        },
+        None,
+    );
+    check(
+        lab.engine
+            .submit_controlled(b, &lab.b_grant, &mut lab.controller)
+            == Admission::Admitted,
+        "A's stale request blocked B",
+    )?;
+    for update in lab.controller.observe_current() {
+        lab.engine.ingest_observation_update(update);
+    }
+    check(
+        lab.submit(&a) == Admission::Admitted && lab.controller.submissions() == 2,
+        "B's identity watermark retired A's older, never-submitted request",
+    )
+}
+
 pub fn run() -> Result<String, String> {
     check(delivery()? == delivery()?, "independent replay diverged")?;
     restart()?;
@@ -639,6 +672,7 @@ pub fn run() -> Result<String, String> {
     withdrawal_and_divergence()?;
     bounded_history()?;
     same_floor()?;
+    recover_older_request_for_other_car()?;
     Ok(concat!(
         "M6A VirtualController failure and restart matrix PASS\n",
         "  identity, receipts, canonical reconciliation, deterministic incident replay\n",

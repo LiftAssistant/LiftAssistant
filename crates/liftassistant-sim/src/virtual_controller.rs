@@ -91,7 +91,7 @@ pub struct VirtualController {
     next_behavior: VirtualBehavior,
     operations: BTreeMap<CarId, Operation>,
     recent: VecDeque<IntentReceipt>,
-    last_id: Option<IntentId>,
+    last_admitted: BTreeMap<CarId, IntentId>,
     submissions: u64,
 }
 
@@ -105,7 +105,7 @@ impl VirtualController {
             next_behavior: VirtualBehavior::default(),
             operations: BTreeMap::new(),
             recent: VecDeque::new(),
-            last_id: None,
+            last_admitted: BTreeMap::new(),
             submissions: 0,
         }
     }
@@ -264,11 +264,12 @@ impl ControlledIntentSink for VirtualController {
         let car = intent.car();
         if !self.available(car)
             || self.operations.contains_key(car)
-            || self.last_id.is_some_and(|last| id <= last)
+            || self.last_admitted.get(car).is_some_and(|last| id <= *last)
+            || self.receipt(id).is_some()
         {
             return Submission::NotSubmitted;
         }
-        self.last_id = Some(id);
+        self.last_admitted.insert(car.clone(), id);
         self.submissions = self
             .submissions
             .checked_add(1)
