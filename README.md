@@ -6,9 +6,12 @@ The long-term goal is to make elevator controllers, protocols, capabilities, pol
 
 LiftAssistant is an early semantic-core and simulation project. **It is not approved for controlling passenger elevators or any safety-critical equipment.**
 
-## Current target: M5 — Production read-only platform
+## M5 — Production read-only platform
 
 M1 Interactive Simulator is implemented and human-accepted.
+
+M5 is complete at its read-only milestone boundary. Live validation of a second source
+family remains pending. The project is at a HUMAN checkpoint before write-model work.
 
 The current working vertical path is:
 

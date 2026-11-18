@@ -101,7 +101,7 @@ M4 exit evidence includes two independent recorded source families, a headless r
 
 Any passenger-elevator control, safety-authority change, normative public-schema freeze, or first real write path requires HUMAN-REVIEW.
 
-## M5 — Production Read-only Platform — current
+## M5 — Production Read-only Platform — complete
 
 Goal: make LiftAssistant genuinely useful on real sites without requiring control authority.
 
@@ -148,6 +148,12 @@ This checkpoint is not permission for low-level brake/drive/safety actuation.
 ## M6 — Controlled Intent Laboratory
 
 Goal: validate high-level write semantics without using passenger production as the experiment.
+
+Entry requires a new HUMAN architecture review. Before a general call or write workload,
+separate active calls from bounded completed-call history, define intent identity and
+receipts, idempotency, expiry, cancellation/supersession, write readiness/authority and
+restart reconciliation. Where cars have different service sets, establish evidence-backed
+per-car execution floor capabilities before dispatch or writes depend on them.
 
 Progression should be evidence-driven:
 
@@ -196,6 +202,11 @@ Passenger-production write deployment remains HUMAN-REVIEW and may require exter
 ## M8 — Production Hardening
 
 Goal: make deployment, recovery, updates, compatibility and field debugging robust enough for sustained operation.
+
+Read-only deployment debt includes external RMF string/array cardinality limits, CLI
+snapshot/SSE payload bounds, Flutter reconnect jitter, HTTP connection/rate limits,
+TLS/auth and explicit browser origin policy, and stable compatibility once the wire
+contract is approved.
 
 Introduce these only when real deployment pressure exists:
 

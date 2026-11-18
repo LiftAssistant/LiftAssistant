@@ -10,7 +10,7 @@ M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.11 are implemented. HUMAN accepted the M5.11 first-version client boundary for backend progression on 2026-11-18. M5.12 HA/BMS is deferred and conditional. **M5.13 is IMPLEMENTED. M5.14 is READY.** Second-family live validation remains `EXTERNAL_VALIDATION_PENDING` outside the M5 completion gate.
+**M5 is COMPLETE at the read-only milestone boundary. Completion mode is HUMAN-CHECK.** M5.13 is implemented and M5.14 passed. M5.12 HA/BMS is deferred and conditional. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. M6 authority and write semantics await a separate HUMAN review.
 
 ## Validated baseline
 
@@ -963,6 +963,19 @@ Reproduce the synthetic Linux process proof with `python3 crates/liftassistant-h
 
 ### M5.14 — M5 Completion Audit
 
-**READY.** Review the corrected M5 ownership, fault boundaries, state retention and claims before the HUMAN checkpoint.
+**PASS.** The corrections and M5.13 rerun close the read-only correctness and lifecycle gates. No unresolved M5-scope defect was found in this audit.
 
-The diagnostics audit reproduced a production Host panic on a broken stdout pipe. Host status and API lifecycle logs now use best-effort writes. A real idle-domain Host with both output pipes closed continued serving snapshot/SSE and exited successfully on SIGTERM.
+- **Dependency ownership.** Normal dependency trees and source inspection confirm Core depends on model only, Engine composes model/Core/runtime, RMF owns ROS/DDS, and the Host owns entropy, clock policy, filesystem output and HTTP serving. The CLI and Flutter reach the Host through the read API.
+- **Identity and lifecycle.** Logical car, configured source and randomly issued incarnation have distinct roles. Ingestion sequence orders one source incarnation, Host revision versions projected client state, and diagnostic sequence orders a bounded diagnostic stream. RMF controller session, source timestamp and reader recreation do not assign incarnation identity.
+- **Freshness.** Discovery, feed payload activity, per-car evidence availability and readiness are separate. Deterministic regressions cover multiplexed expiry, no false stale before first payload, and same-session recovery without resetting the watermark.
+- **Topology and capabilities.** Building floors bound the valid evidence universe. Recorded and live RMF mapping carries the per-lift floor list as source context. It creates no execution capability or per-car dispatch eligibility rule.
+- **Authority.** A logical car has at most one Operational observation authority. Auxiliary evidence stays isolated. Host and clients expose observations only, without field fill, automatic failover or command submission.
+- **Resource retention.** Engine and Host active maps follow configured sources and cars. Source activation clears stale observation stream state. Diagnostics and replay windows are bounded, and SSE stores latest values with active connection tasks that release on shutdown. Completed calls and pending generated-intent correlation belong to the future intent workload.
+- **Diagnostics.** Capsule output errors consume a one-shot request and warn. Audit also reproduced a production Host panic on a broken stdout pipe. A small fix makes Host status and API lifecycle logs best effort. A real idle-domain Host with both output pipes closed served snapshot/SSE and exited successfully on SIGTERM. Diagnostic failures carry no equipment-fault implication.
+- **External contracts.** HTTP remains optional and read-only at `experimental/v0`. Capsule and sanitized candidate formats, diagnostic IDs, and adapter validation profiles remain internal or experimental. The additive car-invalidation action has replay and sanitization coverage. Prior capsule fixtures still replay on the new reader.
+- **Evidence.** The 136 workspace tests, all-target locked Clippy, formatting, actual Rust 1.85.0 check, executable scenarios and process proofs support the M5 result. Official Hotel evidence belongs to the earlier live runs. The current RMF timing/fault matrix uses deterministic input. BACnet evidence is recorded. The first Flutter runtime result remains scoped to its previously validated builds/environments.
+- **Scope and documentation.** No generic lifecycle, health, adapter or messaging framework was introduced. The audit reconciled current gates and durable architecture in their owning documents. M5.12 stays conditional and deferred.
+
+**M6 entry blockers.** Separate active calls from bounded completed-call/history retention before the general call workload. Design `IntentId`, receipts, idempotency, expiry/cancellation/supersession, write readiness/authority and restart reconciliation before a write-capable path. Review evidence-backed per-car execution floor coverage before dispatch or writes to cars with different service sets.
+
+**M8 hardening debt.** External RMF string/array bounds, CLI HTTP/SSE payload bounds, Flutter reconnect jitter, HTTP connection/rate limits, remote deployment security (TLS/auth and explicit CORS policy), and stable API compatibility remain deferred. Second-family live production validation stays `EXTERNAL_VALIDATION_PENDING`.
