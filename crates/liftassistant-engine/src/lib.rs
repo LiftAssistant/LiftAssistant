@@ -296,6 +296,8 @@ impl Engine {
         if let Some(previous) = &previous_session {
             self.retired_source_sessions
                 .insert((source.clone(), previous.clone()));
+            self.diagnostics
+                .forget_observation_stream(&source, previous);
         }
         self.observations.remove_source(&source);
         let mut invalidated_cars: BTreeSet<_> = self

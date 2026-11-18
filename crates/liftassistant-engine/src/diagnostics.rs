@@ -106,6 +106,17 @@ impl FlightRecorder {
         self.incidents.iter()
     }
 
+    pub(crate) fn forget_observation_stream(
+        &mut self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+    ) {
+        // Engine rejects retired-session observations before they reach this detector.
+        self.detector
+            .last_observation_sequence
+            .remove(&(source.clone(), session.clone()));
+    }
+
     pub(crate) fn record_observation(
         &mut self,
         update: CarObservationUpdate,
@@ -264,5 +275,61 @@ impl SequenceDetector {
             | DiagnosticEvent::SourceObservationsInvalidated { .. }
             | DiagnosticEvent::Anomaly(_) => Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use liftassistant_model::{BuildingTopology, CarState, Floor, ObservationProvenance};
+
+    use super::*;
+    use crate::{Engine, SourceSessionError};
+
+    #[test]
+    fn sequence_detector_retains_only_the_current_stream_after_session_churn() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let source = ObservationSourceId::new("churn");
+        let first_session = ObservationSessionId::new("session-0");
+        let car = CarState::new("A", Floor::new(1));
+        engine
+            .bind_observation(
+                source.clone(),
+                car.id.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .unwrap();
+        for generation in 0..1024 {
+            let session = ObservationSessionId::new(format!("session-{generation}"));
+            engine
+                .begin_source_session(source.clone(), session.clone())
+                .unwrap();
+            let update = CarObservationUpdate::from_state(
+                ObservationProvenance {
+                    source: source.clone(),
+                    session,
+                    sequence: ObservationSequence::new(1),
+                },
+                &car,
+            );
+            engine.ingest_observation_update(update.clone());
+            engine.ingest_observation_update(update);
+            assert_eq!(
+                engine.diagnostics.detector.last_observation_sequence.len(),
+                1
+            );
+        }
+        assert_eq!(engine.diagnostics.incidents().count(), INCIDENT_LIMIT);
+        assert_eq!(
+            engine.diagnostics.entries().count(),
+            crate::DEFAULT_DIAGNOSTIC_CAPACITY
+        );
+        assert!(matches!(
+            engine.begin_source_session(source, first_session),
+            Err(SourceSessionError::RetiredSession { .. })
+        ));
+        println!(
+            "retired identity entries={} after 1024 activations",
+            engine.retired_source_sessions.len()
+        );
     }
 }

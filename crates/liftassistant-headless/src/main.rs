@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+mod failure_matrix;
 mod http_api;
 mod incident;
 mod read_api;
