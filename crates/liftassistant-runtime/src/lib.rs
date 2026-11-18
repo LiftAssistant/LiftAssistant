@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, error::Error, fmt, time::Duration};
 
 use liftassistant_model::{
     CarId, CarLocation, CarObservation, CarObservationUpdate, CarState, DoorEvidence, DoorState,
-    Floor, Intent, MotionEvidence, ObservationProvenance, ObservationSequence,
+    Floor, Intent, IntentId, MotionEvidence, ObservationProvenance, ObservationSequence,
     ObservationSessionId, ObservationSourceId, OperatingModeEvidence, PositionEvidence,
     ReportedDestination,
 };
@@ -15,6 +15,44 @@ pub enum RuntimeEvent {
     Observation(CarObservationUpdate),
     Arrived { car: CarId, floor: Floor },
     DoorStateChanged { car: CarId, state: DoorState },
+}
+
+/// Configured lower-controller identity. Vendor holder/session IDs stay inside its adapter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControllerId(String);
+
+impl ControllerId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Submission {
+    NotSubmitted,
+    Submitted,
+    Indeterminate,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReceiptStatus {
+    Accepted,
+    Rejected,
+    Indeterminate,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IntentReceipt {
+    pub controller: ControllerId,
+    pub intent: IntentId,
+    pub status: ReceiptStatus,
+}
+
+/// A receipt and canonical observations arrive separately from submission.
+pub trait ControlledIntentSink {
+    fn controller_id(&self) -> &ControllerId;
+    fn available(&self, car: &CarId) -> bool;
+    fn submit(&mut self, id: IntentId, intent: &Intent) -> Submission;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

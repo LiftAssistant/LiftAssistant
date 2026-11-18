@@ -6,13 +6,14 @@ mod diagnostics;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub use controlled::{
-    Admission, AuthorityError, AuthorityGrant, AuthorityGrantId, ControllerId, IntentRecord,
-    IntentRequest, PrincipalId, WriteBlocker,
+    Admission, AuthorityError, AuthorityGrant, AuthorityGrantId, ControlledEvent, IntentRecord,
+    IntentRequest, PrincipalId, Receipt, ReceiptResult, Reconciliation, WriteBlocker,
 };
 pub use diagnostics::{
-    DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, DiagnosticSequence, FlightRecorder,
-    IncidentSnapshot,
+    ControlledIssue, DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, DiagnosticSequence,
+    FlightRecorder, IncidentSnapshot,
 };
+pub use liftassistant_runtime::ControllerId;
 
 use liftassistant_core::{
     CallRegistration, CallRegistry, DispatchCandidate, DispatchSelection, HallCallRejection,
@@ -314,6 +315,11 @@ impl Engine {
             }
         }
 
+        for car in &invalidated_cars {
+            if self.operational_authorities.get(car) == Some(&source) {
+                self.note_controlled_readiness_loss(car, WriteBlocker::ObservationUnavailable);
+            }
+        }
         Ok(SourceSessionTransition {
             source,
             previous_session,
@@ -351,6 +357,11 @@ impl Engine {
             }
         }
         let invalidated_cars = invalidated_cars.into_iter().collect::<Vec<_>>();
+        for car in &invalidated_cars {
+            if self.operational_authorities.get(car) == Some(&source) {
+                self.note_controlled_readiness_loss(car, WriteBlocker::ObservationUnavailable);
+            }
+        }
         self.diagnostics.record_source_invalidation(
             source.clone(),
             session.clone(),
@@ -382,8 +393,10 @@ impl Engine {
         self.observations
             .invalidate_car_evidence(source, session, car);
         self.source_states.remove(&(source.clone(), car.clone()));
-        if role == ObservationBindingRole::Operational {
-            self.operational_states.remove(car);
+        if role == ObservationBindingRole::Operational
+            && self.operational_states.remove(car).is_some()
+        {
+            self.note_controlled_readiness_loss(car, WriteBlocker::ObservationUnavailable);
         }
         self.diagnostics.record_source_invalidation(
             source.clone(),
@@ -474,8 +487,13 @@ impl Engine {
         };
         let Some(snapshot) = assembled.snapshot() else {
             self.source_states.remove(&key);
-            if role == ObservationBindingRole::Operational {
-                self.operational_states.remove(&assembled.car);
+            if role == ObservationBindingRole::Operational
+                && self.operational_states.remove(&assembled.car).is_some()
+            {
+                self.note_controlled_readiness_loss(
+                    &assembled.car,
+                    WriteBlocker::ObservationUnavailable,
+                );
             }
             return ObservationIngestResult::Incomplete(Box::new(assembled));
         };
@@ -484,14 +502,28 @@ impl Engine {
             CarStateResolution::Resolved(state) => {
                 self.source_states.insert(key, state.clone());
                 if role == ObservationBindingRole::Operational {
-                    self.operational_states
+                    let previous = self
+                        .operational_states
                         .insert(state.id.clone(), state.clone());
+                    if state.mode != liftassistant_model::OperatingMode::Normal
+                        && previous.is_some_and(|previous| {
+                            previous.mode == liftassistant_model::OperatingMode::Normal
+                        })
+                    {
+                        self.note_controlled_readiness_loss(
+                            &state.id,
+                            WriteBlocker::Mode(state.mode),
+                        );
+                    }
+                    self.reconcile_controlled(state, &assembled);
                 }
             }
             CarStateResolution::Unresolved { car, .. } => {
                 self.source_states.remove(&key);
-                if role == ObservationBindingRole::Operational {
-                    self.operational_states.remove(car);
+                if role == ObservationBindingRole::Operational
+                    && self.operational_states.remove(car).is_some()
+                {
+                    self.note_controlled_readiness_loss(car, WriteBlocker::ObservationUnavailable);
                 }
             }
         }

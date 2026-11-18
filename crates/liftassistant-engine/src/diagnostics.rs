@@ -1,12 +1,15 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use liftassistant_model::{
-    CarId, CarObservationUpdate, Intent, ObservationSequence, ObservationSessionId,
+    CarId, CarObservationUpdate, Intent, IntentId, ObservationSequence, ObservationSessionId,
     ObservationSourceId,
 };
 use liftassistant_runtime::RuntimeEvent;
 
-use crate::{EngineEvent, ObservationBindingRole};
+use crate::{
+    Admission, ControlledEvent, EngineEvent, ObservationBindingRole, ReceiptResult, Reconciliation,
+    WriteBlocker,
+};
 
 const INCIDENT_BEFORE_ENTRIES: usize = 8;
 const INCIDENT_AFTER_ENTRIES: usize = 2;
@@ -33,6 +36,20 @@ pub enum DiagnosticAnomaly {
     IntentAcceptedWithoutGeneration {
         intent: Intent,
     },
+    ControlledIntent {
+        intent: IntentId,
+        issue: ControlledIssue,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlledIssue {
+    IdentityConflict,
+    AuthorityFenced,
+    UnexpectedReceipt,
+    InconsistentReceipt,
+    Divergence,
+    WriteReadinessLost,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +59,7 @@ pub enum DiagnosticEvent {
         role: ObservationBindingRole,
     },
     Engine(EngineEvent),
+    Controlled(ControlledEvent),
     SourceObservationsInvalidated {
         source: ObservationSourceId,
         session: ObservationSessionId,
@@ -129,6 +147,10 @@ impl FlightRecorder {
         for event in events {
             self.record(DiagnosticEvent::Engine(event.clone()));
         }
+    }
+
+    pub(crate) fn record_controlled(&mut self, event: ControlledEvent) {
+        self.record(DiagnosticEvent::Controlled(event));
     }
 
     pub(crate) fn record_source_invalidation(
@@ -270,6 +292,39 @@ impl SequenceDetector {
                         intent: intent.clone(),
                     }]
                 }
+            }
+            DiagnosticEvent::Controlled(event) => {
+                use ControlledIssue as Issue;
+                let (intent, issue) = match event {
+                    ControlledEvent::Admission {
+                        request,
+                        result: Admission::IdentityConflict,
+                        ..
+                    } => (request.id, Issue::IdentityConflict),
+                    ControlledEvent::Admission {
+                        request,
+                        result: Admission::Blocked(WriteBlocker::AuthorityFenced),
+                        ..
+                    } => (request.id, Issue::AuthorityFenced),
+                    ControlledEvent::Receipt {
+                        receipt,
+                        result: ReceiptResult::Unexpected,
+                    } => (receipt.intent, Issue::UnexpectedReceipt),
+                    ControlledEvent::Receipt {
+                        receipt,
+                        result: ReceiptResult::Inconsistent,
+                    } => (receipt.intent, Issue::InconsistentReceipt),
+                    ControlledEvent::Reconciliation {
+                        intent,
+                        outcome: Reconciliation::Diverged { .. },
+                        ..
+                    } => (*intent, Issue::Divergence),
+                    ControlledEvent::ReadinessLost { intent, .. } => {
+                        (*intent, Issue::WriteReadinessLost)
+                    }
+                    _ => return Vec::new(),
+                };
+                vec![DiagnosticAnomaly::ControlledIntent { intent, issue }]
             }
             DiagnosticEvent::Engine(_)
             | DiagnosticEvent::SourceObservationsInvalidated { .. }
