@@ -18,7 +18,6 @@ use std::{
     },
     thread,
     time::Duration,
-    time::SystemTime,
 };
 
 use liftassistant_engine::{
@@ -1561,13 +1560,12 @@ fn publish_read_model(api_server: &Option<ExperimentalApiServer>, host: &ReadOnl
 }
 
 fn new_host_source_session() -> Result<ObservationSessionId, String> {
-    let since_epoch = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_err(|error| format!("host clock is before UNIX epoch: {error}"))?;
+    let mut entropy = [0_u8; 16];
+    getrandom::fill(&mut entropy)
+        .map_err(|error| format!("failed to generate RMF source incarnation: {error}"))?;
     Ok(ObservationSessionId::new(format!(
-        "rmf-host-{}-{}",
-        std::process::id(),
-        since_epoch.as_nanos()
+        "{:032x}",
+        u128::from_be_bytes(entropy)
     )))
 }
 

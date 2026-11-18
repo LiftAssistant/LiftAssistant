@@ -71,7 +71,7 @@ fn update(
 #[ignore = "driven by tests/m5_soak.py over stdin and real loopback HTTP"]
 fn api_soak_child() {
     use std::io::{BufRead, Write};
-    use std::time::Instant;
+    use std::time::{Instant, SystemTime};
 
     let cars = env::var("LIFTASSISTANT_SOAK_CARS")
         .unwrap()

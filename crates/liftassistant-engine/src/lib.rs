@@ -109,10 +109,6 @@ pub enum SourceSessionError {
         source: ObservationSourceId,
         session: ObservationSessionId,
     },
-    RetiredSession {
-        source: ObservationSourceId,
-        session: ObservationSessionId,
-    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -155,7 +151,6 @@ pub struct Engine {
     observation_bindings: BTreeMap<(ObservationSourceId, CarId), ObservationBindingRole>,
     operational_authorities: BTreeMap<CarId, ObservationSourceId>,
     active_source_sessions: BTreeMap<ObservationSourceId, ObservationSessionId>,
-    retired_source_sessions: BTreeSet<(ObservationSourceId, ObservationSessionId)>,
     observations: ObservationAssembler,
     source_states: BTreeMap<(ObservationSourceId, CarId), CarState>,
     operational_states: BTreeMap<CarId, CarState>,
@@ -177,7 +172,6 @@ impl Engine {
             observation_bindings: BTreeMap::new(),
             operational_authorities: BTreeMap::new(),
             active_source_sessions: BTreeMap::new(),
-            retired_source_sessions: BTreeSet::new(),
             observations: ObservationAssembler::new(),
             source_states: BTreeMap::new(),
             operational_states: BTreeMap::new(),
@@ -268,6 +262,8 @@ impl Engine {
         self.active_source_sessions.get(source)
     }
 
+    /// Activates a fresh incarnation supplied by the ingestion-lifecycle owner.
+    /// The caller must never assign a historical token to a new lifetime.
     pub fn begin_source_session(
         &mut self,
         source: ObservationSourceId,
@@ -283,19 +279,10 @@ impl Engine {
         if self.active_source_sessions.get(&source) == Some(&session) {
             return Err(SourceSessionError::AlreadyActive { source, session });
         }
-        if self
-            .retired_source_sessions
-            .contains(&(source.clone(), session.clone()))
-        {
-            return Err(SourceSessionError::RetiredSession { source, session });
-        }
-
         let previous_session = self
             .active_source_sessions
             .insert(source.clone(), session.clone());
         if let Some(previous) = &previous_session {
-            self.retired_source_sessions
-                .insert((source.clone(), previous.clone()));
             self.diagnostics
                 .forget_observation_stream(&source, previous);
         }
@@ -1041,13 +1028,6 @@ mod tests {
             })
         );
         assert_eq!(engine.source_state(&source, &car), Some(&state_b));
-        assert_eq!(
-            engine.begin_source_session(source.clone(), session_a.clone()),
-            Err(SourceSessionError::RetiredSession {
-                source: source.clone(),
-                session: session_a,
-            })
-        );
         assert_eq!(
             engine.begin_source_session(source.clone(), session_b.clone()),
             Err(SourceSessionError::AlreadyActive {

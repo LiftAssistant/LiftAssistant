@@ -1,5 +1,13 @@
 # Prior art and research policy
 
+## M5 read-only lifecycle corrections
+
+- [Kubernetes object UIDs](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids) and [systemd invocation IDs](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html) distinguish stable names from individual lifetimes. [Kafka producer fencing](https://kafka.apache.org/35/design/protocol/) rejects superseded producers using current identity/epoch. LiftAssistant takes the fresh opaque incarnation and current-token fence. Its token carries no numeric epoch or event order. Bounded replay artifacts can check uniqueness separately.
+- [DDS 1.4 deadline and liveliness QoS](https://www.omg.org/spec/DDS/1.4/PDF) distinguish an instance update contract from writer liveliness. [ROS 2 QoS](https://raw.githubusercontent.com/ros2/ros2_documentation/kilted/source/Concepts/Intermediate/About-Quality-of-Service-Settings.rst) also separates deadline, liveliness and connection matching. In the observed Hotel feed, one subscription carries multiple lifts. An application arrival timer keyed by explicit lift binding can revoke one car while the feed still receives data. Discovery evidence belongs to the current subscriber. Recreating that subscriber leaves the adapter incarnation and existing ordering intact.
+- [Kubernetes controllers](https://kubernetes.io/docs/concepts/architecture/controller/) scope reconciliation to linked entities. [Open-RMF LiftState](https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg) identifies a lift and supplies its own floor list. LiftAssistant scopes mapping faults to the configured entity and treats unbound names as diagnostic evidence. Feed transport and impossible adapter failures retain their wider scope.
+- [Open-RMF LiftState](https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg) supplies available floors per lift. [ASHRAE BACnet Lift object](https://bacnet.org/wp-content/uploads/sites/4/2022/08/Add-135-2012aq.pdf) describes individual lift and door/landing characteristics. An observed RMF floor set can therefore fit inside the configured building floor universe without defining execution capability.
+- [OpenTelemetry error handling](https://opentelemetry.io/docs/specs/otel/error-handling/) isolates observability failures from application work. An optional Capsule write is a one-shot diagnostic side effect after semantic invalidation. The Host reports a write error and continues according to source/transport disposition.
+
 This file is a compact research index for semantic and interface design. It is not a specification and must not become a substitute for implementation.
 
 Verified/reviewed: 2026-11-16

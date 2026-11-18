@@ -272,6 +272,7 @@ impl fmt::Display for ObservationSourceId {
 }
 
 /// Identifies one explicitly activated lifetime of an observation source.
+/// The lifecycle owner supplies a fresh token for each new incarnation.
 ///
 /// Session values are opaque and comparable only for identity. They carry no ordering,
 /// freshness, or wall-clock meaning.

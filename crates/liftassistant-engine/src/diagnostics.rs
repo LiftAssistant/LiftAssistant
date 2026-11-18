@@ -283,7 +283,7 @@ mod tests {
     use liftassistant_model::{BuildingTopology, CarState, Floor, ObservationProvenance};
 
     use super::*;
-    use crate::{Engine, SourceSessionError};
+    use crate::{Engine, ObservationIngestError, ObservationIngestResult};
 
     #[test]
     fn sequence_detector_retains_only_the_current_stream_after_session_churn() {
@@ -298,7 +298,7 @@ mod tests {
                 ObservationBindingRole::Operational,
             )
             .unwrap();
-        for generation in 0..1024 {
+        for generation in 0..2048 {
             let session = ObservationSessionId::new(format!("session-{generation}"));
             engine
                 .begin_source_session(source.clone(), session.clone())
@@ -311,8 +311,14 @@ mod tests {
                 },
                 &car,
             );
-            engine.ingest_observation_update(update.clone());
+            assert!(matches!(
+                engine.ingest_observation_update(update.clone()),
+                ObservationIngestResult::Resolution(_)
+            ));
             engine.ingest_observation_update(update);
+            assert_eq!(engine.active_source_sessions.len(), 1);
+            assert_eq!(engine.source_states.len(), 1);
+            assert_eq!(engine.operational_states.len(), 1);
             assert_eq!(
                 engine.diagnostics.detector.last_observation_sequence.len(),
                 1
@@ -323,13 +329,21 @@ mod tests {
             engine.diagnostics.entries().count(),
             crate::DEFAULT_DIAGNOSTIC_CAPACITY
         );
-        assert!(matches!(
-            engine.begin_source_session(source, first_session),
-            Err(SourceSessionError::RetiredSession { .. })
-        ));
-        println!(
-            "retired identity entries={} after 1024 activations",
-            engine.retired_source_sessions.len()
-        );
+        for session in [first_session, ObservationSessionId::new("session-2046")] {
+            let late = CarObservationUpdate::from_state(
+                ObservationProvenance {
+                    source: source.clone(),
+                    session,
+                    sequence: ObservationSequence::new(9999),
+                },
+                &car,
+            );
+            assert!(matches!(
+                engine.ingest_observation_update(late),
+                ObservationIngestResult::Rejected(
+                    ObservationIngestError::InactiveSourceSession { .. }
+                )
+            ));
+        }
     }
 }

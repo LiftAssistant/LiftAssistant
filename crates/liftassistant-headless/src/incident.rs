@@ -1008,11 +1008,17 @@ impl IncidentCapsule {
             bound_sources.insert(binding.source.as_str());
         }
         let mut active_sessions = BTreeMap::<&str, &str>::new();
+        let mut incarnations = BTreeSet::new();
         for action in &self.actions {
             match action {
                 CapsuleAction::BeginSourceSession { source, session } => {
                     if !bound_sources.contains(source.as_str()) {
                         return Err(format!("incident capsule starts unbound source {source:?}"));
+                    }
+                    if !incarnations.insert((source.as_str(), session.as_str())) {
+                        return Err(format!(
+                            "incident capsule reuses source incarnation {session:?} for {source:?}"
+                        ));
                     }
                     active_sessions.insert(source, session);
                 }
@@ -1729,5 +1735,32 @@ impl SanitizationReport {
             "sanitization: PASS profile=deterministic-pseudonymization/1 sources={} sessions={} cars={} floors={} manual_review=REQUIRED",
             self.source_count, self.session_count, self.car_count, self.floor_count
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_capsule_rejects_reactivation_of_a_historical_incarnation() {
+        let mut capsule = crate::capture_reference_incident_capsule().unwrap();
+        let first = capsule
+            .actions
+            .iter()
+            .find(|action| matches!(action, CapsuleAction::BeginSourceSession { .. }))
+            .unwrap()
+            .clone();
+        let CapsuleAction::BeginSourceSession { source, .. } = &first else {
+            unreachable!()
+        };
+        assert!(capsule.actions.iter().filter(|action| matches!(action, CapsuleAction::BeginSourceSession { source: other, .. } if other == source)).count() >= 2);
+        capsule.actions.push(first);
+        assert!(
+            capsule
+                .replay()
+                .unwrap_err()
+                .contains("reuses source incarnation")
+        );
     }
 }
