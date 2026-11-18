@@ -32,7 +32,7 @@ import 'semantic_badge.dart';
   }
 }
 
-(String, String, Color, bool) describeHostLifecycle(
+(String, String, Color, Color, bool) describeHostLifecycle(
   HostLifecycle lifecycle,
   InstrumentPalette palette,
 ) {
@@ -42,6 +42,7 @@ import 'semantic_badge.dart';
         'Starting',
         'Host process started; awaiting initial observation activity.',
         palette.info,
+        palette.infoContainer,
         true,
       );
     case HostLifecycle.synchronizing:
@@ -49,6 +50,7 @@ import 'semantic_badge.dart';
         'Synchronizing',
         'Ingesting observations; complete operational state not yet established.',
         palette.caution,
+        palette.cautionContainer,
         true,
       );
     case HostLifecycle.readyReadOnly:
@@ -56,6 +58,7 @@ import 'semantic_badge.dart';
         'ReadyReadOnly',
         'Complete operational state established for all configured Operational cars.',
         palette.ok,
+        palette.okContainer,
         false,
       );
     case HostLifecycle.degraded:
@@ -63,12 +66,13 @@ import 'semantic_badge.dart';
         'Degraded',
         'Operational invariant violation or rejection revoked readiness.',
         palette.danger,
+        palette.dangerContainer,
         false,
       );
   }
 }
 
-(String, String, Color, bool) describeHostReadiness(
+(String, String, Color, Color, bool) describeHostReadiness(
   HostReadiness readiness,
   InstrumentPalette palette,
 ) {
@@ -78,6 +82,7 @@ import 'semantic_badge.dart';
         'ReadOnly',
         'Read-side operational projection is synchronized.',
         palette.ok,
+        palette.okContainer,
         false,
       );
     case HostReadiness.notReady:
@@ -85,25 +90,25 @@ import 'semantic_badge.dart';
         'NotReady',
         'Process reachable does not mean operational data is ready.',
         palette.caution,
+        palette.cautionContainer,
         true,
       );
   }
 }
 
-/// Compact pinned telemetry bar replacing the old 4-card KPI grid.
-class HostTelemetryBar extends StatelessWidget {
-  const HostTelemetryBar({
+/// Renders Host status (`Lifecycle`, `Readiness`, `Rev #N`, and optional
+/// `New Host lifetime`) as genuine Material 3 status chips.
+class HostStatusChipGroup extends StatelessWidget {
+  const HostStatusChipGroup({
     super.key,
     required this.snapshot,
     required this.isLive,
     this.revisionReset,
-    this.maxContentWidth,
   });
 
   final ReadModelSnapshot snapshot;
   final bool isLive;
   final RevisionResetNotice? revisionReset;
-  final double? maxContentWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -111,7 +116,8 @@ class HostTelemetryBar extends StatelessWidget {
     final (
       String lifecycleLabel,
       String lifecycleTip,
-      Color lifecycleColor,
+      Color lifecycleFg,
+      Color lifecycleBg,
       bool lifecycleHollow,
     ) = describeHostLifecycle(
       snapshot.lifecycle,
@@ -120,194 +126,61 @@ class HostTelemetryBar extends StatelessWidget {
     final (
       String readinessLabel,
       String readinessTip,
-      Color readinessColor,
+      Color readinessFg,
+      Color readinessBg,
       bool readinessHollow,
     ) = describeHostReadiness(
       snapshot.readiness,
       palette,
     );
 
-    final bool compactViewport = MediaQuery.sizeOf(context).width < 600;
-    Widget content = Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: compactViewport ? 12 : 16,
-        vertical: 6.5,
-      ),
-      child: LayoutBuilder(
-        builder: (BuildContext context, BoxConstraints constraints) {
-          final bool showContractRight = constraints.maxWidth >= 680;
-          final Widget leftCluster = Wrap(
-            spacing: constraints.maxWidth < 420 ? 11 : 16,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              _TelemetryCell(
-                label: 'Lifecycle',
-                value: lifecycleLabel,
-                dotColor: lifecycleColor,
-                hollowDot: lifecycleHollow,
-                tooltip: lifecycleTip,
-              ),
-              _TelemetryCell(
-                label: 'Readiness',
-                value: readinessLabel,
-                dotColor: readinessColor,
-                hollowDot: readinessHollow,
-                tooltip: readinessTip,
-              ),
-              Tooltip(
-                message:
-                    'Host-local revision (${snapshot.apiVersion}); monotonic within one Host process lifetime and resets on Host restart.',
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 64),
-                      child: Text(
-                        'Rev ',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          color: palette.mutedText,
-                        ),
-                      ),
-                    ),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 96),
-                      child: Text(
-                        '#${snapshot.revision}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: instrumentMonoStyle(
-                          context,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    if (!isLive) ...<Widget>[
-                      const SizedBox(width: 5),
-                      Flexible(
-                        child: Text(
-                          '(retained)',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: palette.caution,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              if (revisionReset != null)
-                SemanticBadge(
-                  label:
-                      'New Host lifetime (#${revisionReset!.previousRevision} → #${revisionReset!.newRevision})',
-                  foreground: palette.info,
-                  background: palette.infoContainer,
-                  monospace: true,
-                ),
-            ],
-          );
+    final String revLabel = isLive
+        ? 'Rev #${snapshot.revision}'
+        : 'Rev #${snapshot.revision} (Retained)';
 
-          if (!showContractRight) {
-            return leftCluster;
-          }
-
-          return Row(
-            children: <Widget>[
-              Expanded(child: leftCluster),
-              const SizedBox(width: 12),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 180),
-                child: Text(
-                  snapshot.apiVersion,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.right,
-                  style: instrumentMonoStyle(
-                    context,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: palette.mutedText,
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-
-    if (maxContentWidth != null) {
-      content = Align(
-        alignment: Alignment.center,
-        child: ConstrainedBox(
-          constraints: BoxConstraints(maxWidth: maxContentWidth!),
-          child: content,
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: <Widget>[
+        SemanticBadge(
+          label: lifecycleLabel,
+          foreground: lifecycleFg,
+          background: lifecycleBg,
+          dotColor: lifecycleFg,
+          hollowDot: lifecycleHollow,
+          tooltip: 'Host Lifecycle: $lifecycleTip',
         ),
-      );
-    }
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: palette.elevatedSurface,
-        border: Border(bottom: BorderSide(color: palette.border)),
-      ),
-      child: content,
-    );
-  }
-}
-
-class _TelemetryCell extends StatelessWidget {
-  const _TelemetryCell({
-    required this.label,
-    required this.value,
-    required this.dotColor,
-    required this.hollowDot,
-    required this.tooltip,
-  });
-
-  final String label;
-  final String value;
-  final Color dotColor;
-  final bool hollowDot;
-  final String tooltip;
-
-  @override
-  Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-    return Tooltip(
-      message: tooltip,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 96),
-            child: Text(
-              '$label ',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.5, color: palette.mutedText),
-            ),
+        SemanticBadge(
+          label: readinessLabel,
+          foreground: readinessFg,
+          background: readinessBg,
+          dotColor: readinessFg,
+          hollowDot: readinessHollow,
+          tooltip: 'Host Readiness: $readinessTip',
+        ),
+        SemanticBadge(
+          label: revLabel,
+          foreground: isLive ? palette.subtleText : palette.caution,
+          background: isLive
+              ? palette.elevatedSurface
+              : palette.cautionContainer,
+          icon: Icons.tag_rounded,
+          outlined: isLive,
+          tooltip:
+              'Host-local revision (${snapshot.apiVersion}); monotonic within one Host process lifetime and resets on Host restart.',
+        ),
+        if (revisionReset != null)
+          SemanticBadge(
+            label:
+                'New Host lifetime (#${revisionReset!.previousRevision} → #${revisionReset!.newRevision})',
+            foreground: palette.info,
+            background: palette.infoContainer,
+            icon: Icons.restart_alt_rounded,
+            tooltip:
+                'Host restarted with a new process lifetime; revision sequence reset from #${revisionReset!.previousRevision} to #${revisionReset!.newRevision}.',
           ),
-          StatusDot(color: dotColor, hollow: hollowDot, size: 6.5),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Text(
-              value,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-            ),
-          ),
-        ],
-      ),
+      ],
     );
   }
 }

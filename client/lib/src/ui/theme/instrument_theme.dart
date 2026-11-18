@@ -47,52 +47,52 @@ class InstrumentPalette extends ThemeExtension<InstrumentPalette> {
   final Color neutral;
   final Color neutralContainer;
 
-  /// Matte carbon / graphite console palette (ISA-101 restrained signal hierarchy).
+  /// Material 3 dark slate console palette.
   static const InstrumentPalette dark = InstrumentPalette(
-    canvas: Color(0xFF111214),
-    surface: Color(0xFF17191C),
-    elevatedSurface: Color(0xFF1E2025),
-    border: Color(0xFF2A2D34),
-    subtleText: Color(0xFF939AA6),
-    mutedText: Color(0xFF666D7A),
-    ok: Color(0xFF2FA36B),
-    okContainer: Color(0xFF14271F),
-    caution: Color(0xFFE59934),
-    cautionContainer: Color(0xFF2B2012),
-    danger: Color(0xFFE5484D),
-    dangerContainer: Color(0xFF2C1517),
-    info: Color(0xFF32B8C6),
-    infoContainer: Color(0xFF13262B),
-    operationalRole: Color(0xFFD6DCE5),
-    operationalRoleContainer: Color(0xFF23272F),
-    auxiliaryRole: Color(0xFF8B929E),
-    auxiliaryRoleContainer: Color(0xFF1A1C20),
-    neutral: Color(0xFF8B929E),
-    neutralContainer: Color(0xFF202329),
+    canvas: Color(0xFF0F1115),
+    surface: Color(0xFF171A21),
+    elevatedSurface: Color(0xFF20242E),
+    border: Color(0xFF2C313D),
+    subtleText: Color(0xFFA0A8B8),
+    mutedText: Color(0xFF6E7787),
+    ok: Color(0xFF34D399),
+    okContainer: Color(0xFF112E25),
+    caution: Color(0xFFFBBF24),
+    cautionContainer: Color(0xFF312510),
+    danger: Color(0xFFF87171),
+    dangerContainer: Color(0xFF331619),
+    info: Color(0xFF38BDF8),
+    infoContainer: Color(0xFF102A3A),
+    operationalRole: Color(0xFF38BDF8),
+    operationalRoleContainer: Color(0xFF102A3A),
+    auxiliaryRole: Color(0xFFA0A8B8),
+    auxiliaryRoleContainer: Color(0xFF20242E),
+    neutral: Color(0xFF8B93A4),
+    neutralContainer: Color(0xFF20242E),
   );
 
-  /// Warm architectural paper / daylight field palette.
+  /// Material 3 daylight architectural surface palette.
   static const InstrumentPalette light = InstrumentPalette(
-    canvas: Color(0xFFF3F3F0),
+    canvas: Color(0xFFF4F6F9),
     surface: Color(0xFFFFFFFF),
-    elevatedSurface: Color(0xFFEBEBE6),
-    border: Color(0xFFD5D5CE),
-    subtleText: Color(0xFF555B66),
-    mutedText: Color(0xFF7A808C),
-    ok: Color(0xFF1B7F4B),
-    okContainer: Color(0xFFE4F4EB),
-    caution: Color(0xFFB45309),
+    elevatedSurface: Color(0xFFEEF1F6),
+    border: Color(0xFFDCE1E9),
+    subtleText: Color(0xFF4B5563),
+    mutedText: Color(0xFF6B7280),
+    ok: Color(0xFF059669),
+    okContainer: Color(0xFFD1FAE5),
+    caution: Color(0xFFD97706),
     cautionContainer: Color(0xFFFEF3C7),
-    danger: Color(0xFFC92A2A),
+    danger: Color(0xFFDC2626),
     dangerContainer: Color(0xFFFEE2E2),
-    info: Color(0xFF0B7285),
-    infoContainer: Color(0xFFE3F5F8),
-    operationalRole: Color(0xFF1E232B),
-    operationalRoleContainer: Color(0xFFE6E7E2),
-    auxiliaryRole: Color(0xFF5E6470),
-    auxiliaryRoleContainer: Color(0xFFF5F5F2),
-    neutral: Color(0xFF5E6470),
-    neutralContainer: Color(0xFFEAEAE5),
+    info: Color(0xFF0284C7),
+    infoContainer: Color(0xFFE0F2FE),
+    operationalRole: Color(0xFF0284C7),
+    operationalRoleContainer: Color(0xFFE0F2FE),
+    auxiliaryRole: Color(0xFF4B5563),
+    auxiliaryRoleContainer: Color(0xFFEEF1F6),
+    neutral: Color(0xFF5E6675),
+    neutralContainer: Color(0xFFEEF1F6),
   );
 
   @override
@@ -195,6 +195,25 @@ extension InstrumentThemeContext on BuildContext {
       Theme.of(this).extension<InstrumentPalette>() ?? InstrumentPalette.dark;
 }
 
+/// Clean sans-serif typography with tabular figures for numbers, IDs, and badges.
+TextStyle instrumentTabularStyle(
+  BuildContext context, {
+  double fontSize = 12.5,
+  FontWeight fontWeight = FontWeight.w600,
+  Color? color,
+  double? height,
+  double? letterSpacing,
+}) {
+  return TextStyle(
+    fontSize: fontSize,
+    fontWeight: fontWeight,
+    height: height,
+    letterSpacing: letterSpacing,
+    color: color ?? Theme.of(context).colorScheme.onSurface,
+    fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+  );
+}
+
 TextStyle instrumentMonoStyle(
   BuildContext context, {
   double fontSize = 12.5,
@@ -202,20 +221,12 @@ TextStyle instrumentMonoStyle(
   Color? color,
   double? height,
 }) {
-  return TextStyle(
-    fontFamily: 'monospace',
-    fontFamilyFallback: const <String>[
-      'JetBrains Mono',
-      'Fira Code',
-      'DejaVu Sans Mono',
-      'Liberation Mono',
-      'monospace',
-    ],
+  return instrumentTabularStyle(
+    context,
     fontSize: fontSize,
     fontWeight: fontWeight,
+    color: color,
     height: height,
-    color: color ?? Theme.of(context).colorScheme.onSurface,
-    fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
   );
 }
 
@@ -226,8 +237,8 @@ ThemeData buildInstrumentTheme(Brightness brightness) {
       : InstrumentPalette.light;
 
   final Color onSurface = isDark
-      ? const Color(0xFFECEEF2)
-      : const Color(0xFF16181C);
+      ? const Color(0xFFF1F5F9)
+      : const Color(0xFF0F172A);
 
   final ColorScheme colorScheme =
       ColorScheme.fromSeed(
@@ -236,10 +247,16 @@ ThemeData buildInstrumentTheme(Brightness brightness) {
         surface: palette.surface,
       ).copyWith(
         primary: palette.info,
-        onPrimary: isDark ? const Color(0xFF07191C) : Colors.white,
+        onPrimary: isDark ? const Color(0xFF061B26) : Colors.white,
+        primaryContainer: palette.infoContainer,
+        onPrimaryContainer: palette.info,
+        secondaryContainer: palette.elevatedSurface,
+        onSecondaryContainer: onSurface,
         surface: palette.surface,
         onSurface: onSurface,
+        surfaceContainerHighest: palette.elevatedSurface,
         outline: palette.border,
+        outlineVariant: palette.border,
       );
 
   return ThemeData(
@@ -248,50 +265,103 @@ ThemeData buildInstrumentTheme(Brightness brightness) {
     colorScheme: colorScheme,
     scaffoldBackgroundColor: palette.canvas,
     dividerColor: palette.border,
+    dividerTheme: DividerThemeData(
+      color: palette.border,
+      thickness: 1,
+      space: 1,
+    ),
+    appBarTheme: AppBarTheme(
+      backgroundColor: palette.surface,
+      foregroundColor: onSurface,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+    ),
     cardTheme: CardThemeData(
       color: palette.surface,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(12),
         side: BorderSide(color: palette.border),
+      ),
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: palette.elevatedSurface,
+      selectedColor: palette.infoContainer,
+      side: BorderSide(color: palette.border),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      labelStyle: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        color: onSurface,
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    ),
+    tabBarTheme: TabBarThemeData(
+      labelColor: palette.info,
+      unselectedLabelColor: palette.subtleText,
+      indicatorColor: palette.info,
+      dividerColor: palette.border,
+      labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+      unselectedLabelStyle: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+      ),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: palette.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: palette.border),
+      ),
+    ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: palette.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         elevation: 0,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        minimumSize: const Size(0, 34),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        minimumSize: const Size(0, 36),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        minimumSize: const Size(0, 34),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        minimumSize: const Size(0, 36),
         side: BorderSide(color: palette.border),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-        textStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: palette.elevatedSurface,
       isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(10),
         borderSide: BorderSide(color: palette.border),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(5),
+        borderRadius: BorderRadius.circular(10),
         borderSide: BorderSide(color: palette.border),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(5),
-        borderSide: BorderSide(color: palette.info, width: 1.2),
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(color: palette.info, width: 1.4),
       ),
     ),
     extensions: <ThemeExtension<dynamic>>[palette],

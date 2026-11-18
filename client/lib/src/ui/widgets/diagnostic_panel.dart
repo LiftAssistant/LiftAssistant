@@ -1,8 +1,24 @@
 import 'package:flutter/material.dart';
 
 import '../../api/read_model.dart';
+import '../../state/client_controller.dart';
 import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
+
+String formatDiagnosticLayerLabel(DiagnosticLayer layer) {
+  switch (layer) {
+    case DiagnosticLayer.transport:
+      return 'Transport';
+    case DiagnosticLayer.source:
+      return 'Source';
+    case DiagnosticLayer.mapping:
+      return 'Mapping';
+    case DiagnosticLayer.observation:
+      return 'Observation';
+    case DiagnosticLayer.readiness:
+      return 'Readiness';
+  }
+}
 
 class DiagnosticsFilterController extends ChangeNotifier {
   DiagnosticsFilterController() {
@@ -28,8 +44,18 @@ class DiagnosticsFilterController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void selectLayer(DiagnosticLayer? layer) {
+    _selectedLayer = layer;
+    notifyListeners();
+  }
+
   void toggleLayer(DiagnosticLayer layer) {
     _selectedLayer = _selectedLayer == layer ? null : layer;
+    notifyListeners();
+  }
+
+  void selectRole(BindingRole? role) {
+    _selectedRole = role;
     notifyListeners();
   }
 
@@ -55,12 +81,14 @@ class DiagnosticsFilterController extends ChangeNotifier {
   }
 
   void resetAll() {
+    final bool hadStateChange =
+        _selectedLayer != null || _selectedRole != null || !_newestFirst;
     _selectedLayer = null;
     _selectedRole = null;
     _newestFirst = true;
     if (searchController.text.isNotEmpty) {
       searchController.clear();
-    } else {
+    } else if (hadStateChange) {
       notifyListeners();
     }
   }
@@ -108,8 +136,237 @@ class DiagnosticsFilterController extends ChangeNotifier {
   }
 }
 
-/// Pinned-toolbar + virtualized [ListView.builder] diagnostics inspector for
-/// bounded-height desktop panes (or standalone shrinking panel when [expandList] is false).
+/// Opens the Pop-up Diagnostics Terminal (`DiagnosticsTerminalModal`).
+/// Uses a generous M3 Modal Dialog on desktop/wide viewports and a full-height
+/// M3 Modal Bottom Sheet on mobile/compact viewports.
+Future<void> showDiagnosticsTerminalModal({
+  required BuildContext context,
+  required ClientController controller,
+  required DiagnosticsFilterController filterController,
+}) async {
+  final Size viewport = MediaQuery.sizeOf(context);
+  final bool useDesktopDialog = viewport.width >= 720 && viewport.height >= 480;
+
+  if (useDesktopDialog) {
+    await showDialog<void>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        final Size dialogViewport = MediaQuery.sizeOf(dialogContext);
+        final double dialogWidth = (dialogViewport.width * 0.84).clamp(
+          560.0,
+          920.0,
+        );
+        final double dialogHeight = (dialogViewport.height * 0.84).clamp(
+          420.0,
+          720.0,
+        );
+        return Dialog(
+          key: const Key('diagnostics-terminal-modal'),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: SizedBox(
+            width: dialogWidth,
+            height: dialogHeight,
+            child: DiagnosticsTerminalModalContent(
+              controller: controller,
+              filterController: filterController,
+              onClose: () => Navigator.of(dialogContext).pop(),
+            ),
+          ),
+        );
+      },
+    );
+    return;
+  }
+
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    clipBehavior: Clip.antiAlias,
+    builder: (BuildContext sheetContext) {
+      return FractionallySizedBox(
+        key: const Key('diagnostics-terminal-modal'),
+        heightFactor: 0.92,
+        child: DiagnosticsTerminalModalContent(
+          controller: controller,
+          filterController: filterController,
+          onClose: () => Navigator.of(sheetContext).pop(),
+        ),
+      );
+    },
+  );
+}
+
+class DiagnosticsTerminalModalContent extends StatelessWidget {
+  const DiagnosticsTerminalModalContent({
+    super.key,
+    required this.controller,
+    required this.filterController,
+    required this.onClose,
+  });
+
+  final ClientController controller;
+  final DiagnosticsFilterController filterController;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final Size viewport = MediaQuery.sizeOf(context);
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final bool compactHeader = viewport.height < 640 || textScale > 1.35;
+    final bool showNonFaultBanner = viewport.height >= 420;
+
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (BuildContext context, _) {
+        final List<DiagnosticEntry> diagnostics =
+            controller.state.snapshot?.recentDiagnostics ??
+            const <DiagnosticEntry>[];
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            // 1. M3 Sheet Header + Non-fault Evidence Banner
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                compactHeader ? 12 : 20,
+                compactHeader ? 8 : 16,
+                compactHeader ? 8 : 14,
+                compactHeader ? 6 : 12,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      if (!compactHeader) ...<Widget>[
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: palette.infoContainer,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.terminal_rounded,
+                            size: 18,
+                            color: palette.info,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                      Expanded(
+                        child: Row(
+                          children: <Widget>[
+                            const Flexible(
+                              child: Text(
+                                'Host Diagnostics',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: -0.2,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Badge.count(
+                              count: diagnostics.length,
+                              backgroundColor: palette.infoContainer,
+                              textColor: palette.info,
+                              textStyle: instrumentTabularStyle(
+                                context,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                                color: palette.info,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        key: const Key('diagnostics-modal-close'),
+                        tooltip: 'Close diagnostics terminal',
+                        visualDensity: compactHeader
+                            ? VisualDensity.compact
+                            : VisualDensity.standard,
+                        onPressed: onClose,
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                      ),
+                    ],
+                  ),
+                  if (showNonFaultBanner) ...<Widget>[
+                    SizedBox(height: compactHeader ? 6 : 10),
+                    Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: compactHeader ? 10 : 12,
+                        vertical: compactHeader ? 5 : 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: palette.elevatedSurface,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: palette.border),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: <Widget>[
+                          Icon(
+                            Icons.info_outline_rounded,
+                            size: 15,
+                            color: palette.info,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Machine-readable Host evidence only — does not assert a confirmed elevator equipment fault or repair action.',
+                              maxLines: compactHeader ? 1 : 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: compactHeader ? 11 : 12,
+                                height: 1.3,
+                                color: palette.subtleText,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+
+            // 2. Filter Toolbar + Virtualized Diagnostic Event Stream
+            Expanded(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  compactHeader ? 12 : 20,
+                  compactHeader ? 8 : 14,
+                  compactHeader ? 12 : 20,
+                  compactHeader ? 8 : 16,
+                ),
+                child: DiagnosticEvidencePanel(
+                  diagnostics: diagnostics,
+                  filterController: filterController,
+                  expandList: true,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Pinned-toolbar + virtualized [ListView.builder] diagnostics inspector.
 class DiagnosticEvidencePanel extends StatefulWidget {
   const DiagnosticEvidencePanel({
     super.key,
@@ -161,23 +418,24 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
           widget.diagnostics,
         );
 
-        final Widget logSurface;
-        if (ordered.isEmpty) {
-          logSurface = _EmptyDiagnosticsBox(
-            hasSourceDiagnostics: widget.diagnostics.isNotEmpty,
-          );
-        } else if (widget.expandList) {
-          logSurface = DecoratedBox(
-            decoration: BoxDecoration(
+        Widget buildContent({required bool expand}) {
+          final Widget logSurface;
+          if (ordered.isEmpty) {
+            final Widget emptyBox = _EmptyDiagnosticsBox(
+              hasSourceDiagnostics: widget.diagnostics.isNotEmpty,
+            );
+            logSurface = expand
+                ? Align(
+                    alignment: Alignment.topCenter,
+                    child: SingleChildScrollView(child: emptyBox),
+                  )
+                : emptyBox;
+          } else if (expand) {
+            logSurface = Card(
               color: palette.surface,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: palette.border),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(5),
               child: ListView.builder(
+                key: const Key('diagnostics-list-view'),
                 padding: EdgeInsets.zero,
-                shrinkWrap: ordered.length <= 30,
                 itemCount: ordered.length,
                 itemBuilder: (BuildContext context, int index) {
                   return _DiagnosticLogRow(
@@ -186,17 +444,10 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
                   );
                 },
               ),
-            ),
-          );
-        } else {
-          logSurface = DecoratedBox(
-            decoration: BoxDecoration(
+            );
+          } else {
+            logSurface = Card(
               color: palette.surface,
-              borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: palette.border),
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(5),
               child: ListView.builder(
                 padding: EdgeInsets.zero,
                 shrinkWrap: true,
@@ -209,96 +460,35 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
                   );
                 },
               ),
-            ),
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+            children: <Widget>[
+              DiagnosticsFilterToolbar(controller: controller),
+              const SizedBox(height: 12),
+              if (expand) Expanded(child: logSurface) else logSurface,
+            ],
           );
         }
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: widget.expandList ? MainAxisSize.max : MainAxisSize.min,
-          children: <Widget>[
-            DiagnosticsFilterToolbar(controller: controller),
-            const SizedBox(height: 8),
-            if (widget.expandList) Flexible(child: logSurface) else logSurface,
-          ],
+        if (!widget.expandList) {
+          return buildContent(expand: false);
+        }
+
+        return LayoutBuilder(
+          builder: (BuildContext context, BoxConstraints constraints) {
+            if (constraints.maxHeight < 210) {
+              return SingleChildScrollView(child: buildContent(expand: false));
+            }
+            return buildContent(expand: true);
+          },
         );
       },
     );
   }
-}
-
-/// Builds lazy slivers (`Toolbar` + virtualized `SliverList.builder`) for use
-/// inside a [CustomScrollView] so large diagnostic logs never materialize offscreen rows.
-List<Widget> buildDiagnosticSlivers({
-  required BuildContext context,
-  required List<DiagnosticEntry> diagnostics,
-  required DiagnosticsFilterController controller,
-  bool showCompactCue = false,
-}) {
-  final InstrumentPalette palette = context.palette;
-  final List<DiagnosticEntry> ordered = controller.filterAndSort(diagnostics);
-
-  return <Widget>[
-    SliverToBoxAdapter(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          if (showCompactCue) ...<Widget>[
-            Align(
-              alignment: Alignment.centerRight,
-              child: Tooltip(
-                message: 'Diagnostic entries are machine-readable Host evidence only — NOT confirmed elevator equipment faults, root causes, or repair instructions.',
-                child: Text(
-                  'Host evidence · non-fault',
-                  style: TextStyle(fontSize: 11, color: palette.mutedText),
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-          ],
-          DiagnosticsFilterToolbar(controller: controller),
-          const SizedBox(height: 8),
-        ],
-      ),
-    ),
-    if (ordered.isEmpty)
-      SliverToBoxAdapter(
-        child: _EmptyDiagnosticsBox(
-          hasSourceDiagnostics: diagnostics.isNotEmpty,
-        ),
-      )
-    else
-      SliverList.builder(
-        itemCount: ordered.length,
-        itemBuilder: (BuildContext context, int index) {
-          final bool isFirst = index == 0;
-          final bool isLast = index == ordered.length - 1;
-          final BorderRadius radius = BorderRadius.vertical(
-            top: isFirst ? const Radius.circular(6) : Radius.zero,
-            bottom: isLast ? const Radius.circular(6) : Radius.zero,
-          );
-
-          return DecoratedBox(
-            decoration: BoxDecoration(
-              color: palette.surface,
-              borderRadius: radius,
-              border: Border(
-                top: BorderSide(color: palette.border),
-                left: BorderSide(color: palette.border),
-                right: BorderSide(color: palette.border),
-                bottom: isLast
-                    ? BorderSide(color: palette.border)
-                    : BorderSide.none,
-              ),
-            ),
-            child: _DiagnosticLogRow(
-              entry: ordered[index],
-              showTopDivider: false,
-            ),
-          );
-        },
-      ),
-  ];
 }
 
 class _EmptyDiagnosticsBox extends StatelessWidget {
@@ -309,19 +499,26 @@ class _EmptyDiagnosticsBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: palette.surface,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: palette.border),
-      ),
+    return Card(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-        child: Text(
-          hasSourceDiagnostics
-              ? 'No diagnostic entries match active filter.'
-              : 'No recent diagnostic entries recorded by Host.',
-          style: TextStyle(fontSize: 12, color: palette.mutedText),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              Icons.check_circle_outline_rounded,
+              size: 18,
+              color: palette.mutedText,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                hasSourceDiagnostics
+                    ? 'No diagnostic entries match the active filter.'
+                    : 'No recent diagnostic entries recorded by Host.',
+                style: TextStyle(fontSize: 13, color: palette.mutedText),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -340,58 +537,86 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
-        final bool inlineRoleOnTopRow =
-            constraints.maxWidth >= 420 && textScale <= 1.2;
+        final bool inlineControlsOnTopRow =
+            constraints.maxWidth >= 560 && textScale <= 1.25;
 
-        final Widget sortButton = ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 108),
-          child: Tooltip(
-            message: controller.newestFirst
-                ? 'Sorted newest sequence first (tap to reverse)'
-                : 'Sorted oldest sequence first (tap to reverse)',
-            child: InkWell(
-              key: const Key('diagnostics-sort-button'),
-              borderRadius: BorderRadius.circular(5),
-              onTap: controller.toggleSortOrder,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(minHeight: 32),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: palette.elevatedSurface,
-                    borderRadius: BorderRadius.circular(5),
-                    border: Border.all(color: palette.border),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 5,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Icon(
-                          controller.newestFirst ? Icons.south : Icons.north,
-                          size: 13,
-                          color: palette.subtleText,
-                        ),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            '#seq',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: instrumentMonoStyle(
-                              context,
-                              fontSize: 11,
-                              color: palette.subtleText,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+        final Widget searchField = ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 38),
+          child: SearchBar(
+            key: const Key('diagnostics-search-input'),
+            controller: controller.searchController,
+            hintText: 'Search event id, source, session, car, entity…',
+            elevation: const WidgetStatePropertyAll<double>(0),
+            backgroundColor: WidgetStatePropertyAll<Color>(
+              palette.elevatedSurface,
+            ),
+            side: WidgetStatePropertyAll<BorderSide>(
+              BorderSide(color: palette.border),
+            ),
+            shape: WidgetStatePropertyAll<OutlinedBorder>(
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            padding: const WidgetStatePropertyAll<EdgeInsets>(
+              EdgeInsets.symmetric(horizontal: 12),
+            ),
+            constraints: const BoxConstraints(minHeight: 38, maxHeight: 42),
+            textStyle: WidgetStatePropertyAll<TextStyle>(
+              instrumentTabularStyle(
+                context,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
               ),
+            ),
+            hintStyle: WidgetStatePropertyAll<TextStyle>(
+              TextStyle(fontSize: 12.5, color: palette.mutedText),
+            ),
+            leading: Icon(
+              Icons.search_rounded,
+              size: 18,
+              color: palette.mutedText,
+            ),
+            trailing: controller.searchQuery.isEmpty
+                ? null
+                : <Widget>[
+                    IconButton(
+                      key: const Key('diagnostics-search-clear'),
+                      tooltip: 'Clear search query',
+                      onPressed: controller.clearSearch,
+                      visualDensity: VisualDensity.compact,
+                      icon: Icon(
+                        Icons.close_rounded,
+                        size: 16,
+                        color: palette.subtleText,
+                      ),
+                    ),
+                  ],
+          ),
+        );
+
+        final Widget sortButton = FilledButton.tonalIcon(
+          key: const Key('diagnostics-sort-button'),
+          onPressed: controller.toggleSortOrder,
+          style: FilledButton.styleFrom(
+            backgroundColor: palette.elevatedSurface,
+            foregroundColor: palette.subtleText,
+            side: BorderSide(color: palette.border),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            minimumSize: const Size(0, 38),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          icon: Icon(
+            controller.newestFirst ? Icons.south_rounded : Icons.north_rounded,
+            size: 15,
+          ),
+          label: Text(
+            controller.newestFirst ? 'Newest' : 'Oldest',
+            style: instrumentTabularStyle(
+              context,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: palette.subtleText,
             ),
           ),
         );
@@ -400,122 +625,85 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 32),
-                    child: TextField(
-                      key: const Key('diagnostics-search-input'),
-                      controller: controller.searchController,
-                      style: const TextStyle(fontSize: 12.5),
-                      decoration: InputDecoration(
-                        hintText: inlineRoleOnTopRow
-                            ? 'Filter diagnostics…'
-                            : 'Filter id, source, car, entity…',
-                        hintStyle: TextStyle(
-                          fontSize: 12,
-                          color: palette.mutedText,
-                        ),
-                        prefixIcon: Icon(
-                          Icons.search,
-                          size: 15,
-                          color: palette.mutedText,
-                        ),
-                        prefixIconConstraints: const BoxConstraints(
-                          minWidth: 30,
-                          minHeight: 30,
-                        ),
-                        suffixIcon: controller.searchQuery.isEmpty
-                            ? null
-                            : IconButton(
-                                key: const Key('diagnostics-search-clear'),
-                                tooltip: 'Clear filter query',
-                                onPressed: controller.clearSearch,
-                                padding: EdgeInsets.zero,
-                                visualDensity: VisualDensity.compact,
-                                icon: Icon(
-                                  Icons.close_rounded,
-                                  size: 14,
-                                  color: palette.subtleText,
-                                ),
-                              ),
-                        suffixIconConstraints: const BoxConstraints(
-                          minWidth: 26,
-                          minHeight: 28,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 6,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                if (inlineRoleOnTopRow) ...<Widget>[
-                  const SizedBox(width: 6),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 164),
-                    child: _RoleSegmentedControl(
-                      controller: controller,
-                      minHeight: 32,
-                    ),
-                  ),
-                ],
-                const SizedBox(width: 6),
-                sortButton,
-              ],
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 3,
-              runSpacing: 4,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                _FilterPill(
-                  key: const Key('diag-filter-all'),
-                  label: 'All',
-                  selected:
-                      controller.selectedLayer == null &&
-                      controller.selectedRole == null,
-                  onTap: controller.clearCategoryFilters,
-                ),
-                Container(width: 1, height: 12, color: palette.border),
-                for (final DiagnosticLayer layer in DiagnosticLayer.values)
-                  _FilterPill(
-                    key: Key('diag-filter-layer-${layer.wireValue}'),
-                    label: layer.wireValue,
-                    monospace: true,
-                    selected: controller.selectedLayer == layer,
-                    onTap: () => controller.toggleLayer(layer),
-                  ),
-              ],
-            ),
-            if (!inlineRoleOnTopRow) ...<Widget>[
-              const SizedBox(height: 5),
-              Wrap(
-                spacing: 6,
-                runSpacing: 4,
-                crossAxisAlignment: WrapCrossAlignment.center,
+            if (inlineControlsOnTopRow)
+              Row(
                 children: <Widget>[
-                  Text(
-                    'Role',
-                    style: TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
-                      color: palette.mutedText,
-                    ),
-                  ),
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: constraints.maxWidth),
-                    child: _RoleSegmentedControl(
-                      controller: controller,
-                      minHeight: 24,
-                    ),
-                  ),
+                  Expanded(child: searchField),
+                  const SizedBox(width: 10),
+                  _RoleSegmentedButton(controller: controller),
+                  const SizedBox(width: 10),
+                  sortButton,
+                ],
+              )
+            else ...<Widget>[
+              Row(
+                children: <Widget>[
+                  Expanded(child: searchField),
+                  const SizedBox(width: 8),
+                  sortButton,
                 ],
               ),
+              const SizedBox(height: 6),
+              _RoleSegmentedButton(controller: controller),
             ],
+            const SizedBox(height: 8),
+            if (textScale > 1.35)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: <Widget>[
+                    FilterChip(
+                      key: const Key('diag-filter-all'),
+                      label: const Text('All'),
+                      selected:
+                          controller.selectedLayer == null &&
+                          controller.selectedRole == null,
+                      showCheckmark: false,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (_) => controller.clearCategoryFilters(),
+                    ),
+                    for (final DiagnosticLayer layer
+                        in DiagnosticLayer.values) ...<Widget>[
+                      const SizedBox(width: 6),
+                      FilterChip(
+                        key: Key('diag-filter-layer-${layer.wireValue}'),
+                        label: Text(formatDiagnosticLayerLabel(layer)),
+                        selected: controller.selectedLayer == layer,
+                        showCheckmark: false,
+                        visualDensity: VisualDensity.compact,
+                        onSelected: (_) => controller.toggleLayer(layer),
+                      ),
+                    ],
+                  ],
+                ),
+              )
+            else
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  FilterChip(
+                    key: const Key('diag-filter-all'),
+                    label: const Text('All'),
+                    selected:
+                        controller.selectedLayer == null &&
+                        controller.selectedRole == null,
+                    showCheckmark: false,
+                    visualDensity: VisualDensity.compact,
+                    onSelected: (_) => controller.clearCategoryFilters(),
+                  ),
+                  for (final DiagnosticLayer layer in DiagnosticLayer.values)
+                    FilterChip(
+                      key: Key('diag-filter-layer-${layer.wireValue}'),
+                      label: Text(formatDiagnosticLayerLabel(layer)),
+                      selected: controller.selectedLayer == layer,
+                      showCheckmark: false,
+                      visualDensity: VisualDensity.compact,
+                      onSelected: (_) => controller.toggleLayer(layer),
+                    ),
+                ],
+              ),
           ],
         );
       },
@@ -523,166 +711,96 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
   }
 }
 
-class _RoleSegmentedControl extends StatelessWidget {
-  const _RoleSegmentedControl({
-    required this.controller,
-    required this.minHeight,
-  });
+enum _RoleFilterOption { all, operational, auxiliary }
+
+class _RoleSegmentedButton extends StatelessWidget {
+  const _RoleSegmentedButton({required this.controller});
 
   final DiagnosticsFilterController controller;
-  final double minHeight;
 
-  @override
-  Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-    final bool opSelected = controller.selectedRole == BindingRole.operational;
-    final bool auxSelected = controller.selectedRole == BindingRole.auxiliary;
-
-    return Tooltip(
-      message: 'Filter diagnostic entries by observation binding role',
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: palette.surface,
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(color: palette.border),
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              Flexible(
-                flex: 11,
-                child: _RoleSegmentButton(
-                  key: const Key('diag-filter-role-operational'),
-                  label: 'Operational',
-                  selected: opSelected,
-                  minHeight: minHeight,
-                  onTap: () => controller.toggleRole(BindingRole.operational),
-                ),
-              ),
-              Container(
-                width: 1,
-                height: (minHeight - 10).clamp(10.0, 20.0),
-                color: palette.border,
-              ),
-              Flexible(
-                flex: 9,
-                child: _RoleSegmentButton(
-                  key: const Key('diag-filter-role-auxiliary'),
-                  label: 'Auxiliary',
-                  selected: auxSelected,
-                  minHeight: minHeight,
-                  onTap: () => controller.toggleRole(BindingRole.auxiliary),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  _RoleFilterOption get _currentOption {
+    switch (controller.selectedRole) {
+      case null:
+        return _RoleFilterOption.all;
+      case BindingRole.operational:
+        return _RoleFilterOption.operational;
+      case BindingRole.auxiliary:
+        return _RoleFilterOption.auxiliary;
+    }
   }
-}
-
-class _RoleSegmentButton extends StatelessWidget {
-  const _RoleSegmentButton({
-    super.key,
-    required this.label,
-    required this.selected,
-    required this.minHeight,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final double minHeight;
-  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-    final Color fg = selected ? palette.info : palette.subtleText;
-    final Color bg = selected ? palette.infoContainer : Colors.transparent;
-
-    return InkWell(
-      onTap: onTap,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(minHeight: minHeight),
-        child: ColoredBox(
-          color: bg,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 3),
-            child: Center(
-              widthFactor: 1.0,
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  color: fg,
-                ),
-              ),
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    if (textScale > 1.35) {
+      return SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: <Widget>[
+            ChoiceChip(
+              key: const Key('diag-filter-role-all'),
+              label: const Text('All Roles'),
+              selected: controller.selectedRole == null,
+              showCheckmark: false,
+              visualDensity: VisualDensity.compact,
+              onSelected: (_) => controller.selectRole(null),
             ),
-          ),
+            const SizedBox(width: 6),
+            ChoiceChip(
+              key: const Key('diag-filter-role-operational'),
+              label: const Text('Operational'),
+              selected: controller.selectedRole == BindingRole.operational,
+              showCheckmark: false,
+              visualDensity: VisualDensity.compact,
+              onSelected: (_) => controller.toggleRole(BindingRole.operational),
+            ),
+            const SizedBox(width: 6),
+            ChoiceChip(
+              key: const Key('diag-filter-role-auxiliary'),
+              label: const Text('Auxiliary'),
+              selected: controller.selectedRole == BindingRole.auxiliary,
+              showCheckmark: false,
+              visualDensity: VisualDensity.compact,
+              onSelected: (_) => controller.toggleRole(BindingRole.auxiliary),
+            ),
+          ],
         ),
+      );
+    }
+
+    return SegmentedButton<_RoleFilterOption>(
+      showSelectedIcon: false,
+      style: SegmentedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
       ),
-    );
-  }
-}
-
-class _FilterPill extends StatelessWidget {
-  const _FilterPill({
-    super.key,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.monospace = false,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final bool monospace;
-
-  @override
-  Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-    final Color fg = selected ? palette.info : palette.subtleText;
-    final Color bg = selected ? palette.infoContainer : palette.surface;
-    final Color borderColor = selected
-        ? palette.info.withValues(alpha: 0.45)
-        : palette.border;
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(4),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 5.0, vertical: 3),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: borderColor),
+      segments: const <ButtonSegment<_RoleFilterOption>>[
+        ButtonSegment<_RoleFilterOption>(
+          value: _RoleFilterOption.all,
+          label: Text('All Roles', key: Key('diag-filter-role-all')),
         ),
-        child: Text(
-          label,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: monospace
-              ? instrumentMonoStyle(
-                  context,
-                  fontSize: 10,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  color: fg,
-                )
-              : TextStyle(
-                  fontSize: 10.5,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                  color: fg,
-                ),
+        ButtonSegment<_RoleFilterOption>(
+          value: _RoleFilterOption.operational,
+          label: Text('Operational', key: Key('diag-filter-role-operational')),
         ),
-      ),
+        ButtonSegment<_RoleFilterOption>(
+          value: _RoleFilterOption.auxiliary,
+          label: Text('Auxiliary', key: Key('diag-filter-role-auxiliary')),
+        ),
+      ],
+      selected: <_RoleFilterOption>{_currentOption},
+      onSelectionChanged: (Set<_RoleFilterOption> selection) {
+        final _RoleFilterOption chosen = selection.first;
+        switch (chosen) {
+          case _RoleFilterOption.all:
+            controller.selectRole(null);
+          case _RoleFilterOption.operational:
+            controller.selectRole(BindingRole.operational);
+          case _RoleFilterOption.auxiliary:
+            controller.selectRole(BindingRole.auxiliary);
+        }
+      },
     );
   }
 }
@@ -696,152 +814,197 @@ class _DiagnosticLogRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
-    final Color layerColor = _layerColor(entry.layer, palette);
+    final (Color layerFg, Color layerBg) = _layerColors(entry.layer, palette);
     final bool hasContext =
         entry.source != null ||
         entry.session != null ||
         entry.car != null ||
+        entry.role != null ||
         entry.nativeEntity != null;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: showTopDivider
-            ? Border(top: BorderSide(color: palette.border))
-            : null,
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7.5),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Wrap(
-              spacing: 7,
-              runSpacing: 3,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                Text(
-                  '#${entry.sequence}',
-                  style: instrumentMonoStyle(
-                    context,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: palette.mutedText,
-                  ),
-                ),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    StatusDot(color: layerColor, size: 6),
-                    const SizedBox(width: 4.5),
-                    Flexible(
-                      child: Text(
-                        entry.layer.wireValue,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: instrumentMonoStyle(
-                          context,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                          color: layerColor,
-                        ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        if (showTopDivider) const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              // Primary diagnostic identity line: Sequence Badge + Layer Chip + Event ID
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: palette.elevatedSurface,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: palette.border),
+                    ),
+                    child: Text(
+                      '#${entry.sequence}',
+                      style: instrumentTabularStyle(
+                        context,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: palette.subtleText,
                       ),
                     ),
-                  ],
-                ),
-                Text(
-                  entry.id,
-                  style: instrumentMonoStyle(
-                    context,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
                   ),
-                ),
-                if (entry.role != null)
                   SemanticBadge(
-                    label: entry.role!.wireValue,
-                    foreground: entry.role == BindingRole.operational
-                        ? palette.operationalRole
-                        : palette.auxiliaryRole,
-                    background: entry.role == BindingRole.operational
-                        ? palette.operationalRoleContainer
-                        : palette.auxiliaryRoleContainer,
-                    outlined: entry.role == BindingRole.auxiliary,
-                    monospace: true,
+                    label: formatDiagnosticLayerLabel(entry.layer),
+                    foreground: layerFg,
+                    background: layerBg,
+                    dotColor: layerFg,
+                    tooltip: 'Diagnostic layer: ${entry.layer.wireValue}',
                   ),
-              ],
-            ),
-            if (hasContext) ...<Widget>[
-              const SizedBox(height: 3.5),
-              Wrap(
-                spacing: 10,
-                runSpacing: 2.5,
-                children: <Widget>[
-                  if (entry.source != null)
-                    _ContextPair(label: 'source', value: entry.source!),
-                  if (entry.session != null)
-                    _ContextPair(label: 'session', value: entry.session!),
-                  if (entry.car != null)
-                    _ContextPair(label: 'car', value: entry.car!),
-                  if (entry.nativeEntity != null)
-                    _ContextPair(
-                      label: 'native_entity',
-                      value: entry.nativeEntity!,
+                  Text(
+                    entry.id,
+                    style: instrumentTabularStyle(
+                      context,
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w700,
                     ),
+                  ),
                 ],
               ),
+
+              // Structured M3 context chips (no raw key=value concatenation)
+              if (hasContext) ...<Widget>[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: <Widget>[
+                    if (entry.source != null)
+                      _DiagnosticContextChip(
+                        icon: Icons.hub_outlined,
+                        label: 'Source',
+                        value: entry.source!,
+                      ),
+                    if (entry.session != null)
+                      _DiagnosticContextChip(
+                        icon: Icons.link_rounded,
+                        label: 'Session',
+                        value: entry.session!,
+                      ),
+                    if (entry.car != null)
+                      _DiagnosticContextChip(
+                        icon: Icons.elevator_outlined,
+                        label: 'Car',
+                        value: entry.car!,
+                      ),
+                    if (entry.role != null)
+                      _DiagnosticContextChip(
+                        icon: Icons.verified_user_outlined,
+                        label: 'Role',
+                        value: entry.role == BindingRole.operational
+                            ? 'Operational'
+                            : 'Auxiliary',
+                        accentColor: entry.role == BindingRole.operational
+                            ? palette.operationalRole
+                            : null,
+                      ),
+                    if (entry.nativeEntity != null)
+                      _DiagnosticContextChip(
+                        icon: Icons.memory_rounded,
+                        label: 'Entity',
+                        value: entry.nativeEntity!.isEmpty
+                            ? '""'
+                            : entry.nativeEntity!,
+                      ),
+                  ],
+                ),
+              ],
             ],
-          ],
+          ),
         ),
-      ),
+      ],
     );
   }
 
-  Color _layerColor(DiagnosticLayer layer, InstrumentPalette palette) {
+  (Color fg, Color bg) _layerColors(
+    DiagnosticLayer layer,
+    InstrumentPalette palette,
+  ) {
     switch (layer) {
       case DiagnosticLayer.transport:
-        return palette.info;
+        return (palette.info, palette.infoContainer);
       case DiagnosticLayer.source:
-        return palette.subtleText;
+        return (palette.subtleText, palette.elevatedSurface);
       case DiagnosticLayer.mapping:
-        return palette.caution;
+        return (palette.caution, palette.cautionContainer);
       case DiagnosticLayer.observation:
-        return palette.info;
+        return (palette.info, palette.infoContainer);
       case DiagnosticLayer.readiness:
-        return palette.ok;
+        return (palette.ok, palette.okContainer);
     }
   }
 }
 
-class _ContextPair extends StatelessWidget {
-  const _ContextPair({required this.label, required this.value});
+class _DiagnosticContextChip extends StatelessWidget {
+  const _DiagnosticContextChip({
+    required this.icon,
+    required this.label,
+    required this.value,
+    this.accentColor,
+  });
 
+  final IconData icon;
   final String label;
   final String value;
+  final Color? accentColor;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
-    final String displayValue = value.isEmpty ? '""' : value;
-    // Use Text.rich rather than raw RichText so MediaQuery.textScalerOf(context) applies.
-    return Text.rich(
-      TextSpan(
-        children: <InlineSpan>[
-          TextSpan(
-            text: '$label=',
-            style: instrumentMonoStyle(
-              context,
-              fontSize: 11,
-              fontWeight: FontWeight.w400,
-              color: palette.mutedText,
-            ),
-          ),
-          TextSpan(
-            text: displayValue,
-            style: instrumentMonoStyle(
-              context,
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: palette.subtleText,
+    final Color effectiveValueColor =
+        accentColor ?? Theme.of(context).colorScheme.onSurface;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: palette.elevatedSurface,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: palette.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 13, color: accentColor ?? palette.mutedText),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text.rich(
+              TextSpan(
+                children: <InlineSpan>[
+                  TextSpan(
+                    text: '$label: ',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                      color: palette.mutedText,
+                    ),
+                  ),
+                  TextSpan(
+                    text: value,
+                    style: instrumentTabularStyle(
+                      context,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: effectiveValueColor,
+                    ),
+                  ),
+                ],
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],

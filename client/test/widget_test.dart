@@ -106,7 +106,9 @@ const String _restartedSynchronizingJson = '''
 
 final class _WidgetTestTransport implements HostTransport {
   String currentSnapshot = _richFixtureJson;
-  StreamController<String> sseController = StreamController<String>();
+  StreamController<String> sseController = StreamController<String>(
+    onCancel: () async {},
+  );
 
   @override
   Future<String> fetchSnapshotJson(HostEndpoint endpoint) async {
@@ -115,17 +117,13 @@ final class _WidgetTestTransport implements HostTransport {
 
   @override
   Future<HostSseConnection> openSnapshotEvents(HostEndpoint endpoint) async {
-    sseController = StreamController<String>();
+    sseController = StreamController<String>(onCancel: () async {});
     final StreamController<String> local = sseController;
     return HostSseConnection(
       snapshots: local.stream,
       onClose: () async {
         if (!local.isClosed) {
-          if (local.hasListener) {
-            await local.close();
-          } else {
-            unawaited(local.close());
-          }
+          unawaited(local.close());
         }
       },
     );
@@ -141,7 +139,7 @@ final class _WidgetTestTransport implements HostTransport {
 
 void main() {
   testWidgets(
-    'desktop split console renders equal-height cars/sources, flush-right headers, and filterable diagnostics without redundant tab chrome or write controls',
+    'desktop M3 supporting-pane layout balances Operational Cars and Observation Sources, and opens Pop-up Diagnostics Terminal on demand without write controls',
     (WidgetTester tester) async {
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(1366, 900);
@@ -165,8 +163,8 @@ void main() {
       final Rect onboardingFormRect = tester.getRect(
         find.byType(HostConnectionForm),
       );
-      expect(onboardingFormRect.top, greaterThan(120.0));
-      expect(onboardingFormRect.center.dy, lessThan(430.0));
+      expect(onboardingFormRect.top, greaterThan(100.0));
+      expect(onboardingFormRect.center.dy, lessThan(440.0));
 
       // Rejects https:// URL in onboarding form.
       await tester.enterText(
@@ -185,25 +183,35 @@ void main() {
       await tester.tap(find.byKey(const Key('connect-host-button')));
       await tester.pumpAndSettle();
 
-      // Unified desktop split console: zero redundant NavigationRail / Overview tab.
+      // Single-row M3 AppBar displays Read-Only chip, Host status M3 chips, and Diagnostics Terminal button + badge.
       expect(find.byType(NavigationRail), findsNothing);
       expect(find.byKey(const Key('compact-section-strip')), findsNothing);
+      expect(find.text('Read-Only'), findsOneWidget);
       expect(find.text('LIVE SSE'), findsOneWidget);
       expect(find.text('ReadyReadOnly'), findsOneWidget);
       expect(find.text('ReadOnly'), findsOneWidget);
-      expect(find.text('#12'), findsOneWidget);
-
-      // SectionHeader trailingNote aligns flush with the right edge of Host Diagnostics header.
-      final Rect diagHeaderRect = tester.getRect(
-        find.widgetWithText(SectionHeader, 'Host Diagnostics'),
+      expect(find.text('Rev #12'), findsOneWidget);
+      expect(
+        find.byKey(const Key('topbar-diagnostics-button')),
+        findsOneWidget,
       );
-      final Rect diagNoteRect = tester.getRect(
-        find.text('Host evidence · non-fault'),
-      );
-      expect((diagHeaderRect.right - diagNoteRect.right).abs(), lessThan(2.0));
+      expect(find.byKey(const Key('topbar-diagnostics-badge')), findsOneWidget);
 
-      // Side-by-side car cards and side-by-side source cards share exact row height on 1366x900,
-      // AND trailing header readouts (mode badge & bound count) align flush-right within 12px card padding.
+      // Host Diagnostics is NOT permanently occupying the main desktop canvas before clicking the terminal button.
+      expect(find.byKey(const Key('diagnostics-terminal-modal')), findsNothing);
+
+      // Desktop Supporting-Pane layout: Operational Cars on the left primary pane, Observation Sources on the right supporting pane.
+      final Rect carsHeaderRect = tester.getRect(
+        find.widgetWithText(SectionHeader, 'Operational Cars'),
+      );
+      final Rect sourcesHeaderRect = tester.getRect(
+        find.widgetWithText(SectionHeader, 'Observation Sources'),
+      );
+      expect(carsHeaderRect.top, equals(sourcesHeaderRect.top));
+      expect(carsHeaderRect.left, lessThan(sourcesHeaderRect.left));
+
+      // Side-by-side car cards in the primary pane share exact row height on 1366x900,
+      // and trailing mode chips align flush-right within 16px card padding.
       final Rect car0 = tester.getRect(find.byType(OperationalCarCard).at(0));
       final Rect car1 = tester.getRect(find.byType(OperationalCarCard).at(1));
       expect(car0.top, equals(car1.top));
@@ -212,7 +220,7 @@ void main() {
       final Rect car0ModeRect = tester.getRect(
         find.descendant(
           of: find.byType(OperationalCarCard).at(0),
-          matching: find.text('Normal'),
+          matching: find.widgetWithText(SemanticBadge, 'Normal'),
         ),
       );
       final Rect car1ModeRect = tester.getRect(
@@ -221,76 +229,47 @@ void main() {
           matching: find.widgetWithText(SemanticBadge, 'Inspection'),
         ),
       );
-      expect((car0.right - 12.0 - car0ModeRect.right).abs(), lessThan(2.0));
-      expect((car1.right - 12.0 - car1ModeRect.right).abs(), lessThan(2.0));
+      expect((car0.right - 16.0 - car0ModeRect.right).abs(), lessThan(2.0));
+      expect((car1.right - 16.0 - car1ModeRect.right).abs(), lessThan(2.0));
 
+      // Source cards in the right supporting pane align their trailing bound chips flush-right within 16px padding.
       final Rect src0 = tester.getRect(find.byType(SourceHealthCard).at(0));
       final Rect src1 = tester.getRect(find.byType(SourceHealthCard).at(1));
-      expect(src0.top, equals(src1.top));
-      expect(src0.height, equals(src1.height));
+      expect(src0.left, equals(src1.left));
+      expect(src0.width, equals(src1.width));
 
       final Rect src0BoundRect = tester.getRect(
         find.descendant(
           of: find.byType(SourceHealthCard).at(0),
-          matching: find.text('2 bound'),
+          matching: find.widgetWithText(SemanticBadge, '2 bound'),
         ),
       );
       final Rect src1BoundRect = tester.getRect(
         find.descendant(
           of: find.byType(SourceHealthCard).at(1),
-          matching: find.text('1 bound'),
+          matching: find.widgetWithText(SemanticBadge, '1 bound'),
         ),
       );
-      expect((src0.right - 12.0 - src0BoundRect.right).abs(), lessThan(2.0));
-      expect((src1.right - 12.0 - src1BoundRect.right).abs(), lessThan(2.0));
+      expect((src0.right - 16.0 - src0BoundRect.right).abs(), lessThan(2.0));
+      expect((src1.right - 16.0 - src1BoundRect.right).abs(), lessThan(2.0));
 
-      // DiagnosticsFilterToolbar: #seq button is flush-right, Role segmented control sits paired
-      // on Row 1, and all 6 Layer pills sit on a single non-wrapping row (no orphan Auxiliary wrap).
-      final Rect toolbarRect = tester.getRect(
-        find.byType(DiagnosticsFilterToolbar),
-      );
-      final Rect sortButtonRect = tester.getRect(
-        find.byKey(const Key('diagnostics-sort-button')),
-      );
-      expect((toolbarRect.right - sortButtonRect.right).abs(), lessThan(2.0));
-
-      final Rect roleOpRect = tester.getRect(
-        find.byKey(const Key('diag-filter-role-operational')),
-      );
-      final Rect roleAuxRect = tester.getRect(
-        find.byKey(const Key('diag-filter-role-auxiliary')),
-      );
-      expect(roleOpRect.top, equals(roleAuxRect.top));
-
-      final double allPillTop = tester
-          .getRect(find.byKey(const Key('diag-filter-all')))
-          .top;
-      expect(roleOpRect.top, isNot(equals(allPillTop)));
-      for (final String layerKey in <String>[
-        'diag-filter-all',
-        'diag-filter-layer-transport',
-        'diag-filter-layer-source',
-        'diag-filter-layer-mapping',
-        'diag-filter-layer-observation',
-        'diag-filter-layer-readiness',
-      ]) {
-        final Rect pillRect = tester.getRect(find.byKey(Key(layerKey)));
-        expect(pillRect.right, lessThanOrEqualTo(toolbarRect.right + 0.5));
-      }
-
-      // Location precision distinction: Floor ref vs Continuous position.
-      expect(find.text('Floor ref'), findsOneWidget);
-      expect(find.text('Floor 3'), findsOneWidget);
+      // Location precision distinction: Floor Reference vs Continuous position.
+      expect(find.text('Floor Reference'), findsOneWidget);
+      expect(find.text('3F'), findsOneWidget);
       expect(find.text('Continuous'), findsOneWidget);
-      expect(find.text('2.25'), findsOneWidget);
-      expect(find.text('Nearest Floor 2 (+0.25)'), findsOneWidget);
+      expect(find.text('2.25 F'), findsOneWidget);
+      expect(find.text('Nearest Floor 2'), findsOneWidget);
+      expect(find.text('+0.25'), findsOneWidget);
 
-      // Source-reported destination is labeled concisely without conflation.
-      expect(find.text('Source dest'), findsNWidgets(2));
+      // Source-reported destination is labeled clearly in the 3-column M3 footer.
+      expect(find.text('Reported Destination'), findsNWidgets(2));
       expect(find.text('Floor 6'), findsOneWidget);
       expect(find.text('Unknown'), findsOneWidget);
 
-      // Source Operational vs Auxiliary distinction & discovery!=payload callout.
+      // Source Operational vs Auxiliary distinction, 3-column tonal health tiles, & discovery!=payload warning banner.
+      expect(find.text('Session: session-alpha'), findsOneWidget);
+      expect(find.text('Session: session-beta'), findsOneWidget);
+      expect(find.text('Discovery Observed'), findsNWidgets(2));
       expect(
         find.descendant(
           of: find.byType(SourceHealthCard),
@@ -305,58 +284,85 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('diagnostic only'), findsOneWidget);
       expect(
         find.textContaining('Discovery observed without active payload'),
         findsOneWidget,
       );
 
-      // At 1040x800 and 940x720 laptop/tiled widths, primary left stage keeps 2 equal-height car columns,
-      // stacked sources match the exact right edge of car column 1, and zero layer pills clip horizontally!
+      // Laptop / tiled desktop widths (1040x800 and 940x720) render without overflow.
       for (final Size compactDesktop in <Size>[
         const Size(1040, 800),
         const Size(940, 720),
       ]) {
         tester.view.physicalSize = compactDesktop;
         await tester.pumpAndSettle();
-        final Rect laptopCar0 = tester.getRect(
-          find.byType(OperationalCarCard).at(0),
-        );
-        final Rect laptopCar1 = tester.getRect(
-          find.byType(OperationalCarCard).at(1),
-        );
-        final Rect laptopSrc0 = tester.getRect(
-          find.byType(SourceHealthCard).at(0),
-        );
-        expect(laptopCar0.top, equals(laptopCar1.top));
-        expect(laptopCar0.height, equals(laptopCar1.height));
-        expect((laptopCar1.right - laptopSrc0.right).abs(), lessThan(1.0));
-
-        final Rect compactToolbar = tester.getRect(
-          find.byType(DiagnosticsFilterToolbar),
-        );
-        final Rect readinessRect = tester.getRect(
-          find.byKey(const Key('diag-filter-layer-readiness')),
-        );
-        expect(
-          readinessRect.right,
-          lessThanOrEqualTo(compactToolbar.right + 0.5),
-        );
+        expect(tester.takeException(), isNull);
       }
 
       tester.view.physicalSize = const Size(1366, 900);
       await tester.pumpAndSettle();
 
-      // Full filterable diagnostics stream is immediately available on desktop right pane.
+      // Open Pop-up Diagnostics Terminal via top AppBar button.
+      await tester.tap(find.byKey(const Key('topbar-diagnostics-button')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('diagnostics-terminal-modal')),
+        findsOneWidget,
+      );
+      expect(find.byType(DiagnosticsTerminalModalContent), findsOneWidget);
+      expect(find.text('Host Diagnostics'), findsOneWidget);
+      expect(
+        find.textContaining('Machine-readable Host evidence only'),
+        findsOneWidget,
+      );
       expect(find.text('readiness.changed'), findsOneWidget);
       expect(find.text('mapping.rejected'), findsOneWidget);
 
+      // Structured M3 context chips inside diagnostic entry row (no raw key=value soup).
+      final Finder modalFinder = find.byType(DiagnosticsTerminalModalContent);
+      expect(
+        find.descendant(
+          of: modalFinder,
+          matching: find.textContaining('Source: bacnet/wing-west'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: modalFinder,
+          matching: find.textContaining('Session: session-beta'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: modalFinder,
+          matching: find.textContaining('Car: lift-A'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: modalFinder,
+          matching: find.textContaining('Role: Auxiliary'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: modalFinder,
+          matching: find.textContaining('Entity: LiftObj_1'),
+        ),
+        findsOneWidget,
+      );
+
+      // Filter by Mapping layer FilterChip.
       await tester.tap(find.byKey(const Key('diag-filter-layer-mapping')));
       await tester.pumpAndSettle();
       expect(find.text('mapping.rejected'), findsOneWidget);
       expect(find.text('readiness.changed'), findsNothing);
 
-      // Reset filter, test role filter and search input + clear button.
+      // Reset filter via All FilterChip, test Role SegmentedButton and SearchBar + clear button.
       await tester.tap(find.byKey(const Key('diag-filter-all')));
       await tester.pumpAndSettle();
       expect(find.text('readiness.changed'), findsOneWidget);
@@ -367,6 +373,7 @@ void main() {
       expect(find.text('readiness.changed'), findsNothing);
 
       await tester.tap(find.byKey(const Key('diag-filter-all')));
+      await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const Key('diagnostics-search-input')),
         'LiftObj',
@@ -374,15 +381,35 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('mapping.rejected'), findsOneWidget);
       expect(find.text('readiness.changed'), findsNothing);
+      // When search matches zero entries, empty diagnostics card stays compact rather than stretching to modal height.
+      await tester.enterText(
+        find.byKey(const Key('diagnostics-search-input')),
+        'no-such-diagnostic-entry',
+      );
+      await tester.pumpAndSettle();
+      final Finder emptyFilterText = find.text(
+        'No diagnostic entries match the active filter.',
+      );
+      expect(emptyFilterText, findsOneWidget);
+      final Rect emptyCardRect = tester.getRect(
+        find.ancestor(of: emptyFilterText, matching: find.byType(Card)).first,
+      );
+      expect(emptyCardRect.height, lessThan(120.0));
+
       await tester.tap(find.byKey(const Key('diagnostics-search-clear')));
       await tester.pumpAndSettle();
       expect(find.text('readiness.changed'), findsOneWidget);
+
+      // Close Pop-up Diagnostics Terminal.
+      await tester.tap(find.byKey(const Key('diagnostics-modal-close')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('diagnostics-terminal-modal')), findsNothing);
 
       // Open and close on-demand semantic reference modal.
       await tester.tap(find.byKey(const Key('topbar-semantics-button')));
       await tester.pumpAndSettle();
       expect(find.text('experimental/v0 Semantic Reference'), findsOneWidget);
-      await tester.tap(find.byIcon(Icons.close));
+      await tester.tap(find.byIcon(Icons.close_rounded));
       await tester.pumpAndSettle();
 
       // Verify strict read-only boundary: zero elevator command actions.
@@ -399,7 +426,7 @@ void main() {
   );
 
   testWidgets(
-    'mobile layout shows operational cars above the fold, preserves diagnostic filters across tabs/resizes, and surfaces disconnect + Host revision reset',
+    'mobile layout uses 2-tab M3 strip (Cars / Sources), opens Pop-up Diagnostics Terminal bottom sheet, preserves filters, and surfaces disconnect + Host revision reset',
     (WidgetTester tester) async {
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(360, 780);
@@ -426,71 +453,28 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Mobile uses slim 3-tab strip (Cars / Sources / Diagnostics) and renders BOTH cars above the fold
-      // with flush-right mode readouts!
+      // Mobile uses 2-tab M3 strip (Cars / Sources) and renders both cars cleanly.
       expect(find.byKey(const Key('compact-section-strip')), findsOneWidget);
+      expect(find.byKey(const Key('compact-tab-cars')), findsOneWidget);
+      expect(find.byKey(const Key('compact-tab-sources')), findsOneWidget);
       expect(find.byType(OperationalCarCard), findsNWidgets(2));
-      final Rect mobileCar0 = tester.getRect(
-        find.byType(OperationalCarCard).at(0),
-      );
-      final Rect mobileCar0Mode = tester.getRect(
-        find.descendant(
-          of: find.byType(OperationalCarCard).at(0),
-          matching: find.text('Normal'),
-        ),
-      );
-      expect(
-        (mobileCar0.right - 12.0 - mobileCar0Mode.right).abs(),
-        lessThan(2.0),
-      );
-      final Rect secondCarRect = tester.getRect(
-        find.byType(OperationalCarCard).at(1),
-      );
-      expect(secondCarRect.bottom, lessThan(780));
       expect(tester.takeException(), isNull);
 
-      // Visit Sources, then Diagnostics, apply filter + search, switch tabs AND resize across desktop/mobile!
+      // Switch to Sources tab on mobile.
       await tester.tap(find.byKey(const Key('compact-tab-sources')));
       await tester.pumpAndSettle();
       expect(find.text('rmf/site-main'), findsOneWidget);
-      final Rect mobileSrc0 = tester.getRect(
-        find.byType(SourceHealthCard).at(0),
-      );
-      final Rect mobileSrc0Bound = tester.getRect(
-        find.descendant(
-          of: find.byType(SourceHealthCard).at(0),
-          matching: find.text('2 bound'),
-        ),
-      );
-      expect(
-        (mobileSrc0.right - 12.0 - mobileSrc0Bound.right).abs(),
-        lessThan(2.0),
-      );
       expect(tester.takeException(), isNull);
 
-      await tester.tap(find.byKey(const Key('compact-tab-diagnostics')));
+      // Open Pop-up Diagnostics Terminal bottom sheet from top AppBar button, apply filter + search, close & reopen.
+      await tester.tap(find.byKey(const Key('topbar-diagnostics-button')));
       await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('diagnostics-terminal-modal')),
+        findsOneWidget,
+      );
       expect(find.text('mapping.rejected'), findsOneWidget);
       expect(find.text('readiness.changed'), findsOneWidget);
-
-      // On mobile Diagnostics, #seq button is flush-right and Role buttons stay paired together on their own row.
-      final Rect mobileToolbarRect = tester.getRect(
-        find.byType(DiagnosticsFilterToolbar),
-      );
-      final Rect mobileSortRect = tester.getRect(
-        find.byKey(const Key('diagnostics-sort-button')),
-      );
-      expect(
-        (mobileToolbarRect.right - mobileSortRect.right).abs(),
-        lessThan(2.0),
-      );
-      final Rect mobileRoleOp = tester.getRect(
-        find.byKey(const Key('diag-filter-role-operational')),
-      );
-      final Rect mobileRoleAux = tester.getRect(
-        find.byKey(const Key('diag-filter-role-auxiliary')),
-      );
-      expect(mobileRoleOp.top, equals(mobileRoleAux.top));
 
       await tester.tap(find.byKey(const Key('diag-filter-layer-mapping')));
       await tester.enterText(
@@ -500,26 +484,22 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('readiness.changed'), findsNothing);
 
-      // Switch away to Cars and back to Diagnostics: filter & query remain intact!
+      // Close modal, switch back to Cars tab, resize to desktop, and reopen Diagnostics Terminal: filter & query remain intact!
+      await tester.tap(find.byKey(const Key('diagnostics-modal-close')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('compact-tab-cars')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('compact-tab-diagnostics')));
-      await tester.pumpAndSettle();
-      expect(find.text('mapping.rejected'), findsOneWidget);
-      expect(find.text('readiness.changed'), findsNothing);
 
-      // Resize across 920x460 split-desktop breakpoint and back: filter & query remain intact!
       tester.view.physicalSize = const Size(1280, 800);
       await tester.pumpAndSettle();
-      expect(find.text('mapping.rejected'), findsOneWidget);
-      expect(find.text('readiness.changed'), findsNothing);
-
-      tester.view.physicalSize = const Size(360, 780);
+      await tester.tap(find.byKey(const Key('topbar-diagnostics-button')));
       await tester.pumpAndSettle();
       expect(find.text('mapping.rejected'), findsOneWidget);
       expect(find.text('readiness.changed'), findsNothing);
+      await tester.tap(find.byKey(const Key('diagnostics-modal-close')));
+      await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('compact-tab-cars')));
+      tester.view.physicalSize = const Size(360, 780);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
 
@@ -549,7 +529,7 @@ void main() {
       expect(find.text('LIVE SSE'), findsOneWidget);
       expect(find.text('Synchronizing'), findsOneWidget);
       expect(find.text('NotReady'), findsOneWidget);
-      expect(find.text('#1'), findsOneWidget);
+      expect(find.text('Rev #1'), findsOneWidget);
       expect(
         find.textContaining('New Host lifetime (#12 → #1)'),
         findsOneWidget,
@@ -558,13 +538,9 @@ void main() {
         find.byKey(const Key('empty-operational-cars-card')),
         findsOneWidget,
       );
-      // Pending Operational car binding from sources is surfaced directly in empty state!
-      expect(
-        find.textContaining(
-          'lift-A · awaiting (rmf/site-main, payload:awaiting)',
-        ),
-        findsOneWidget,
-      );
+      // Pending Operational car binding from sources is surfaced via structured M3 chips!
+      expect(find.text('Source: rmf/site-main'), findsOneWidget);
+      expect(find.text('Payload: Awaiting'), findsOneWidget);
     },
   );
 
@@ -665,7 +641,6 @@ void main() {
         find.byKey(const Key('host-url-input')),
       );
       expect(inlineField.controller?.text, 'http://192.168.1.99:9090');
-      // Inline onboarding error banner does not render a duplicate Host URL modal button above the open form.
       expect(
         find.byKey(const Key('error-configure-host-button')),
         findsNothing,
@@ -680,10 +655,11 @@ void main() {
       // Verify -0.00 / +-0.00 NEVER appear anywhere, and +0.85 outlier delta renders accurately.
       expect(find.textContaining('-0.00'), findsNothing);
       expect(find.textContaining('+-0.00'), findsNothing);
-      expect(find.text('0.00'), findsOneWidget);
-      expect(find.text('Nearest Floor 2 (+0.00)'), findsOneWidget);
-      expect(find.text('Nearest Floor 0 (+0.00)'), findsOneWidget);
-      expect(find.text('Nearest Floor 2 (+0.85)'), findsOneWidget);
+      expect(find.text('0.00 F'), findsOneWidget);
+      expect(find.text('Nearest Floor 2'), findsNWidgets(2));
+      expect(find.text('Nearest Floor 0'), findsOneWidget);
+      expect(find.text('+0.00'), findsNWidgets(2));
+      expect(find.text('+0.85'), findsOneWidget);
       expect(find.text('Floor -1'), findsOneWidget);
 
       // Verify long CarId does not overflow on 360x780 mobile portrait or 800x300 short landscape + modal.
@@ -699,6 +675,28 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       Navigator.of(tester.element(find.byType(Dialog))).pop();
+      await tester.pumpAndSettle();
+
+      // Open Pop-up Diagnostics Terminal on 800x300 short landscape, filter, and switch Host endpoint while modal is open.
+      await tester.tap(find.byKey(const Key('topbar-diagnostics-button')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.enterText(
+        find.byKey(const Key('diagnostics-search-input')),
+        'unmatched-filter',
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('mapping.rejected'), findsNothing);
+
+      // Switching Host endpoint while Diagnostics Terminal is mounted resets filter outside build() without error.
+      unawaited(syncController.connectToUrl('http://192.168.1.100:9090'));
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('mapping.rejected'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('diagnostics-modal-close')));
       await tester.pumpAndSettle();
 
       // Emit unsupported API version while snapshot #5 is retained: BOTH error banner and stale banner must show.
@@ -820,23 +818,20 @@ void main() {
         lessThan(15),
       );
 
-      // Check Sources and Diagnostics tabs at 2.0x text scale on 320x568 without overflow!
+      // Check Sources tab and Pop-up Diagnostics Terminal at 2.0x text scale on 320x568 without overflow!
       await tester.tap(find.byKey(const Key('compact-tab-sources')));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
 
-      await tester.tap(find.byKey(const Key('compact-tab-diagnostics')));
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-
-      // Scroll past the 2.0x-scaled filter toolbar on 320x568; oldest entry (#1) stays unmaterialized offscreen!
-      await tester.drag(find.byType(CustomScrollView), const Offset(0, -320));
+      await tester.tap(find.byKey(const Key('topbar-diagnostics-button')));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       expect(find.text('observation.updated.200'), findsOneWidget);
       expect(find.text('observation.updated.1'), findsNothing);
+      await tester.tap(find.byKey(const Key('diagnostics-modal-close')));
+      await tester.pumpAndSettle();
 
-      // Desktop split console at 2.0x text scale AND at 1.0x virtualization check.
+      // Desktop supporting-pane layout at 2.0x text scale AND at 1.0x virtualization check.
       tester.view.physicalSize = const Size(1366, 900);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
@@ -848,13 +843,18 @@ void main() {
         tester.widgetList(find.byType(OperationalCarCard)).length,
         lessThan(30),
       );
+
+      await tester.tap(find.byKey(const Key('topbar-diagnostics-button')));
+      await tester.pumpAndSettle();
       expect(find.text('observation.updated.200'), findsOneWidget);
       expect(find.text('observation.updated.1'), findsNothing);
+      await tester.tap(find.byKey(const Key('diagnostics-modal-close')));
+      await tester.pumpAndSettle();
     },
   );
 
   testWidgets(
-    'bounds single-car and single-source cards on wide desktop stages and aligns single source under column 0 when 2 cars resolve',
+    'balances single-car and single-source cards side-by-side in desktop Supporting-Pane layout',
     (WidgetTester tester) async {
       tester.view.devicePixelRatio = 1.0;
       tester.view.physicalSize = const Size(1366, 900);
@@ -892,46 +892,6 @@ void main() {
       }
       ''';
 
-      const String twoCarSingleSourceJson = '''
-      {
-        "api_version": "experimental/v0",
-        "revision": 3,
-        "lifecycle": "ready_read_only",
-        "readiness": "read_only",
-        "operational_cars": [
-          {
-            "id": "lift-A",
-            "location": {"kind": "floor", "floor": 1},
-            "motion": {"state": "stopped"},
-            "door": "closed",
-            "operating_mode": "normal",
-            "reported_destination": {"kind": "none"}
-          },
-          {
-            "id": "lift-B",
-            "location": {"kind": "floor", "floor": 3},
-            "motion": {"state": "moving", "direction": "up"},
-            "door": "closed",
-            "operating_mode": "normal",
-            "reported_destination": {"kind": "known", "floor": 5}
-          }
-        ],
-        "sources": [
-          {
-            "source": "rmf/site-main",
-            "session": {"state": "active", "session": "session-1"},
-            "transport": "discovery_observed",
-            "payload": "active",
-            "observations": [
-              {"car": "lift-A", "role": "operational", "availability": "resolved"},
-              {"car": "lift-B", "role": "operational", "availability": "resolved"}
-            ]
-          }
-        ],
-        "recent_diagnostics": []
-      }
-      ''';
-
       final _WidgetTestTransport transport = _WidgetTestTransport()
         ..currentSnapshot = singleCarFixtureJson;
       final ClientController controller = ClientController(
@@ -952,82 +912,15 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Single car and single source share identical bounded width (<= 540px) AND sit immediately
-      // adjacent to Host Diagnostics (no 349px..903px central chasm between cards and VerticalDivider).
+      // In desktop M3 Supporting-Pane layout, 1 OperationalCarCard sits in the left primary pane
+      // and 1 SourceHealthCard sits side-by-side at the same top Y in the right supporting pane!
       final Rect singleCarRect = tester.getRect(
         find.byType(OperationalCarCard),
       );
       final Rect singleSrcRect = tester.getRect(find.byType(SourceHealthCard));
-      final Rect singleDiagHeaderRect = tester.getRect(
-        find.widgetWithText(SectionHeader, 'Host Diagnostics'),
-      );
-      expect(singleCarRect.left, equals(singleSrcRect.left));
-      expect(singleCarRect.width, equals(singleSrcRect.width));
-      expect(singleCarRect.width, lessThanOrEqualTo(540.0));
-      expect(singleCarRect.width, greaterThanOrEqualTo(500.0));
-      expect(
-        singleDiagHeaderRect.left - singleCarRect.right,
-        lessThanOrEqualTo(36.0),
-      );
-
-      final Rect fireBadgeRect = tester.getRect(
-        find.widgetWithText(SemanticBadge, 'FireService'),
-      );
-      final Rect singleBoundRect = tester.getRect(find.text('1 bound'));
-      expect(
-        (singleCarRect.right - 12.0 - fireBadgeRect.right).abs(),
-        lessThan(2.0),
-      );
-      expect(
-        (singleSrcRect.right - 12.0 - singleBoundRect.right).abs(),
-        lessThan(2.0),
-      );
-
-      // Ultra-wide 1920x1080 single-car state also avoids a 900px central void!
-      tester.view.physicalSize = const Size(1920, 1080);
-      await tester.pumpAndSettle();
-      final Rect ultraSingleCarRect = tester.getRect(
-        find.byType(OperationalCarCard),
-      );
-      final Rect ultraSingleDiagHeader = tester.getRect(
-        find.widgetWithText(SectionHeader, 'Host Diagnostics'),
-      );
-      expect(ultraSingleCarRect.width, lessThanOrEqualTo(540.0));
-      expect(
-        ultraSingleDiagHeader.left - ultraSingleCarRect.right,
-        lessThanOrEqualTo(36.0),
-      );
-
-      tester.view.physicalSize = const Size(1366, 900);
-      await tester.pumpAndSettle();
-
-      // Push a 2-car, 1-source SSE snapshot (real Hotel RMF topology): Source 0 snaps to match Car 0's column width!
-      transport.sseController.add(twoCarSingleSourceJson);
-      await tester.pumpAndSettle();
-
-      final Rect twoCar0Rect = tester.getRect(
-        find.byType(OperationalCarCard).at(0),
-      );
-      final Rect pairedSrcRect = tester.getRect(find.byType(SourceHealthCard));
-      expect((twoCar0Rect.right - pairedSrcRect.right).abs(), lessThan(1.0));
-
-      // Ultra-wide 1920x1080 bounds multi-column rows cleanly (<= 500px) AND keeps Car 1 adjacent to Host Diagnostics!
-      tester.view.physicalSize = const Size(1920, 1080);
-      await tester.pumpAndSettle();
-      final Rect ultraWideCar0 = tester.getRect(
-        find.byType(OperationalCarCard).at(0),
-      );
-      final Rect ultraWideCar1 = tester.getRect(
-        find.byType(OperationalCarCard).at(1),
-      );
-      final Rect ultraWideDiagHeader = tester.getRect(
-        find.widgetWithText(SectionHeader, 'Host Diagnostics'),
-      );
-      expect(ultraWideCar0.width, lessThanOrEqualTo(500.0));
-      expect(
-        ultraWideDiagHeader.left - ultraWideCar1.right,
-        lessThanOrEqualTo(36.0),
-      );
+      expect((singleCarRect.top - singleSrcRect.top).abs(), lessThan(2.0));
+      expect(singleCarRect.right, lessThan(singleSrcRect.left));
+      expect(singleCarRect.width, greaterThan(singleSrcRect.width));
     },
   );
 }

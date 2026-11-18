@@ -152,75 +152,88 @@ class _HostConnectionFormState extends State<HostConnectionForm> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        const Text(
-          'Host Endpoint',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.2,
-          ),
+        Row(
+          children: <Widget>[
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: palette.infoContainer,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(Icons.dns_outlined, size: 18, color: palette.info),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  const Text(
+                    'Host Endpoint',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Read-only experimental/v0 snapshot + SSE stream (plain http:// only).',
+                    style: TextStyle(fontSize: 12.5, color: palette.subtleText),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 3),
-        Text(
-          'Read-only experimental/v0 snapshot + SSE stream (plain http:// only).',
-          style: TextStyle(fontSize: 12, color: palette.subtleText),
-        ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         TextField(
           key: const Key('host-url-input'),
           controller: _controller,
           keyboardType: TextInputType.url,
           autocorrect: false,
-          style: instrumentMonoStyle(context, fontSize: 13),
+          style: instrumentTabularStyle(context, fontSize: 13.5),
           decoration: InputDecoration(
             hintText: 'http://127.0.0.1:8080',
+            prefixIcon: Icon(
+              Icons.link_rounded,
+              size: 18,
+              color: palette.mutedText,
+            ),
             errorText: _validationError,
             errorMaxLines: 3,
           ),
           onSubmitted: (_) => _submit(),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Wrap(
-          spacing: 6,
-          runSpacing: 6,
+          spacing: 8,
+          runSpacing: 8,
           children: <Widget>[
             for (final HostPreset preset in presets)
-              Tooltip(
-                message: preset.hint,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(4),
-                  onTap: () {
-                    setState(() {
-                      _controller.text = preset.url;
-                      _validationError = null;
-                    });
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: palette.elevatedSurface,
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: palette.border),
-                    ),
-                    child: Text(
-                      preset.label,
-                      style: instrumentMonoStyle(
-                        context,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: palette.subtleText,
-                      ),
-                    ),
+              ActionChip(
+                tooltip: preset.hint,
+                visualDensity: VisualDensity.compact,
+                label: Text(
+                  preset.label,
+                  style: instrumentTabularStyle(
+                    context,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: palette.subtleText,
                   ),
                 ),
+                onPressed: () {
+                  setState(() {
+                    _controller.text = preset.url;
+                    _validationError = null;
+                  });
+                },
               ),
           ],
         ),
         if (kIsWeb) ...<Widget>[
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Text.rich(
             TextSpan(
               style: TextStyle(
@@ -234,10 +247,10 @@ class _HostConnectionFormState extends State<HostConnectionForm> {
                 ),
                 TextSpan(
                   text: '/\u2060api\u2060/\u2060experimental\u2060/\u2060v0',
-                  style: instrumentMonoStyle(
+                  style: instrumentTabularStyle(
                     context,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
                     color: palette.subtleText,
                   ),
                 ),
@@ -246,21 +259,23 @@ class _HostConnectionFormState extends State<HostConnectionForm> {
             ),
           ),
         ],
-        const SizedBox(height: 14),
+        const SizedBox(height: 16),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: <Widget>[
-            FilledButton(
+            FilledButton.icon(
               key: const Key('connect-host-button'),
               onPressed: _submit,
-              child: const Text('Connect'),
+              icon: const Icon(Icons.bolt_rounded, size: 16),
+              label: const Text('Connect'),
             ),
             if (widget.isConnectedOrConnecting && widget.onDisconnect != null)
-              OutlinedButton(
+              OutlinedButton.icon(
                 key: const Key('disconnect-host-button'),
                 onPressed: widget.onDisconnect,
-                child: const Text('Disconnect'),
+                icon: const Icon(Icons.link_off_rounded, size: 16),
+                label: const Text('Disconnect'),
               ),
           ],
         ),
@@ -282,10 +297,7 @@ Future<void> showHostConnectionModal({
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: context.palette.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
-      ),
+      clipBehavior: Clip.antiAlias,
       builder: (BuildContext sheetContext) {
         return SingleChildScrollView(
           padding: EdgeInsets.fromLTRB(
@@ -317,15 +329,11 @@ Future<void> showHostConnectionModal({
     context: context,
     builder: (BuildContext dialogContext) {
       return Dialog(
-        backgroundColor: dialogContext.palette.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: BorderSide(color: dialogContext.palette.border),
-        ),
+        clipBehavior: Clip.antiAlias,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 460),
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(20),
             child: HostConnectionForm(
               initialUrl: currentUrl,
               isConnectedOrConnecting: isConnectedOrConnecting,
@@ -349,17 +357,12 @@ Future<void> showSemanticsReferenceModal(BuildContext context) async {
   await showDialog<void>(
     context: context,
     builder: (BuildContext dialogContext) {
-      final InstrumentPalette palette = dialogContext.palette;
       return Dialog(
-        backgroundColor: palette.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: BorderSide(color: palette.border),
-        ),
+        clipBehavior: Clip.antiAlias,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 520),
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(18),
+            padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -370,7 +373,7 @@ Future<void> showSemanticsReferenceModal(BuildContext context) async {
                       child: Text(
                         'experimental/v0 Semantic Reference',
                         style: TextStyle(
-                          fontSize: 14.5,
+                          fontSize: 15,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -378,7 +381,7 @@ Future<void> showSemanticsReferenceModal(BuildContext context) async {
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       onPressed: () => Navigator.of(dialogContext).pop(),
-                      icon: const Icon(Icons.close, size: 17),
+                      icon: const Icon(Icons.close_rounded, size: 18),
                     ),
                   ],
                 ),
