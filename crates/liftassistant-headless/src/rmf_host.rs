@@ -120,6 +120,65 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn subscriber_recreation_restarts_discovery_without_restarting_the_adapter() {
+        use crate::{SourceSessionActivity, TransportDiscoveryState};
+        let (mut host, mut adapter, mut monitor) = fixture(ObservationBindingRole::Operational);
+        let (source, session) = (adapter.source().clone(), adapter.session().clone());
+        let (b, first, second) = (
+            CarId::new("B"),
+            lift("Lift1", &["L1"]),
+            lift("Lift2", &["L1"]),
+        );
+        let now = Instant::now();
+        for payload in [&first, &second] {
+            monitor
+                .supervise(&mut host, &mut adapter, now, Some(payload))
+                .unwrap();
+        }
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+        assert_eq!(
+            host.source_health(&source).unwrap().transport_discovery,
+            TransportDiscoveryState::DiscoveryObserved
+        );
+        host.mark_source_payload_stale(source.clone(), session.clone())
+            .unwrap();
+        host.note_transport_subscriber_created(&source);
+        let health = host.source_health(&source).unwrap();
+        assert_eq!(health.session, SourceSessionActivity::Active(session));
+        assert_eq!(
+            health.transport_discovery,
+            TransportDiscoveryState::SubscriberCreated
+        );
+        assert_eq!(health.payload, PayloadActivity::Stale);
+        assert_eq!(host.readiness(), Readiness::NotReady);
+
+        let mut recreated = RmfCarFreshness::new(monitor.policy);
+        recreated
+            .supervise(&mut host, &mut adapter, now, Some(&second))
+            .unwrap();
+        let health = host.source_health(&source).unwrap();
+        assert_eq!(
+            health.transport_discovery,
+            TransportDiscoveryState::DiscoveryObserved
+        );
+        assert_eq!(health.payload, PayloadActivity::Active);
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        assert_eq!(
+            host.engine
+                .evidence(&source, &b)
+                .unwrap()
+                .latest_provenance
+                .sequence
+                .value(),
+            3
+        );
+        recreated
+            .supervise(&mut host, &mut adapter, now, Some(&first))
+            .unwrap();
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+    }
+
     fn fixture(
         role_a: ObservationBindingRole,
     ) -> (ReadOnlyHost, RmfObservationAdapter, RmfCarFreshness) {

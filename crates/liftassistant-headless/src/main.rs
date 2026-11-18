@@ -788,26 +788,19 @@ impl ReadOnlyHost {
     }
 
     fn note_transport_subscriber_created(&mut self, source: &ObservationSourceId) {
-        let changed = if let Some(health) = self.source_health.get_mut(source) {
-            if health.transport_discovery != TransportDiscoveryState::Unknown {
-                return;
-            }
-            health.transport_discovery = TransportDiscoveryState::SubscriberCreated;
-            let SourceSessionActivity::Active(session) = &health.session else {
-                return self.bump_read_model_revision();
-            };
+        let Some(health) = self.source_health.get_mut(source) else {
+            return;
+        };
+        // Each call denotes a freshly created subscriber, even within the same ingestion lifetime.
+        health.transport_discovery = TransportDiscoveryState::SubscriberCreated;
+        if let SourceSessionActivity::Active(session) = &health.session {
             self.diagnostics
                 .record(HostEvent::TransportSubscriberCreated {
                     source: source.clone(),
                     session: session.clone(),
                 });
-            true
-        } else {
-            false
-        };
-        if changed {
-            self.bump_read_model_revision();
         }
+        self.bump_read_model_revision();
     }
 
     fn note_transport_discovery(&mut self, source: &ObservationSourceId) {
@@ -839,6 +832,11 @@ impl ReadOnlyHost {
         session: ObservationSessionId,
         message: String,
     ) {
+        if let Some(health) = self.source_health.get_mut(&source).filter(|health|
+            matches!(&health.session, SourceSessionActivity::Active(active) if active == &session)
+        ) {
+            health.transport_discovery = TransportDiscoveryState::Unknown;
+        }
         self.diagnostics.record(HostEvent::TransportFailed {
             source,
             session,
@@ -4121,7 +4119,6 @@ mod tests {
         host.note_transport_subscriber_created(&reference_source_id());
         host.note_transport_discovery(&reference_source_id());
         let discovered_revision = host.read_model().revision();
-        host.note_transport_subscriber_created(&reference_source_id());
 
         let health = host
             .source_health(&reference_source_id())
@@ -4137,7 +4134,15 @@ mod tests {
         );
         assert_eq!(host.readiness(), Readiness::NotReady);
         assert!(host.engine.car_states().is_empty());
-        assert_eq!(host.read_model().revision(), discovered_revision);
+        host.note_transport_subscriber_created(&reference_source_id());
+        assert!(host.read_model().revision() > discovered_revision);
+        assert_eq!(
+            host.source_health(&reference_source_id())
+                .unwrap()
+                .transport_discovery,
+            TransportDiscoveryState::SubscriberCreated
+        );
+        assert_eq!(host.readiness(), Readiness::NotReady);
     }
 
     #[test]
