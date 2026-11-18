@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../api/read_model.dart';
-import '../../state/client_controller.dart';
 import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
 
@@ -136,248 +135,28 @@ class DiagnosticsFilterController extends ChangeNotifier {
   }
 }
 
-/// Opens the Pop-up Diagnostics Terminal (`DiagnosticsTerminalModal`).
-/// Uses a generous M3 Modal Dialog on desktop/wide viewports and a full-height
-/// M3 Modal Bottom Sheet on mobile/compact viewports.
-Future<void> showDiagnosticsTerminalModal({
-  required BuildContext context,
-  required ClientController controller,
-  required DiagnosticsFilterController filterController,
-}) async {
-  final Size viewport = MediaQuery.sizeOf(context);
-  final bool useDesktopDialog = viewport.width >= 720 && viewport.height >= 480;
-
-  if (useDesktopDialog) {
-    await showDialog<void>(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        final Size dialogViewport = MediaQuery.sizeOf(dialogContext);
-        final double dialogWidth = (dialogViewport.width * 0.84).clamp(
-          560.0,
-          920.0,
-        );
-        final double dialogHeight = (dialogViewport.height * 0.84).clamp(
-          420.0,
-          720.0,
-        );
-        return Dialog(
-          key: const Key('diagnostics-terminal-modal'),
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 24,
-            vertical: 24,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: SizedBox(
-            width: dialogWidth,
-            height: dialogHeight,
-            child: DiagnosticsTerminalModalContent(
-              controller: controller,
-              filterController: filterController,
-              onClose: () => Navigator.of(dialogContext).pop(),
-            ),
-          ),
-        );
-      },
-    );
-    return;
-  }
-
-  await showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    clipBehavior: Clip.antiAlias,
-    builder: (BuildContext sheetContext) {
-      return FractionallySizedBox(
-        key: const Key('diagnostics-terminal-modal'),
-        heightFactor: 0.92,
-        child: DiagnosticsTerminalModalContent(
-          controller: controller,
-          filterController: filterController,
-          onClose: () => Navigator.of(sheetContext).pop(),
-        ),
-      );
-    },
-  );
-}
-
-class DiagnosticsTerminalModalContent extends StatelessWidget {
-  const DiagnosticsTerminalModalContent({
-    super.key,
-    required this.controller,
-    required this.filterController,
-    required this.onClose,
-  });
-
-  final ClientController controller;
-  final DiagnosticsFilterController filterController;
-  final VoidCallback onClose;
-
-  @override
-  Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-    final Size viewport = MediaQuery.sizeOf(context);
-    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
-    final bool compactHeader = viewport.height < 640 || textScale > 1.35;
-    final bool showNonFaultBanner = viewport.height >= 420;
-
-    return ListenableBuilder(
-      listenable: controller,
-      builder: (BuildContext context, _) {
-        final List<DiagnosticEntry> diagnostics =
-            controller.state.snapshot?.recentDiagnostics ??
-            const <DiagnosticEntry>[];
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            // 1. M3 Sheet Header + Non-fault Evidence Banner
-            Padding(
-              padding: EdgeInsets.fromLTRB(
-                compactHeader ? 12 : 20,
-                compactHeader ? 8 : 16,
-                compactHeader ? 8 : 14,
-                compactHeader ? 6 : 12,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Row(
-                    children: <Widget>[
-                      if (!compactHeader) ...<Widget>[
-                        Container(
-                          width: 34,
-                          height: 34,
-                          decoration: BoxDecoration(
-                            color: palette.infoContainer,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(
-                            Icons.terminal_rounded,
-                            size: 18,
-                            color: palette.info,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                      ],
-                      Expanded(
-                        child: Row(
-                          children: <Widget>[
-                            const Flexible(
-                              child: Text(
-                                'Host Diagnostics',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                  letterSpacing: -0.2,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Badge.count(
-                              count: diagnostics.length,
-                              backgroundColor: palette.infoContainer,
-                              textColor: palette.info,
-                              textStyle: instrumentTabularStyle(
-                                context,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
-                                color: palette.info,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        key: const Key('diagnostics-modal-close'),
-                        tooltip: 'Close diagnostics terminal',
-                        visualDensity: compactHeader
-                            ? VisualDensity.compact
-                            : VisualDensity.standard,
-                        onPressed: onClose,
-                        icon: const Icon(Icons.close_rounded, size: 20),
-                      ),
-                    ],
-                  ),
-                  if (showNonFaultBanner) ...<Widget>[
-                    SizedBox(height: compactHeader ? 6 : 10),
-                    Container(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: compactHeader ? 10 : 12,
-                        vertical: compactHeader ? 5 : 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: palette.elevatedSurface,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: palette.border),
-                      ),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: <Widget>[
-                          Icon(
-                            Icons.info_outline_rounded,
-                            size: 15,
-                            color: palette.info,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Machine-readable Host evidence only — does not assert a confirmed elevator equipment fault or repair action.',
-                              maxLines: compactHeader ? 1 : 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: compactHeader ? 11 : 12,
-                                height: 1.3,
-                                color: palette.subtleText,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-
-            // 2. Filter Toolbar + Virtualized Diagnostic Event Stream
-            Expanded(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  compactHeader ? 12 : 20,
-                  compactHeader ? 8 : 14,
-                  compactHeader ? 12 : 20,
-                  compactHeader ? 8 : 16,
-                ),
-                child: DiagnosticEvidencePanel(
-                  diagnostics: diagnostics,
-                  filterController: filterController,
-                  expandList: true,
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// Pinned-toolbar + virtualized [ListView.builder] diagnostics inspector.
+/// Diagnostics inspector supporting two clean modes:
+/// 1. **Preview mode in `Overview`** (`maxPreviewEntries != null`): renders a
+///    clean M3 [Card] containing the latest `maxPreviewEntries` structured
+///    diagnostic rows plus an `"Inspect all N diagnostics"` action button
+///    without search/filter chrome.
+/// 2. **Full workbench mode in `Diagnostics` section** (`maxPreviewEntries == null`):
+///    renders a concise 1-line non-fault evidence notice, [DiagnosticsFilterToolbar]
+///    (M3 [SearchBar], role [SegmentedButton], layer [FilterChip]s, sort button),
+///    and the full virtualized diagnostic list card.
 class DiagnosticEvidencePanel extends StatefulWidget {
   const DiagnosticEvidencePanel({
     super.key,
     required this.diagnostics,
     this.filterController,
-    this.expandList = false,
+    this.maxPreviewEntries,
+    this.onViewAll,
   });
 
   final List<DiagnosticEntry> diagnostics;
   final DiagnosticsFilterController? filterController;
-  final bool expandList;
+  final int? maxPreviewEntries;
+  final VoidCallback? onViewAll;
 
   @override
   State<DiagnosticEvidencePanel> createState() =>
@@ -406,10 +185,73 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
     super.dispose();
   }
 
+  Widget _buildPreviewMode(BuildContext context, InstrumentPalette palette) {
+    if (widget.diagnostics.isEmpty) {
+      return const _EmptyDiagnosticsBox(hasSourceDiagnostics: false);
+    }
+
+    final List<DiagnosticEntry> sorted = widget.diagnostics.toList()
+      ..sort(
+        (DiagnosticEntry a, DiagnosticEntry b) =>
+            b.sequence.compareTo(a.sequence),
+      );
+    final List<DiagnosticEntry> previewItems = sorted
+        .take(widget.maxPreviewEntries!)
+        .toList();
+
+    return Card(
+      color: palette.surface,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          for (int i = 0; i < previewItems.length; i++)
+            _DiagnosticLogRow(entry: previewItems[i], showTopDivider: i > 0),
+          if (widget.onViewAll != null) ...<Widget>[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 4,
+                children: <Widget>[
+                  Text(
+                    'Showing ${previewItems.length} of ${widget.diagnostics.length} recent events',
+                    style: TextStyle(fontSize: 12, color: palette.mutedText),
+                  ),
+                  TextButton.icon(
+                    key: const Key('overview-inspect-all-diagnostics-button'),
+                    onPressed: widget.onViewAll,
+                    style: TextButton.styleFrom(
+                      iconAlignment: IconAlignment.end,
+                    ),
+                    icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+                    label: Text(
+                      'Inspect all ${widget.diagnostics.length} diagnostics',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
+    if (widget.maxPreviewEntries != null) {
+      return _buildPreviewMode(context, palette);
+    }
+
     final DiagnosticsFilterController controller = _effectiveController;
+    final Size viewport = MediaQuery.sizeOf(context);
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final bool compactNotice = viewport.height < 500 || textScale > 1.35;
 
     return ListenableBuilder(
       listenable: controller,
@@ -418,21 +260,32 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
           widget.diagnostics,
         );
 
-        Widget buildContent({required bool expand}) {
-          final Widget logSurface;
-          if (ordered.isEmpty) {
-            final Widget emptyBox = _EmptyDiagnosticsBox(
-              hasSourceDiagnostics: widget.diagnostics.isNotEmpty,
-            );
-            logSurface = expand
-                ? Align(
-                    alignment: Alignment.topCenter,
-                    child: SingleChildScrollView(child: emptyBox),
-                  )
-                : emptyBox;
-          } else if (expand) {
-            logSurface = Card(
-              color: palette.surface,
+        final Widget logSurface;
+        if (ordered.isEmpty) {
+          logSurface = _EmptyDiagnosticsBox(
+            hasSourceDiagnostics: widget.diagnostics.isNotEmpty,
+          );
+        } else if (ordered.length <= 15) {
+          logSurface = Card(
+            color: palette.surface,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                for (int i = 0; i < ordered.length; i++)
+                  _DiagnosticLogRow(entry: ordered[i], showTopDivider: i > 0),
+              ],
+            ),
+          );
+        } else {
+          final double boundedMaxHeight = (viewport.height - 260).clamp(
+            320.0,
+            680.0,
+          );
+          logSurface = Card(
+            color: palette.surface,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: boundedMaxHeight),
               child: ListView.builder(
                 key: const Key('diagnostics-list-view'),
                 padding: EdgeInsets.zero,
@@ -444,47 +297,53 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
                   );
                 },
               ),
-            );
-          } else {
-            logSurface = Card(
-              color: palette.surface,
-              child: ListView.builder(
-                padding: EdgeInsets.zero,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: ordered.length,
-                itemBuilder: (BuildContext context, int index) {
-                  return _DiagnosticLogRow(
-                    entry: ordered[index],
-                    showTopDivider: index > 0,
-                  );
-                },
-              ),
-            );
-          }
-
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
-            children: <Widget>[
-              DiagnosticsFilterToolbar(controller: controller),
-              const SizedBox(height: 12),
-              if (expand) Expanded(child: logSurface) else logSurface,
-            ],
+            ),
           );
         }
 
-        if (!widget.expandList) {
-          return buildContent(expand: false);
-        }
-
-        return LayoutBuilder(
-          builder: (BuildContext context, BoxConstraints constraints) {
-            if (constraints.maxHeight < 210) {
-              return SingleChildScrollView(child: buildContent(expand: false));
-            }
-            return buildContent(expand: true);
-          },
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: compactNotice ? 10 : 12,
+                vertical: compactNotice ? 6 : 8,
+              ),
+              decoration: BoxDecoration(
+                color: palette.elevatedSurface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: palette.border),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: <Widget>[
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 15,
+                    color: palette.info,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Machine-readable Host evidence only — does not assert a confirmed elevator equipment fault or repair action.',
+                      maxLines: compactNotice ? 1 : 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: compactNotice ? 11.5 : 12,
+                        height: 1.3,
+                        color: palette.subtleText,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            DiagnosticsFilterToolbar(controller: controller),
+            const SizedBox(height: 12),
+            logSurface,
+          ],
         );
       },
     );
@@ -538,7 +397,7 @@ class DiagnosticsFilterToolbar extends StatelessWidget {
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final bool inlineControlsOnTopRow =
-            constraints.maxWidth >= 560 && textScale <= 1.25;
+            constraints.maxWidth >= 680 && textScale <= 1.2;
 
         final Widget searchField = ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 38),
@@ -732,7 +591,8 @@ class _RoleSegmentedButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
-    if (textScale > 1.35) {
+    final double screenWidth = MediaQuery.sizeOf(context).width;
+    if (textScale > 1.25 || screenWidth < 360) {
       return SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
@@ -768,39 +628,45 @@ class _RoleSegmentedButton extends StatelessWidget {
       );
     }
 
-    return SegmentedButton<_RoleFilterOption>(
-      showSelectedIcon: false,
-      style: SegmentedButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SegmentedButton<_RoleFilterOption>(
+        showSelectedIcon: false,
+        style: SegmentedButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+        segments: const <ButtonSegment<_RoleFilterOption>>[
+          ButtonSegment<_RoleFilterOption>(
+            value: _RoleFilterOption.all,
+            label: Text('All Roles', key: Key('diag-filter-role-all')),
+          ),
+          ButtonSegment<_RoleFilterOption>(
+            value: _RoleFilterOption.operational,
+            label: Text(
+              'Operational',
+              key: Key('diag-filter-role-operational'),
+            ),
+          ),
+          ButtonSegment<_RoleFilterOption>(
+            value: _RoleFilterOption.auxiliary,
+            label: Text('Auxiliary', key: Key('diag-filter-role-auxiliary')),
+          ),
+        ],
+        selected: <_RoleFilterOption>{_currentOption},
+        onSelectionChanged: (Set<_RoleFilterOption> selection) {
+          final _RoleFilterOption chosen = selection.first;
+          switch (chosen) {
+            case _RoleFilterOption.all:
+              controller.selectRole(null);
+            case _RoleFilterOption.operational:
+              controller.selectRole(BindingRole.operational);
+            case _RoleFilterOption.auxiliary:
+              controller.selectRole(BindingRole.auxiliary);
+          }
+        },
       ),
-      segments: const <ButtonSegment<_RoleFilterOption>>[
-        ButtonSegment<_RoleFilterOption>(
-          value: _RoleFilterOption.all,
-          label: Text('All Roles', key: Key('diag-filter-role-all')),
-        ),
-        ButtonSegment<_RoleFilterOption>(
-          value: _RoleFilterOption.operational,
-          label: Text('Operational', key: Key('diag-filter-role-operational')),
-        ),
-        ButtonSegment<_RoleFilterOption>(
-          value: _RoleFilterOption.auxiliary,
-          label: Text('Auxiliary', key: Key('diag-filter-role-auxiliary')),
-        ),
-      ],
-      selected: <_RoleFilterOption>{_currentOption},
-      onSelectionChanged: (Set<_RoleFilterOption> selection) {
-        final _RoleFilterOption chosen = selection.first;
-        switch (chosen) {
-          case _RoleFilterOption.all:
-            controller.selectRole(null);
-          case _RoleFilterOption.operational:
-            controller.selectRole(BindingRole.operational);
-          case _RoleFilterOption.auxiliary:
-            controller.selectRole(BindingRole.auxiliary);
-        }
-      },
     );
   }
 }

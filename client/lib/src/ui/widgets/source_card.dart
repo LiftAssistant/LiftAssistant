@@ -181,7 +181,7 @@ class SourceHealthCard extends StatelessWidget {
             ),
           ),
 
-          // 2. 3-Column Tonal Health Tiles
+          // 2. 3-Column Equal-Width Tonal Health Tiles
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
             child: Builder(
@@ -191,13 +191,16 @@ class SourceHealthCard extends StatelessWidget {
                 final double screenWidth = MediaQuery.sizeOf(context).width;
                 final bool useThreeColumns =
                     screenWidth >= 340 && textScale <= 1.35;
+                final bool equalWidths =
+                    (screenWidth >= 460 && screenWidth < 760) ||
+                    screenWidth >= 1120;
 
                 if (useThreeColumns) {
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Expanded(
-                        flex: 7,
+                        flex: equalWidths ? 1 : 7,
                         child: _SourceTonalHealthTile(
                           title: 'Session',
                           value: sessionStateLabel,
@@ -208,7 +211,7 @@ class SourceHealthCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        flex: 11,
+                        flex: equalWidths ? 1 : 11,
                         child: _SourceTonalHealthTile(
                           title: 'Transport',
                           value: transportLabel,
@@ -220,7 +223,7 @@ class SourceHealthCard extends StatelessWidget {
                       ),
                       const SizedBox(width: 8),
                       Expanded(
-                        flex: 7,
+                        flex: equalWidths ? 1 : 7,
                         child: _SourceTonalHealthTile(
                           title: 'Payload',
                           value: payloadLabel,

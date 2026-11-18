@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -13,7 +14,7 @@ import 'widgets/semantic_badge.dart';
 import 'widgets/source_card.dart';
 import 'widgets/system_status_strip.dart';
 
-enum CompactSection { cars, sources }
+enum ClientSection { overview, cars, sources, diagnostics }
 
 class ClientShellPage extends StatefulWidget {
   const ClientShellPage({
@@ -32,7 +33,7 @@ class ClientShellPage extends StatefulWidget {
 }
 
 class _ClientShellPageState extends State<ClientShellPage> {
-  CompactSection _compactSection = CompactSection.cars;
+  ClientSection _section = ClientSection.overview;
   final DiagnosticsFilterController _diagnosticsFilter =
       DiagnosticsFilterController();
   HostEndpoint? _lastEndpoint;
@@ -40,6 +41,19 @@ class _ClientShellPageState extends State<ClientShellPage> {
   @override
   void initState() {
     super.initState();
+    if (kIsWeb) {
+      switch (Uri.base.queryParameters['section']) {
+        case 'cars':
+          _section = ClientSection.cars;
+        case 'sources':
+          _section = ClientSection.sources;
+        case 'diagnostics':
+          _section = ClientSection.diagnostics;
+        case 'overview':
+        default:
+          break;
+      }
+    }
     _lastEndpoint = widget.controller.state.endpoint;
     widget.controller.addListener(_handleControllerChanged);
   }
@@ -87,12 +101,13 @@ class _ClientShellPageState extends State<ClientShellPage> {
     );
   }
 
-  void _openDiagnosticsTerminal() {
-    showDiagnosticsTerminalModal(
-      context: context,
-      controller: widget.controller,
-      filterController: _diagnosticsFilter,
-    );
+  void _switchSection(ClientSection next) {
+    if (_section == next) {
+      return;
+    }
+    setState(() {
+      _section = next;
+    });
   }
 
   @override
@@ -101,15 +116,9 @@ class _ClientShellPageState extends State<ClientShellPage> {
       listenable: widget.controller,
       builder: (BuildContext context, _) {
         final ClientState state = widget.controller.state;
-
         final Size viewport = MediaQuery.sizeOf(context);
         final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
-        final bool isSupportingPaneDesktop =
-            viewport.width >= 900 && viewport.height >= 440;
-        final bool showInlineAppBarHostChips =
-            state.snapshot != null &&
-            isSupportingPaneDesktop &&
-            textScale <= 1.25;
+        final bool isWide = viewport.width >= 760;
 
         return Scaffold(
           appBar: _buildTopBar(
@@ -117,44 +126,81 @@ class _ClientShellPageState extends State<ClientShellPage> {
             state,
             screenWidth: viewport.width,
             textScale: textScale,
-            showInlineHostChips: showInlineAppBarHostChips,
+            isWide: isWide,
           ),
+          bottomNavigationBar: isWide || state.snapshot == null
+              ? null
+              : _buildBottomNav(context, state.snapshot!),
           body: SafeArea(
-            child: state.snapshot == null
-                ? _buildNoSnapshotWorkspace(context, state)
-                : _buildConnectedWorkspace(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                if (!isWide)
+                  _buildCompactEndpointBar(
                     context,
                     state,
-                    state.snapshot!,
-                    viewport: viewport,
                     textScale: textScale,
-                    isSupportingPaneDesktop: isSupportingPaneDesktop,
-                    showInlineAppBarHostChips: showInlineAppBarHostChips,
                   ),
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      if (isWide && state.snapshot != null) ...<Widget>[
+                        _buildSideRail(context, state.snapshot!),
+                        VerticalDivider(
+                          width: 1,
+                          thickness: 1,
+                          color: context.palette.border,
+                        ),
+                      ],
+                      Expanded(
+                        child: state.snapshot == null
+                            ? _buildNoSnapshotWorkspace(context, state)
+                            : _buildConnectedWorkspace(
+                                context,
+                                state,
+                                state.snapshot!,
+                                viewport: viewport,
+                                textScale: textScale,
+                                isWide: isWide,
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
     );
   }
 
+  /// Layer 1 — Clean, single-purpose AppBar:
+  /// Left: Brand + LiftAssistant + subtle Read-Only chip.
+  /// Right: Only Client-to-Host connection controls (Host address button,
+  /// connection phase badge, Reconnect, Semantics `?`, Theme toggle).
   PreferredSizeWidget _buildTopBar(
     BuildContext context,
     ClientState state, {
     required double screenWidth,
     required double textScale,
-    required bool showInlineHostChips,
+    required bool isWide,
   }) {
     final InstrumentPalette palette = context.palette;
     final double barHeight = (54.0 * textScale.clamp(1.0, 1.35))
         .roundToDouble();
     final bool isCompactTopBar = screenWidth < 420 || textScale > 1.35;
-    final bool showReadOnlyChip = screenWidth >= 680 && textScale <= 1.3;
-    final bool showEndpointOriginInline =
-        screenWidth >= (560.0 * textScale.clamp(1.0, 1.35));
-    final bool showDiagnosticsLabel = screenWidth >= 1080 && textScale <= 1.2;
-    final (String phaseLabel, Color phaseColor, Color _, bool phaseHollow) =
-        describeConnectionPhase(state.phase, palette);
-    final int diagCount = state.snapshot?.recentDiagnostics.length ?? 0;
+    final bool showReadOnlyChip = screenWidth >= 620 && textScale <= 1.3;
+    final (
+      String phaseLabel,
+      Color phaseColor,
+      Color phaseBg,
+      bool phaseHollow,
+    ) = describeConnectionPhase(
+      state.phase,
+      palette,
+    );
 
     return PreferredSize(
       preferredSize: Size.fromHeight(barHeight),
@@ -174,12 +220,11 @@ class _ClientShellPageState extends State<ClientShellPage> {
               ),
               child: Row(
                 children: <Widget>[
-                  // Left Brand + Title + Read-Only M3 Chip
                   Expanded(
                     child: Row(
                       children: <Widget>[
                         const _HoistwayBrandMark(),
-                        if (!isCompactTopBar || screenWidth >= 380) ...<Widget>[
+                        if (!isCompactTopBar || screenWidth >= 360) ...<Widget>[
                           const SizedBox(width: 8),
                           const Flexible(
                             child: Text(
@@ -205,132 +250,88 @@ class _ClientShellPageState extends State<ClientShellPage> {
                             tooltip: 'Strictly read-only experimental/v0 client; zero elevator write controls.',
                           ),
                         ],
-                        if (showInlineHostChips &&
-                            state.snapshot != null) ...<Widget>[
-                          const SizedBox(width: 12),
-                          Flexible(
-                            flex: 3,
-                            child: SingleChildScrollView(
-                              scrollDirection: Axis.horizontal,
-                              child: HostStatusChipGroup(
-                                snapshot: state.snapshot!,
-                                isLive: state.isSnapshotLive,
-                                revisionReset: state.lastRevisionReset,
-                              ),
-                            ),
-                          ),
-                        ],
                       ],
                     ),
                   ),
                   SizedBox(width: isCompactTopBar ? 4 : 8),
-
-                  // Pop-up Diagnostics Terminal Action Button with M3 Badge
-                  if (state.snapshot != null) ...<Widget>[
-                    _DiagnosticsTerminalButton(
-                      key: const Key('topbar-diagnostics-button'),
-                      count: diagCount,
-                      showLabel: showDiagnosticsLabel,
-                      compact: isCompactTopBar,
-                      onPressed: _openDiagnosticsTerminal,
-                    ),
-                    SizedBox(width: isCompactTopBar ? 4 : 8),
-                  ],
-
-                  // Unified Host Endpoint + Connection Phase Control
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: showEndpointOriginInline
-                          ? (screenWidth * 0.34).clamp(200.0, 320.0)
-                          : (isCompactTopBar
-                                ? (screenWidth * 0.23).clamp(62.0, 116.0)
-                                : (screenWidth * 0.38).clamp(108.0, 164.0)),
-                    ),
-                    child: Material(
-                      color: palette.elevatedSurface,
-                      borderRadius: BorderRadius.circular(10),
-                      child: InkWell(
-                        key: const Key('topbar-host-button'),
+                  if (isWide) ...<Widget>[
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: textScale > 1.35 ? 190 : 240,
+                      ),
+                      child: Material(
+                        color: palette.elevatedSurface,
                         borderRadius: BorderRadius.circular(10),
-                        onTap: () => _openHostConfig(state),
-                        child: Container(
-                          constraints: BoxConstraints(
-                            minHeight: isCompactTopBar ? 30 : 34,
-                          ),
-                          padding: EdgeInsets.symmetric(
-                            horizontal: isCompactTopBar ? 6 : 10,
-                            vertical: isCompactTopBar ? 3 : 5,
-                          ),
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: palette.border),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: <Widget>[
-                              Flexible(
-                                child: Row(
-                                  key: const Key(
-                                    'topbar-connection-phase-badge',
-                                  ),
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: <Widget>[
-                                    StatusDot(
-                                      color: phaseColor,
-                                      hollow: phaseHollow,
-                                      size: 7,
-                                    ),
-                                    const SizedBox(width: 5),
-                                    Flexible(
-                                      child: Text(
-                                        phaseLabel,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: instrumentTabularStyle(
-                                          context,
-                                          fontSize: 11.5,
-                                          fontWeight: FontWeight.w700,
-                                          color: phaseColor,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                        child: InkWell(
+                          key: const Key('topbar-host-button'),
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () => _openHostConfig(state),
+                          child: Container(
+                            constraints: const BoxConstraints(minHeight: 34),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: palette.border),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: <Widget>[
+                                Icon(
+                                  Icons.dns_outlined,
+                                  size: 14.5,
+                                  color: palette.subtleText,
                                 ),
-                              ),
-                              if (!isCompactTopBar) ...<Widget>[
-                                Container(
-                                  width: 1,
-                                  height: 14,
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                  ),
-                                  color: palette.border,
-                                ),
-                                if (showEndpointOriginInline)
-                                  Flexible(
-                                    child: Text(
-                                      state.endpoint?.origin ?? 'Configure',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: instrumentTabularStyle(
-                                        context,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                        color: palette.subtleText,
-                                      ),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: Text(
+                                    state.endpoint?.origin ?? 'Configure Host',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: instrumentTabularStyle(
+                                      context,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurface,
                                     ),
-                                  )
-                                else
-                                  Icon(
-                                    Icons.dns_outlined,
-                                    size: 15,
-                                    color: palette.subtleText,
                                   ),
+                                ),
+                                const SizedBox(width: 5),
+                                Icon(
+                                  Icons.tune_rounded,
+                                  size: 14,
+                                  color: palette.subtleText,
+                                ),
                               ],
-                            ],
+                            ),
                           ),
                         ),
                       ),
+                    ),
+                    const SizedBox(width: 8),
+                  ] else
+                    _TopBarIconButton(
+                      key: const Key('topbar-host-button'),
+                      tooltip: 'Configure Host endpoint',
+                      onPressed: () => _openHostConfig(state),
+                      icon: Icons.dns_outlined,
+                      compact: isCompactTopBar,
+                    ),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: isWide ? 180 : (isCompactTopBar ? 96 : 136),
+                    ),
+                    child: SemanticBadge(
+                      key: const Key('topbar-connection-phase-badge'),
+                      label: phaseLabel,
+                      foreground: phaseColor,
+                      background: phaseBg,
+                      dotColor: phaseColor,
+                      hollowDot: phaseHollow,
                     ),
                   ),
                   SizedBox(width: isCompactTopBar ? 2 : 4),
@@ -364,6 +365,240 @@ class _ClientShellPageState extends State<ClientShellPage> {
               ),
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactEndpointBar(
+    BuildContext context,
+    ClientState state, {
+    required double textScale,
+  }) {
+    final InstrumentPalette palette = context.palette;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.elevatedSurface,
+        border: Border(bottom: BorderSide(color: palette.border)),
+      ),
+      child: InkWell(
+        key: const Key('compact-endpoint-bar'),
+        onTap: () => _openHostConfig(state),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          child: Row(
+            children: <Widget>[
+              if (textScale <= 1.5) ...<Widget>[
+                SemanticBadge(
+                  label: 'Read-Only',
+                  foreground: palette.subtleText,
+                  background: palette.surface,
+                  icon: Icons.lock_outline_rounded,
+                  outlined: true,
+                ),
+                const SizedBox(width: 8),
+              ],
+              Icon(Icons.dns_outlined, size: 13.5, color: palette.subtleText),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  state.endpoint?.origin ?? 'Tap to configure Host URL',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: instrumentTabularStyle(
+                    context,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Icon(Icons.tune_rounded, size: 14, color: palette.subtleText),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavBadge(
+    BuildContext context, {
+    required int count,
+    required bool selected,
+    required Widget child,
+  }) {
+    final InstrumentPalette palette = context.palette;
+    return Badge.count(
+      count: count,
+      isLabelVisible: count > 0,
+      backgroundColor: selected
+          ? palette.infoContainer
+          : palette.elevatedSurface,
+      textColor: selected ? palette.info : palette.subtleText,
+      textStyle: instrumentTabularStyle(
+        context,
+        fontSize: 10.5,
+        fontWeight: FontWeight.w700,
+        color: selected ? palette.info : palette.subtleText,
+      ),
+      child: child,
+    );
+  }
+
+  /// Layer 2 (Desktop `>= 760px`) — Left NavigationRail with M3 `Badge.count`
+  /// on Cars, Sources, and Diagnostics. Wrapped in SingleChildScrollView +
+  /// IntrinsicHeight so short landscape viewports (`800x300`) never overflow.
+  Widget _buildSideRail(BuildContext context, ReadModelSnapshot snapshot) {
+    final InstrumentPalette palette = context.palette;
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.2),
+      ),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints railConstraints) {
+          return SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: railConstraints.maxHeight),
+              child: IntrinsicHeight(
+                child: NavigationRail(
+                  key: const Key('desktop-navigation-rail'),
+                  backgroundColor: palette.surface,
+                  selectedIndex: _section.index,
+                  labelType: NavigationRailLabelType.all,
+                  minWidth: 88,
+                  onDestinationSelected: (int idx) {
+                    _switchSection(ClientSection.values[idx]);
+                  },
+                  destinations: <NavigationRailDestination>[
+                    const NavigationRailDestination(
+                      icon: Icon(Icons.space_dashboard_outlined),
+                      selectedIcon: Icon(Icons.space_dashboard),
+                      label: Text('Overview'),
+                    ),
+                    NavigationRailDestination(
+                      icon: _buildNavBadge(
+                        context,
+                        count: snapshot.operationalCars.length,
+                        selected: false,
+                        child: const Icon(Icons.elevator_outlined),
+                      ),
+                      selectedIcon: _buildNavBadge(
+                        context,
+                        count: snapshot.operationalCars.length,
+                        selected: true,
+                        child: const Icon(Icons.elevator),
+                      ),
+                      label: const Text('Cars'),
+                    ),
+                    NavigationRailDestination(
+                      icon: _buildNavBadge(
+                        context,
+                        count: snapshot.sources.length,
+                        selected: false,
+                        child: const Icon(Icons.hub_outlined),
+                      ),
+                      selectedIcon: _buildNavBadge(
+                        context,
+                        count: snapshot.sources.length,
+                        selected: true,
+                        child: const Icon(Icons.hub),
+                      ),
+                      label: const Text('Sources'),
+                    ),
+                    NavigationRailDestination(
+                      icon: _buildNavBadge(
+                        context,
+                        count: snapshot.recentDiagnostics.length,
+                        selected: false,
+                        child: const Icon(Icons.analytics_outlined),
+                      ),
+                      selectedIcon: _buildNavBadge(
+                        context,
+                        count: snapshot.recentDiagnostics.length,
+                        selected: true,
+                        child: const Icon(Icons.analytics),
+                      ),
+                      label: const Text('Diagnostics'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Layer 2 (Mobile `< 760px`) — Bottom NavigationBar with M3 `Badge.count`.
+  Widget _buildBottomNav(BuildContext context, ReadModelSnapshot snapshot) {
+    final InstrumentPalette palette = context.palette;
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: MediaQuery.textScalerOf(context).clamp(maxScaleFactor: 1.2),
+      ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: palette.border)),
+        ),
+        child: NavigationBar(
+          key: const Key('mobile-navigation-bar'),
+          backgroundColor: palette.surface,
+          selectedIndex: _section.index,
+          onDestinationSelected: (int idx) {
+            _switchSection(ClientSection.values[idx]);
+          },
+          destinations: <NavigationDestination>[
+            const NavigationDestination(
+              icon: Icon(Icons.space_dashboard_outlined),
+              selectedIcon: Icon(Icons.space_dashboard),
+              label: 'Overview',
+            ),
+            NavigationDestination(
+              icon: _buildNavBadge(
+                context,
+                count: snapshot.operationalCars.length,
+                selected: false,
+                child: const Icon(Icons.elevator_outlined),
+              ),
+              selectedIcon: _buildNavBadge(
+                context,
+                count: snapshot.operationalCars.length,
+                selected: true,
+                child: const Icon(Icons.elevator),
+              ),
+              label: 'Cars',
+            ),
+            NavigationDestination(
+              icon: _buildNavBadge(
+                context,
+                count: snapshot.sources.length,
+                selected: false,
+                child: const Icon(Icons.hub_outlined),
+              ),
+              selectedIcon: _buildNavBadge(
+                context,
+                count: snapshot.sources.length,
+                selected: true,
+                child: const Icon(Icons.hub),
+              ),
+              label: 'Sources',
+            ),
+            NavigationDestination(
+              icon: _buildNavBadge(
+                context,
+                count: snapshot.recentDiagnostics.length,
+                selected: false,
+                child: const Icon(Icons.analytics_outlined),
+              ),
+              selectedIcon: _buildNavBadge(
+                context,
+                count: snapshot.recentDiagnostics.length,
+                selected: true,
+                child: const Icon(Icons.analytics),
+              ),
+              label: 'Diagnostics',
+            ),
+          ],
         ),
       ),
     );
@@ -424,9 +659,10 @@ class _ClientShellPageState extends State<ClientShellPage> {
                       ),
                       const SizedBox(height: 12),
                     ] else if (state.error != null) ...<Widget>[
-                      ClientAlertBanners(
+                      SystemStatusStrip(
                         state: state,
                         onReconnectNow: widget.controller.reconnectNow,
+                        onConfigureHost: () => _openHostConfig(state),
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -462,220 +698,505 @@ class _ClientShellPageState extends State<ClientShellPage> {
     ReadModelSnapshot snapshot, {
     required Size viewport,
     required double textScale,
-    required bool isSupportingPaneDesktop,
-    required bool showInlineAppBarHostChips,
+    required bool isWide,
   }) {
-    final InstrumentPalette palette = context.palette;
-    final bool hasAlerts =
-        state.hasRetainedStaleSnapshot || state.error != null;
+    final EdgeInsets pagePadding = EdgeInsets.all(isWide ? 20 : 14);
+    final Widget statusStrip = SystemStatusStrip(
+      state: state,
+      onReconnectNow: widget.controller.reconnectNow,
+      onConfigureHost: () => _openHostConfig(state),
+    );
 
-    if (isSupportingPaneDesktop) {
-      const double maxCanvasWidth = 1480.0;
+    final Widget content = switch (_section) {
+      ClientSection.overview => _buildOverviewWorkspace(
+        context,
+        snapshot,
+        statusStrip: statusStrip,
+        pagePadding: pagePadding,
+        isWide: isWide,
+        textScale: textScale,
+      ),
+      ClientSection.cars => _buildCarsWorkspace(
+        context,
+        snapshot,
+        statusStrip: statusStrip,
+        pagePadding: pagePadding,
+        textScale: textScale,
+      ),
+      ClientSection.sources => _buildSourcesWorkspace(
+        context,
+        snapshot,
+        statusStrip: statusStrip,
+        pagePadding: pagePadding,
+        textScale: textScale,
+      ),
+      ClientSection.diagnostics => _buildDiagnosticsWorkspace(
+        context,
+        snapshot,
+        statusStrip: statusStrip,
+        pagePadding: pagePadding,
+      ),
+    };
 
-      final Widget carsPane = CustomScrollView(
-        key: const Key('desktop-cars-scroll'),
-        slivers: <Widget>[
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(24, 20, 12, 0),
-            sliver: SliverToBoxAdapter(
-              child: SectionHeader(
-                title: 'Operational Cars',
-                count: snapshot.operationalCars.length,
-                icon: Icons.elevator_outlined,
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(24, 14, 12, 24),
-            sliver: _buildCarsSliver(context, snapshot, textScale: textScale),
-          ),
-        ],
-      );
+    return AnimatedOpacity(
+      duration: const Duration(milliseconds: 150),
+      opacity: state.isSnapshotLive ? 1.0 : 0.72,
+      child: content,
+    );
+  }
 
-      final Widget sourcesPane = CustomScrollView(
-        key: const Key('desktop-sources-scroll'),
-        slivers: <Widget>[
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(12, 20, 24, 0),
-            sliver: SliverToBoxAdapter(
-              child: SectionHeader(
-                title: 'Observation Sources',
-                count: snapshot.sources.length,
-                icon: Icons.hub_outlined,
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.fromLTRB(12, 14, 24, 24),
-            sliver: _buildSourcesSliver(
-              context,
-              snapshot,
-              textScale: textScale,
-            ),
-          ),
-        ],
-      );
+  Widget _buildOverviewDiagnosticsHeader(
+    BuildContext context,
+    ReadModelSnapshot snapshot,
+  ) {
+    return SectionHeader(
+      title: 'Recent Diagnostics',
+      count: snapshot.recentDiagnostics.length,
+      icon: Icons.analytics_outlined,
+    );
+  }
 
-      final Widget supportingPaneBody = Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: maxCanvasWidth),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Expanded(flex: 62, child: carsPane),
-              VerticalDivider(width: 1, thickness: 1, color: palette.border),
-              Expanded(flex: 38, child: sourcesPane),
-            ],
-          ),
-        ),
-      );
-
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          if (!showInlineAppBarHostChips)
-            _buildCompactHostStatusStrip(context, state, snapshot),
-          if (hasAlerts)
-            Align(
-              alignment: Alignment.topCenter,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: maxCanvasWidth),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
-                  child: ClientAlertBanners(
-                    state: state,
-                    onReconnectNow: widget.controller.reconnectNow,
-                    onConfigureHost: () => _openHostConfig(state),
-                  ),
+  Widget _buildOverviewWorkspace(
+    BuildContext context,
+    ReadModelSnapshot snapshot, {
+    required Widget statusStrip,
+    required EdgeInsets pagePadding,
+    required bool isWide,
+    required double textScale,
+  }) {
+    // On desktop viewports, render the classic 2-column Overview (left flex: 6
+    // Operational Cars + Observation Sources, right flex: 5 Recent Diagnostics preview).
+    if (isWide && textScale <= 1.45) {
+      return SingleChildScrollView(
+        padding: pagePadding,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1440),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                statusStrip,
+                const SizedBox(height: 20),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(
+                      flex: 6,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          SectionHeader(
+                            title: 'Operational Cars',
+                            count: snapshot.operationalCars.length,
+                            icon: Icons.elevator_outlined,
+                          ),
+                          const SizedBox(height: 12),
+                          _buildCarsGridBox(
+                            context,
+                            snapshot,
+                            textScale: textScale,
+                          ),
+                          const SizedBox(height: 24),
+                          SectionHeader(
+                            title: 'Observation Sources',
+                            count: snapshot.sources.length,
+                            icon: Icons.hub_outlined,
+                          ),
+                          const SizedBox(height: 12),
+                          _buildSourcesListBox(context, snapshot),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 20),
+                    Expanded(
+                      flex: 5,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          _buildOverviewDiagnosticsHeader(context, snapshot),
+                          const SizedBox(height: 12),
+                          DiagnosticEvidencePanel(
+                            diagnostics: snapshot.recentDiagnostics,
+                            maxPreviewEntries: 6,
+                            onViewAll: () =>
+                                _switchSection(ClientSection.diagnostics),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ),
-          Expanded(
-            child: AnimatedOpacity(
-              duration: const Duration(milliseconds: 150),
-              opacity: state.isSnapshotLive ? 1.0 : 0.72,
-              child: supportingPaneBody,
-            ),
-          ),
-        ],
-      );
-    }
-
-    // Mobile / Narrow layout: Host status chip strip + M3 2-tab bar (Cars / Sources)
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _buildCompactHostStatusStrip(context, state, snapshot),
-        _buildCompactTabStrip(context, snapshot),
-        Expanded(
-          child: AnimatedOpacity(
-            duration: const Duration(milliseconds: 150),
-            opacity: state.isSnapshotLive ? 1.0 : 0.72,
-            child: CustomScrollView(
-              slivers: <Widget>[
-                if (hasAlerts)
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                    sliver: SliverToBoxAdapter(
-                      child: ClientAlertBanners(
-                        state: state,
-                        onReconnectNow: widget.controller.reconnectNow,
-                        onConfigureHost: () => _openHostConfig(state),
-                      ),
-                    ),
-                  ),
-                ...switch (_compactSection) {
-                  CompactSection.cars => <Widget>[
-                    SliverPadding(
-                      padding: const EdgeInsets.all(12),
-                      sliver: _buildCarsSliver(
-                        context,
-                        snapshot,
-                        textScale: textScale,
-                      ),
-                    ),
-                  ],
-                  CompactSection.sources => <Widget>[
-                    SliverPadding(
-                      padding: const EdgeInsets.all(12),
-                      sliver: _buildSourcesSliver(
-                        context,
-                        snapshot,
-                        textScale: textScale,
-                      ),
-                    ),
-                  ],
-                },
               ],
             ),
           ),
         ),
-      ],
-    );
-  }
+      );
+    }
 
-  Widget _buildCompactHostStatusStrip(
-    BuildContext context,
-    ClientState state,
-    ReadModelSnapshot snapshot,
-  ) {
-    final InstrumentPalette palette = context.palette;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: palette.surface,
-        border: Border(bottom: BorderSide(color: palette.border)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: HostStatusChipGroup(
-          snapshot: snapshot,
-          isLive: state.isSnapshotLive,
-          revisionReset: state.lastRevisionReset,
+    // On mobile / narrow viewports (or large accessibility text scales), stack
+    // sections vertically in a virtualized CustomScrollView.
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1440),
+        child: CustomScrollView(
+          slivers: <Widget>[
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                pagePadding.left,
+                pagePadding.top,
+                pagePadding.right,
+                12,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    statusStrip,
+                    const SizedBox(height: 18),
+                    SectionHeader(
+                      title: 'Operational Cars',
+                      count: snapshot.operationalCars.length,
+                      icon: Icons.elevator_outlined,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.symmetric(horizontal: pagePadding.left),
+              sliver: _buildCarsSliver(context, snapshot, textScale: textScale),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                pagePadding.left,
+                22,
+                pagePadding.right,
+                12,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: SectionHeader(
+                  title: 'Observation Sources',
+                  count: snapshot.sources.length,
+                  icon: Icons.hub_outlined,
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.symmetric(horizontal: pagePadding.left),
+              sliver: _buildSourcesSliver(
+                context,
+                snapshot,
+                textScale: textScale,
+                allowMultiColumn: false,
+              ),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                pagePadding.left,
+                22,
+                pagePadding.right,
+                pagePadding.bottom,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    _buildOverviewDiagnosticsHeader(context, snapshot),
+                    const SizedBox(height: 12),
+                    DiagnosticEvidencePanel(
+                      diagnostics: snapshot.recentDiagnostics,
+                      maxPreviewEntries: 6,
+                      onViewAll: () =>
+                          _switchSection(ClientSection.diagnostics),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildCompactTabStrip(
+  Widget _buildCarsWorkspace(
     BuildContext context,
-    ReadModelSnapshot snapshot,
-  ) {
-    final InstrumentPalette palette = context.palette;
-    return DecoratedBox(
-      key: const Key('compact-section-strip'),
-      decoration: BoxDecoration(
-        color: palette.surface,
-        border: Border(bottom: BorderSide(color: palette.border)),
-      ),
+    ReadModelSnapshot snapshot, {
+    required Widget statusStrip,
+    required EdgeInsets pagePadding,
+    required double textScale,
+  }) {
+    return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 42),
-        child: IntrinsicHeight(
-          child: Row(
+        constraints: const BoxConstraints(maxWidth: 1440),
+        child: CustomScrollView(
+          key: const Key('cars-section-scroll'),
+          slivers: <Widget>[
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                pagePadding.left,
+                pagePadding.top,
+                pagePadding.right,
+                14,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    statusStrip,
+                    const SizedBox(height: 20),
+                    SectionHeader(
+                      title: 'Operational Cars',
+                      count: snapshot.operationalCars.length,
+                      icon: Icons.elevator_outlined,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                pagePadding.left,
+                0,
+                pagePadding.right,
+                pagePadding.bottom,
+              ),
+              sliver: _buildCarsSliver(context, snapshot, textScale: textScale),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSourcesWorkspace(
+    BuildContext context,
+    ReadModelSnapshot snapshot, {
+    required Widget statusStrip,
+    required EdgeInsets pagePadding,
+    required double textScale,
+  }) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1440),
+        child: CustomScrollView(
+          key: const Key('sources-section-scroll'),
+          slivers: <Widget>[
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                pagePadding.left,
+                pagePadding.top,
+                pagePadding.right,
+                14,
+              ),
+              sliver: SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    statusStrip,
+                    const SizedBox(height: 20),
+                    SectionHeader(
+                      title: 'Observation Sources',
+                      count: snapshot.sources.length,
+                      icon: Icons.hub_outlined,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                pagePadding.left,
+                0,
+                pagePadding.right,
+                pagePadding.bottom,
+              ),
+              sliver: _buildSourcesSliver(
+                context,
+                snapshot,
+                textScale: textScale,
+                allowMultiColumn: true,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDiagnosticsWorkspace(
+    BuildContext context,
+    ReadModelSnapshot snapshot, {
+    required Widget statusStrip,
+    required EdgeInsets pagePadding,
+  }) {
+    return SingleChildScrollView(
+      key: const Key('diagnostics-section-scroll'),
+      padding: pagePadding,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 1440),
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              _CompactTabButton(
-                key: const Key('compact-tab-cars'),
-                icon: Icons.elevator_outlined,
-                label: 'Cars',
-                count: snapshot.operationalCars.length,
-                selected: _compactSection == CompactSection.cars,
-                onTap: () =>
-                    setState(() => _compactSection = CompactSection.cars),
+              statusStrip,
+              const SizedBox(height: 20),
+              SectionHeader(
+                title: 'Host Diagnostics',
+                count: snapshot.recentDiagnostics.length,
+                icon: Icons.analytics_outlined,
               ),
-              _CompactTabButton(
-                key: const Key('compact-tab-sources'),
-                icon: Icons.hub_outlined,
-                label: 'Sources',
-                count: snapshot.sources.length,
-                selected: _compactSection == CompactSection.sources,
-                onTap: () =>
-                    setState(() => _compactSection = CompactSection.sources),
+              const SizedBox(height: 14),
+              DiagnosticEvidencePanel(
+                diagnostics: snapshot.recentDiagnostics,
+                filterController: _diagnosticsFilter,
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildCarsGridBox(
+    BuildContext context,
+    ReadModelSnapshot snapshot, {
+    required double textScale,
+  }) {
+    const double spacing = 14;
+    final List<OperationalCar> cars = snapshot.operationalCars;
+    if (cars.isEmpty) {
+      return _EmptyOperationalCarsPanel(sources: snapshot.sources);
+    }
+
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double width = constraints.maxWidth;
+        if (cars.length == 1) {
+          final bool useTabularFooter = width >= 280 && textScale <= 1.35;
+          return OperationalCarCard(
+            car: cars.first,
+            useTabularFooter: useTabularFooter,
+          );
+        }
+
+        final int columns = (width >= 520 && textScale <= 1.45) ? 2 : 1;
+        final double cardWidth = columns == 1
+            ? width
+            : (width - spacing) / columns;
+        final bool useTabularFooter = cardWidth >= 280 && textScale <= 1.35;
+        final int rowCount = (cars.length + columns - 1) ~/ columns;
+
+        Widget buildRow(int rowIndex) {
+          if (columns == 1) {
+            return OperationalCarCard(
+              car: cars[rowIndex],
+              useTabularFooter: useTabularFooter,
+            );
+          }
+          final int start = rowIndex * columns;
+          return IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                for (int col = 0; col < columns; col++) ...<Widget>[
+                  if (col > 0) const SizedBox(width: spacing),
+                  Expanded(
+                    child: (start + col < cars.length)
+                        ? OperationalCarCard(
+                            car: cars[start + col],
+                            stretchToRowHeight: true,
+                            useTabularFooter: useTabularFooter,
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ],
+              ],
+            ),
+          );
+        }
+
+        // Lazily virtualize when fleet size is large (> 12 cars).
+        if (cars.length > 12) {
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 540),
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: rowCount,
+              itemBuilder: (BuildContext context, int rowIndex) {
+                final Widget rowWidget = buildRow(rowIndex);
+                if (rowIndex == 0) {
+                  return rowWidget;
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(top: spacing),
+                  child: rowWidget,
+                );
+              },
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) ...<Widget>[
+              if (rowIndex > 0) const SizedBox(height: spacing),
+              buildRow(rowIndex),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildSourcesListBox(
+    BuildContext context,
+    ReadModelSnapshot snapshot,
+  ) {
+    const double spacing = 14;
+    final InstrumentPalette palette = context.palette;
+    final List<SourceHealth> sources = snapshot.sources;
+    if (sources.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          child: Text(
+            'No observation sources configured on this Host.',
+            style: TextStyle(fontSize: 13, color: palette.mutedText),
+          ),
+        ),
+      );
+    }
+
+    if (sources.length > 8) {
+      return ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 540),
+        child: ListView.builder(
+          padding: EdgeInsets.zero,
+          itemCount: sources.length,
+          itemBuilder: (BuildContext context, int i) {
+            final Widget card = SourceHealthCard(source: sources[i]);
+            if (i == 0) {
+              return card;
+            }
+            return Padding(
+              padding: const EdgeInsets.only(top: spacing),
+              child: card,
+            );
+          },
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        for (int i = 0; i < sources.length; i++) ...<Widget>[
+          if (i > 0) const SizedBox(height: spacing),
+          SourceHealthCard(source: sources[i]),
+        ],
+      ],
     );
   }
 
@@ -695,18 +1216,20 @@ class _ClientShellPageState extends State<ClientShellPage> {
     return SliverLayoutBuilder(
       builder: (BuildContext context, SliverConstraints sliverConstraints) {
         final double width = sliverConstraints.crossAxisExtent;
-        if (cars.length == 1) {
-          final bool useTabularFooter = width >= 280 && textScale <= 1.35;
-          return SliverToBoxAdapter(
-            child: OperationalCarCard(
-              car: cars.first,
-              useTabularFooter: useTabularFooter,
-            ),
-          );
-        }
+        final bool useTwoColumns =
+            textScale <= 1.45 &&
+            (width >= 680 || (cars.length > 1 && width >= 520));
 
-        if (width < 520 || textScale > 1.45) {
+        if (!useTwoColumns) {
           final bool useTabularFooter = width >= 280 && textScale <= 1.35;
+          if (cars.length == 1) {
+            return SliverToBoxAdapter(
+              child: OperationalCarCard(
+                car: cars.first,
+                useTabularFooter: useTabularFooter,
+              ),
+            );
+          }
           return SliverList.builder(
             itemCount: cars.length,
             itemBuilder: (BuildContext context, int index) {
@@ -771,6 +1294,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
     BuildContext context,
     ReadModelSnapshot snapshot, {
     required double textScale,
+    required bool allowMultiColumn,
   }) {
     const double spacing = 14;
     final InstrumentPalette palette = context.palette;
@@ -789,98 +1313,62 @@ class _ClientShellPageState extends State<ClientShellPage> {
       );
     }
 
-    return SliverList.builder(
-      itemCount: sources.length,
-      itemBuilder: (BuildContext context, int index) {
-        final Widget card = SourceHealthCard(source: sources[index]);
-        if (index == 0) {
-          return card;
+    return SliverLayoutBuilder(
+      builder: (BuildContext context, SliverConstraints sliverConstraints) {
+        final double width = sliverConstraints.crossAxisExtent;
+        final bool useTwoColumns =
+            allowMultiColumn && width >= 680 && textScale <= 1.35;
+
+        if (!useTwoColumns) {
+          return SliverList.builder(
+            itemCount: sources.length,
+            itemBuilder: (BuildContext context, int index) {
+              final Widget card = SourceHealthCard(source: sources[index]);
+              if (index == 0) {
+                return card;
+              }
+              return Padding(
+                padding: const EdgeInsets.only(top: spacing),
+                child: card,
+              );
+            },
+          );
         }
-        return Padding(
-          padding: const EdgeInsets.only(top: spacing),
-          child: card,
+
+        const int columns = 2;
+        final int rowCount = (sources.length + columns - 1) ~/ columns;
+        return SliverList.builder(
+          itemCount: rowCount,
+          itemBuilder: (BuildContext context, int rowIndex) {
+            final int start = rowIndex * columns;
+            final Widget rowWidget = IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  for (int col = 0; col < columns; col++) ...<Widget>[
+                    if (col > 0) const SizedBox(width: spacing),
+                    Expanded(
+                      child: (start + col < sources.length)
+                          ? SourceHealthCard(
+                              source: sources[start + col],
+                              fillRowHeight: true,
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ],
+              ),
+            );
+            if (rowIndex == 0) {
+              return rowWidget;
+            }
+            return Padding(
+              padding: const EdgeInsets.only(top: spacing),
+              child: rowWidget,
+            );
+          },
         );
       },
-    );
-  }
-}
-
-class _DiagnosticsTerminalButton extends StatelessWidget {
-  const _DiagnosticsTerminalButton({
-    super.key,
-    required this.count,
-    required this.showLabel,
-    required this.onPressed,
-    this.compact = false,
-  });
-
-  final int count;
-  final bool showLabel;
-  final VoidCallback onPressed;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-
-    return Tooltip(
-      message: 'Open Host Diagnostics Terminal ($count recent entries)',
-      child: Material(
-        color: palette.elevatedSurface,
-        borderRadius: BorderRadius.circular(10),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: onPressed,
-          child: Container(
-            constraints: BoxConstraints(minHeight: compact ? 30 : 34),
-            padding: EdgeInsets.symmetric(
-              horizontal: compact ? 6 : (showLabel ? 11 : 9),
-              vertical: compact ? 3 : 5,
-            ),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: palette.border),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Icon(
-                  Icons.terminal_rounded,
-                  size: compact ? 14.5 : 16,
-                  color: count > 0 ? palette.info : palette.subtleText,
-                ),
-                if (showLabel) ...<Widget>[
-                  const SizedBox(width: 6),
-                  Text(
-                    'Diagnostics',
-                    style: instrumentTabularStyle(
-                      context,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                ],
-                SizedBox(width: compact ? 4 : 6),
-                Badge.count(
-                  key: const Key('topbar-diagnostics-badge'),
-                  count: count,
-                  backgroundColor: count > 0
-                      ? palette.infoContainer
-                      : palette.surface,
-                  textColor: count > 0 ? palette.info : palette.mutedText,
-                  textStyle: instrumentTabularStyle(
-                    context,
-                    fontSize: compact ? 10 : 11,
-                    fontWeight: FontWeight.w700,
-                    color: count > 0 ? palette.info : palette.mutedText,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -931,93 +1419,6 @@ class _TopBarIconButton extends StatelessWidget {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
       icon: Icon(icon, size: compact ? 16 : 18, color: palette.subtleText),
-    );
-  }
-}
-
-class _CompactTabButton extends StatelessWidget {
-  const _CompactTabButton({
-    super.key,
-    required this.icon,
-    required this.label,
-    required this.count,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final int count;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final InstrumentPalette palette = context.palette;
-    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
-    final double screenWidth = MediaQuery.sizeOf(context).width;
-    final bool showIcon = screenWidth >= 380 && textScale <= 1.35;
-    final Color fg = selected
-        ? Theme.of(context).colorScheme.onSurface
-        : palette.subtleText;
-
-    return Expanded(
-      child: InkWell(
-        onTap: onTap,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            border: selected
-                ? Border(bottom: BorderSide(color: palette.info, width: 2.5))
-                : null,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-            child: Center(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  if (showIcon) ...<Widget>[
-                    Icon(
-                      icon,
-                      size: 16,
-                      color: selected ? palette.info : palette.mutedText,
-                    ),
-                    const SizedBox(width: 6),
-                  ],
-                  Flexible(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        color: fg,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Badge.count(
-                    count: count,
-                    backgroundColor: selected
-                        ? palette.infoContainer
-                        : palette.elevatedSurface,
-                    textColor: selected ? palette.info : palette.mutedText,
-                    textStyle: instrumentTabularStyle(
-                      context,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: selected ? palette.info : palette.mutedText,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

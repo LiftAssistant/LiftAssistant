@@ -206,45 +206,28 @@ class _LocationReadout extends StatelessWidget {
 
     switch (location) {
       case FloorLocation(:final floor):
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+        return Wrap(
+          spacing: 10,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
-            Wrap(
-              spacing: 10,
-              runSpacing: 6,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: <Widget>[
-                Text(
-                  '${floor}F',
-                  style: instrumentTabularStyle(
-                    context,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.5,
-                    height: 1.05,
-                  ),
-                ),
-                SemanticBadge(
-                  label: 'Floor Reference',
-                  foreground: palette.subtleText,
-                  background: palette.elevatedSurface,
-                  icon: Icons.layers_outlined,
-                  outlined: true,
-                  tooltip: 'Discrete floor association only (kind: floor). Host holds no continuous coordinate for this car.',
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
             Text(
-              'Discrete floor reference',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: palette.mutedText,
+              '${floor}F',
+              style: instrumentTabularStyle(
+                context,
+                fontSize: 28,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -0.5,
+                height: 1.05,
               ),
+            ),
+            SemanticBadge(
+              label: 'Floor Reference',
+              foreground: palette.subtleText,
+              background: palette.elevatedSurface,
+              icon: Icons.layers_outlined,
+              outlined: true,
+              tooltip: 'Discrete floor association only (kind: floor). Host holds no continuous coordinate for this car.',
             ),
           ],
         );
