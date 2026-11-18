@@ -61,14 +61,18 @@ class SourceHealthCard extends StatelessWidget {
     super.key,
     required this.source,
     this.fillRowHeight = false,
+    this.cardWidth,
   });
 
   final SourceHealth source;
   final bool fillRowHeight;
+  final double? cardWidth;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
+    final double effectiveWidth = cardWidth ?? MediaQuery.sizeOf(context).width;
+    final double innerWidth = (effectiveWidth - 32).clamp(160.0, 1400.0);
 
     final (
       String sessionStateLabel,
@@ -208,35 +212,34 @@ class SourceHealthCard extends StatelessWidget {
             ),
           ),
 
-          // 2. 3-Column Equal-Width Borderless M3 Tonal Health Tiles
+          // 2. 3-Column Borderless M3 Tonal Health Tiles
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
             child: Builder(
               builder: (BuildContext context) {
                 final double textScale = MediaQuery.textScalerOf(context)
                     .scale(1.0);
-                final double screenWidth = MediaQuery.sizeOf(context).width;
                 final bool useThreeColumns =
-                    screenWidth >= 340 && textScale <= 1.35;
-                final bool equalWidths =
-                    (screenWidth >= 460 && screenWidth < 760) ||
-                    screenWidth >= 1120;
+                    innerWidth >= 290 && textScale <= 1.35;
+                final bool equalWidths = innerWidth >= 520;
+                final bool compactTiles = innerWidth < 430;
 
                 if (useThreeColumns) {
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Expanded(
-                        flex: equalWidths ? 1 : 7,
+                        flex: equalWidths ? 1 : 6,
                         child: _SourceTonalHealthTile(
                           title: 'Session',
                           value: sessionStateLabel,
                           icon: sessionIcon,
                           accentColor: sessionColor,
                           tooltip: sessionSubtitle,
+                          compact: compactTiles,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      SizedBox(width: compactTiles ? 6 : 8),
                       Expanded(
                         flex: equalWidths ? 1 : 11,
                         child: _SourceTonalHealthTile(
@@ -246,11 +249,12 @@ class SourceHealthCard extends StatelessWidget {
                           accentColor: transportColor,
                           tooltip:
                               'Transport state: ${source.transport.wireValue}',
+                          compact: compactTiles,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      SizedBox(width: compactTiles ? 6 : 8),
                       Expanded(
-                        flex: equalWidths ? 1 : 7,
+                        flex: equalWidths ? 1 : 6,
                         child: _SourceTonalHealthTile(
                           title: 'Payload',
                           value: payloadLabel,
@@ -258,6 +262,7 @@ class SourceHealthCard extends StatelessWidget {
                           accentColor: payloadColor,
                           tooltip:
                               'Payload activity: ${source.payload.wireValue}',
+                          compact: compactTiles,
                         ),
                       ),
                     ],
@@ -295,8 +300,6 @@ class SourceHealthCard extends StatelessWidget {
               },
             ),
           ),
-
-          if (fillRowHeight) const Spacer(),
 
           // Discovery != usable payload M3 warning banner
           if (discoveryWithoutActivePayload)
@@ -352,7 +355,10 @@ class SourceHealthCard extends StatelessWidget {
           else
             for (int i = 0; i < source.observations.length; i++) ...<Widget>[
               if (i > 0) const Divider(height: 1),
-              _ObservationBindingRow(observation: source.observations[i]),
+              _ObservationBindingRow(
+                observation: source.observations[i],
+                rowWidth: innerWidth,
+              ),
             ],
         ],
       ),
@@ -367,6 +373,7 @@ class _SourceTonalHealthTile extends StatelessWidget {
     required this.icon,
     required this.accentColor,
     required this.tooltip,
+    this.compact = false,
   });
 
   final String title;
@@ -374,6 +381,7 @@ class _SourceTonalHealthTile extends StatelessWidget {
   final IconData icon;
   final Color accentColor;
   final String tooltip;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -381,7 +389,10 @@ class _SourceTonalHealthTile extends StatelessWidget {
     return Tooltip(
       message: tooltip,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 8.5 : 11,
+          vertical: 9,
+        ),
         decoration: BoxDecoration(
           color: palette.elevatedSurface,
           borderRadius: BorderRadius.circular(10),
@@ -404,8 +415,8 @@ class _SourceTonalHealthTile extends StatelessWidget {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Icon(icon, size: 14.5, color: accentColor),
-                const SizedBox(width: 5.5),
+                Icon(icon, size: compact ? 13.5 : 14.5, color: accentColor),
+                SizedBox(width: compact ? 4.5 : 5.5),
                 Flexible(
                   child: Text(
                     value,
@@ -413,7 +424,7 @@ class _SourceTonalHealthTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: instrumentTabularStyle(
                       context,
-                      fontSize: 12,
+                      fontSize: compact ? 11.5 : 12,
                       fontWeight: FontWeight.w700,
                       color: Theme.of(context).colorScheme.onSurface,
                     ),
@@ -429,14 +440,21 @@ class _SourceTonalHealthTile extends StatelessWidget {
 }
 
 class _ObservationBindingRow extends StatelessWidget {
-  const _ObservationBindingRow({required this.observation});
+  const _ObservationBindingRow({
+    required this.observation,
+    required this.rowWidth,
+  });
 
   final SourceObservation observation;
+  final double rowWidth;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
     final bool isOperational = observation.role == BindingRole.operational;
+    final bool useSingleLineRow = rowWidth >= 340 && textScale <= 1.25;
+    final bool compactBadges = rowWidth < 400 || textScale > 1.2;
 
     final (
       String availLabel,
@@ -470,6 +488,81 @@ class _ObservationBindingRow extends StatelessWidget {
       ),
     };
 
+    final Widget carIcon = Container(
+      width: 26,
+      height: 26,
+      decoration: BoxDecoration(
+        color: isOperational
+            ? palette.operationalRoleContainer
+            : palette.elevatedSurface,
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Icon(
+        Icons.elevator_outlined,
+        size: 15,
+        color: isOperational ? palette.operationalRole : palette.mutedText,
+      ),
+    );
+
+    final Widget carLabel = Tooltip(
+      message: 'Bound logical car: ${observation.car}',
+      child: Text(
+        observation.car,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: instrumentTabularStyle(
+          context,
+          fontSize: 13.5,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+
+    final Widget roleBadge = SemanticBadge(
+      label: isOperational ? 'Operational' : 'Auxiliary',
+      foreground: isOperational
+          ? palette.operationalRole
+          : palette.auxiliaryRole,
+      background: isOperational
+          ? palette.operationalRoleContainer
+          : palette.auxiliaryRoleContainer,
+      icon: isOperational
+          ? Icons.verified_user_outlined
+          : Icons.visibility_outlined,
+      compact: compactBadges,
+      tooltip: isOperational
+          ? 'Operational authority: permitted into LiftAssistant operational truth when resolved.'
+          : 'Auxiliary role: inspectable and diagnostic only — excluded from operational truth and never used for automatic failover.',
+    );
+
+    final Widget availBadge = SemanticBadge(
+      label: availLabel,
+      foreground: availFg,
+      background: availBg,
+      icon: observationAvailabilityIcon(observation.availability),
+      compact: compactBadges,
+      tooltip:
+          'Observation availability: ${observation.availability.wireValue}',
+    );
+
+    if (useSingleLineRow) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            carIcon,
+            const SizedBox(width: 8),
+            Expanded(child: carLabel),
+            const SizedBox(width: 10),
+            roleBadge,
+            const SizedBox(width: 6),
+            availBadge,
+          ],
+        ),
+      );
+    }
+
+    final double maxCarWidth = (rowWidth - 44).clamp(80.0, 220.0);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Wrap(
@@ -481,39 +574,11 @@ class _ObservationBindingRow extends StatelessWidget {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Container(
-                width: 26,
-                height: 26,
-                decoration: BoxDecoration(
-                  color: isOperational
-                      ? palette.operationalRoleContainer
-                      : palette.elevatedSurface,
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                child: Icon(
-                  Icons.elevator_outlined,
-                  size: 15,
-                  color: isOperational
-                      ? palette.operationalRole
-                      : palette.mutedText,
-                ),
-              ),
+              carIcon,
               const SizedBox(width: 8),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 160),
-                child: Tooltip(
-                  message: 'Bound logical car: ${observation.car}',
-                  child: Text(
-                    observation.car,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: instrumentTabularStyle(
-                      context,
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
+                constraints: BoxConstraints(maxWidth: maxCarWidth),
+                child: carLabel,
               ),
             ],
           ),
@@ -521,31 +586,7 @@ class _ObservationBindingRow extends StatelessWidget {
             spacing: 6,
             runSpacing: 4,
             crossAxisAlignment: WrapCrossAlignment.center,
-            children: <Widget>[
-              SemanticBadge(
-                label: isOperational ? 'Operational' : 'Auxiliary',
-                foreground: isOperational
-                    ? palette.operationalRole
-                    : palette.auxiliaryRole,
-                background: isOperational
-                    ? palette.operationalRoleContainer
-                    : palette.auxiliaryRoleContainer,
-                icon: isOperational
-                    ? Icons.verified_user_outlined
-                    : Icons.visibility_outlined,
-                tooltip: isOperational
-                    ? 'Operational authority: permitted into LiftAssistant operational truth when resolved.'
-                    : 'Auxiliary role: inspectable and diagnostic only — excluded from operational truth and never used for automatic failover.',
-              ),
-              SemanticBadge(
-                label: availLabel,
-                foreground: availFg,
-                background: availBg,
-                icon: observationAvailabilityIcon(observation.availability),
-                tooltip:
-                    'Observation availability: ${observation.availability.wireValue}',
-              ),
-            ],
+            children: <Widget>[roleBadge, availBadge],
           ),
         ],
       ),

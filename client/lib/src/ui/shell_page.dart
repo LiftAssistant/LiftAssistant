@@ -699,17 +699,26 @@ class _ClientShellPageState extends State<ClientShellPage> {
     required bool isWide,
   }) {
     final EdgeInsets pagePadding = EdgeInsets.all(isWide ? 20 : 14);
-    final Widget statusStrip = SystemStatusStrip(
+    final Widget overviewStatusStrip = SystemStatusStrip(
       state: state,
       onReconnectNow: widget.controller.reconnectNow,
       onConfigureHost: () => _openHostConfig(state),
     );
+    final bool hasAlerts =
+        state.error != null || state.hasRetainedStaleSnapshot;
+    final Widget? alertBanners = hasAlerts
+        ? ClientAlertBanners(
+            state: state,
+            onReconnectNow: widget.controller.reconnectNow,
+            onConfigureHost: () => _openHostConfig(state),
+          )
+        : null;
 
     final Widget content = switch (_section) {
       ClientSection.overview => _buildOverviewWorkspace(
         context,
         snapshot,
-        statusStrip: statusStrip,
+        statusStrip: overviewStatusStrip,
         pagePadding: pagePadding,
         isWide: isWide,
         textScale: textScale,
@@ -717,22 +726,23 @@ class _ClientShellPageState extends State<ClientShellPage> {
       ClientSection.cars => _buildCarsWorkspace(
         context,
         snapshot,
-        statusStrip: statusStrip,
+        alertBanners: alertBanners,
         pagePadding: pagePadding,
         textScale: textScale,
       ),
       ClientSection.sources => _buildSourcesWorkspace(
         context,
         snapshot,
-        statusStrip: statusStrip,
+        alertBanners: alertBanners,
         pagePadding: pagePadding,
         textScale: textScale,
       ),
       ClientSection.diagnostics => _buildDiagnosticsWorkspace(
         context,
         snapshot,
-        statusStrip: statusStrip,
+        alertBanners: alertBanners,
         pagePadding: pagePadding,
+        textScale: textScale,
       ),
     };
 
@@ -762,18 +772,25 @@ class _ClientShellPageState extends State<ClientShellPage> {
     required bool isWide,
     required double textScale,
   }) {
-    // On desktop viewports, render the classic 2-column Overview (left flex: 6
-    // Operational Cars + Observation Sources, right flex: 5 Recent Diagnostics preview).
-    final double viewportWidth = MediaQuery.sizeOf(context).width;
+    // On wide desktop viewports (>= 1120px), render the 2-column Overview
+    // dashboard (left flex: 6 Operational Cars + Observation Sources, right
+    // flex: 5 Recent Diagnostics preview). On medium tablet / small desktop
+    // (760..1119px) and narrow mobile (< 760px), reflow vertically so columns
+    // are never cramped.
+    final Size viewport = MediaQuery.sizeOf(context);
+    final double viewportWidth = viewport.width;
     final bool useTwoColumnOverview =
-        isWide &&
-        (viewportWidth >= 920 ? textScale <= 1.45 : textScale <= 1.15);
+        isWide && viewportWidth >= 1120 && textScale <= 1.35;
+    final int previewLimit = useTwoColumnOverview
+        ? (viewport.height < 640 ? 4 : 6)
+        : (isWide ? 5 : 4);
+
     if (useTwoColumnOverview) {
       return SingleChildScrollView(
         padding: pagePadding,
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1440),
+            constraints: const BoxConstraints(maxWidth: 1560),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
@@ -819,7 +836,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                           const SizedBox(height: 12),
                           DiagnosticEvidencePanel(
                             diagnostics: snapshot.recentDiagnostics,
-                            maxPreviewEntries: 6,
+                            maxPreviewEntries: previewLimit,
                             onViewAll: () =>
                                 _switchSection(ClientSection.diagnostics),
                           ),
@@ -835,11 +852,12 @@ class _ClientShellPageState extends State<ClientShellPage> {
       );
     }
 
-    // On mobile / narrow viewports (or large accessibility text scales), stack
-    // sections vertically in a virtualized CustomScrollView.
+    // On medium (tablet / small desktop) and narrow (mobile) viewports,
+    // reflow sections vertically in cognitive priority order:
+    // Global Summary -> Operational Cars -> Observation Sources -> Recent Diagnostics.
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 1440),
+        constraints: const BoxConstraints(maxWidth: 1560),
         child: CustomScrollView(
           slivers: <Widget>[
             SliverPadding(
@@ -889,7 +907,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                 context,
                 snapshot,
                 textScale: textScale,
-                allowMultiColumn: false,
+                allowMultiColumn: isWide,
               ),
             ),
             SliverPadding(
@@ -907,7 +925,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                     const SizedBox(height: 12),
                     DiagnosticEvidencePanel(
                       diagnostics: snapshot.recentDiagnostics,
-                      maxPreviewEntries: 6,
+                      maxPreviewEntries: previewLimit,
                       onViewAll: () =>
                           _switchSection(ClientSection.diagnostics),
                     ),
@@ -924,13 +942,38 @@ class _ClientShellPageState extends State<ClientShellPage> {
   Widget _buildCarsWorkspace(
     BuildContext context,
     ReadModelSnapshot snapshot, {
-    required Widget statusStrip,
+    required Widget? alertBanners,
     required EdgeInsets pagePadding,
     required double textScale,
   }) {
+    final InstrumentPalette palette = context.palette;
+    final int carCount = snapshot.operationalCars.length;
+    final int nonResolvedOperational = snapshot.sources.fold<int>(
+      0,
+      (int sum, SourceHealth s) =>
+          sum +
+          s.observations
+              .where(
+                (SourceObservation o) =>
+                    o.role == BindingRole.operational &&
+                    o.availability != ObservationAvailability.resolved,
+              )
+              .length,
+    );
+    final (
+      String readinessLabel,
+      String readinessTip,
+      Color readinessFg,
+      Color readinessBg,
+      IconData readinessIcon,
+    ) = describeHostReadiness(
+      snapshot.readiness,
+      palette,
+    );
+
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 1440),
+        constraints: const BoxConstraints(maxWidth: 1560),
         child: CustomScrollView(
           key: const Key('cars-section-scroll'),
           slivers: <Widget>[
@@ -939,18 +982,46 @@ class _ClientShellPageState extends State<ClientShellPage> {
                 pagePadding.left,
                 pagePadding.top,
                 pagePadding.right,
-                14,
+                16,
               ),
               sliver: SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    statusStrip,
-                    const SizedBox(height: 20),
-                    SectionHeader(
+                    if (alertBanners != null) ...<Widget>[
+                      alertBanners,
+                      const SizedBox(height: 14),
+                    ],
+                    DedicatedPageHeader(
+                      key: const Key('cars-page-header'),
                       title: 'Operational Cars',
-                      count: snapshot.operationalCars.length,
+                      subtitle: 'Monitor current Engine-owned elevator state resolved from authoritative Operational bindings.',
                       icon: Icons.elevator_outlined,
+                      countLabel:
+                          '$carCount ${carCount == 1 ? "operational car" : "operational cars"}',
+                      countBadgeKey: const Key('cars-page-count-badge'),
+                      trailingBadges: <Widget>[
+                        SemanticBadge(
+                          label: readinessLabel,
+                          foreground: readinessFg,
+                          background: readinessBg,
+                          icon: readinessIcon,
+                          compact: textScale > 1.25,
+                          tooltip: 'Read Readiness: $readinessTip',
+                        ),
+                        if (nonResolvedOperational > 0)
+                          SemanticBadge(
+                            key: const Key('cars-page-non-resolved-badge'),
+                            label:
+                                '$nonResolvedOperational non-resolved ${nonResolvedOperational == 1 ? "binding" : "bindings"}',
+                            foreground: palette.caution,
+                            background: palette.cautionContainer,
+                            icon: Icons.help_outline_rounded,
+                            compact: textScale > 1.25,
+                            tooltip:
+                                '$nonResolvedOperational configured Operational binding(s) are not currently resolved and are excluded from operational truth.',
+                          ),
+                      ],
                     ),
                   ],
                 ),
@@ -974,13 +1045,23 @@ class _ClientShellPageState extends State<ClientShellPage> {
   Widget _buildSourcesWorkspace(
     BuildContext context,
     ReadModelSnapshot snapshot, {
-    required Widget statusStrip,
+    required Widget? alertBanners,
     required EdgeInsets pagePadding,
     required double textScale,
   }) {
+    final InstrumentPalette palette = context.palette;
+    final int sourceCount = snapshot.sources.length;
+    final int totalBindings = snapshot.sources.fold<int>(
+      0,
+      (int sum, SourceHealth s) => sum + s.observations.length,
+    );
+    final int staleSources = snapshot.sources
+        .where((SourceHealth s) => s.payload == PayloadActivity.stale)
+        .length;
+
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 1440),
+        constraints: const BoxConstraints(maxWidth: 1560),
         child: CustomScrollView(
           key: const Key('sources-section-scroll'),
           slivers: <Widget>[
@@ -989,18 +1070,42 @@ class _ClientShellPageState extends State<ClientShellPage> {
                 pagePadding.left,
                 pagePadding.top,
                 pagePadding.right,
-                14,
+                16,
               ),
               sliver: SliverToBoxAdapter(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    statusStrip,
-                    const SizedBox(height: 20),
-                    SectionHeader(
+                    if (alertBanners != null) ...<Widget>[
+                      alertBanners,
+                      const SizedBox(height: 14),
+                    ],
+                    DedicatedPageHeader(
+                      key: const Key('sources-page-header'),
                       title: 'Observation Sources',
-                      count: snapshot.sources.length,
+                      subtitle: 'Inspect observation streams, adapter sessions, transport discovery, payload freshness, and logical-car bindings.',
                       icon: Icons.hub_outlined,
+                      countLabel:
+                          '$sourceCount ${sourceCount == 1 ? "source" : "sources"}',
+                      countBadgeKey: const Key('sources-page-count-badge'),
+                      trailingBadges: <Widget>[
+                        SemanticBadge(
+                          label:
+                              '$totalBindings ${totalBindings == 1 ? "binding" : "bindings"}',
+                          foreground: palette.subtleText,
+                          background: palette.elevatedSurface,
+                          icon: Icons.account_tree_outlined,
+                          compact: textScale > 1.25,
+                        ),
+                        if (staleSources > 0)
+                          SemanticBadge(
+                            label: '$staleSources stale',
+                            foreground: palette.danger,
+                            background: palette.dangerContainer,
+                            icon: Icons.timer_off_outlined,
+                            compact: textScale > 1.25,
+                          ),
+                      ],
                     ),
                   ],
                 ),
@@ -1029,24 +1134,77 @@ class _ClientShellPageState extends State<ClientShellPage> {
   Widget _buildDiagnosticsWorkspace(
     BuildContext context,
     ReadModelSnapshot snapshot, {
-    required Widget statusStrip,
+    required Widget? alertBanners,
     required EdgeInsets pagePadding,
+    required double textScale,
   }) {
+    final InstrumentPalette palette = context.palette;
+    final int eventCount = snapshot.recentDiagnostics.length;
     return SingleChildScrollView(
       key: const Key('diagnostics-section-scroll'),
       padding: pagePadding,
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1440),
+          constraints: const BoxConstraints(maxWidth: 1560),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              statusStrip,
-              const SizedBox(height: 20),
-              SectionHeader(
-                title: 'Host Diagnostics',
-                count: snapshot.recentDiagnostics.length,
-                icon: Icons.analytics_outlined,
+              if (alertBanners != null) ...<Widget>[
+                alertBanners,
+                const SizedBox(height: 14),
+              ],
+              ListenableBuilder(
+                listenable: _diagnosticsFilter,
+                builder: (BuildContext context, _) {
+                  final bool hasFilter = _diagnosticsFilter.hasActiveFilter;
+                  final int matchedCount = hasFilter
+                      ? _diagnosticsFilter
+                            .filterAndSort(snapshot.recentDiagnostics)
+                            .length
+                      : eventCount;
+                  return DedicatedPageHeader(
+                    key: const Key('diagnostics-page-header'),
+                    title: 'Host Diagnostics',
+                    subtitle: 'Inspect machine-readable Host evidence across transport, source, mapping, observation, and readiness layers.',
+                    icon: Icons.analytics_outlined,
+                    countLabel:
+                        '$eventCount ${eventCount == 1 ? "event" : "events"}',
+                    countBadgeKey: const Key('diagnostics-page-count-badge'),
+                    trailingBadges: <Widget>[
+                      if (hasFilter) ...<Widget>[
+                        SemanticBadge(
+                          key: const Key('diagnostics-page-filtered-badge'),
+                          label: '$matchedCount matching',
+                          foreground: palette.subtleText,
+                          background: palette.elevatedSurface,
+                          icon: Icons.filter_alt_outlined,
+                          compact: textScale > 1.25,
+                        ),
+                        TextButton.icon(
+                          key: const Key('diagnostics-header-reset-button'),
+                          onPressed: _diagnosticsFilter.resetAll,
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            minimumSize: const Size(0, 28),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          icon: const Icon(Icons.filter_alt_off, size: 14),
+                          label: const Text(
+                            'Reset filters',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  );
+                },
               ),
               const SizedBox(height: 14),
               DiagnosticEvidencePanel(
@@ -1058,6 +1216,20 @@ class _ClientShellPageState extends State<ClientShellPage> {
         ),
       ),
     );
+  }
+
+  static int _computeAdaptiveGridColumns(
+    double width,
+    double textScale, {
+    required bool allowMultiColumn,
+  }) {
+    if (!allowMultiColumn || textScale > 1.35 || width < 600) {
+      return 1;
+    }
+    if (textScale > 1.15 || width < 1180) {
+      return 2;
+    }
+    return 3;
   }
 
   Widget _buildCarsGridBox(
@@ -1076,20 +1248,21 @@ class _ClientShellPageState extends State<ClientShellPage> {
         final double width = constraints.maxWidth;
         if (cars.length == 1) {
           final bool useTabularFooter = width >= 280 && textScale <= 1.35;
-          final bool compactCard = width < 430 || textScale > 1.15;
+          final bool compactCard = width < 400 || textScale > 1.15;
           return OperationalCarCard(
             car: cars.first,
             useTabularFooter: useTabularFooter,
             compactCard: compactCard,
+            cardWidth: width,
           );
         }
 
-        final int columns = (width >= 600 && textScale <= 1.2) ? 2 : 1;
+        final int columns = (width >= 560 && textScale <= 1.2) ? 2 : 1;
         final double cardWidth = columns == 1
             ? width
             : (width - spacing) / columns;
         final bool useTabularFooter = cardWidth >= 280 && textScale <= 1.35;
-        final bool compactCard = cardWidth < 430 || textScale > 1.15;
+        final bool compactCard = cardWidth < 400 || textScale > 1.15;
         final int rowCount = (cars.length + columns - 1) ~/ columns;
 
         Widget buildRow(int rowIndex) {
@@ -1098,6 +1271,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
               car: cars[rowIndex],
               useTabularFooter: useTabularFooter,
               compactCard: compactCard,
+              cardWidth: cardWidth,
             );
           }
           final int start = rowIndex * columns;
@@ -1114,6 +1288,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                             stretchToRowHeight: true,
                             useTabularFooter: useTabularFooter,
                             compactCard: compactCard,
+                            cardWidth: cardWidth,
                           )
                         : const SizedBox.shrink(),
                   ),
@@ -1176,34 +1351,42 @@ class _ClientShellPageState extends State<ClientShellPage> {
       );
     }
 
-    if (sources.length > 8) {
-      return ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 540),
-        child: ListView.builder(
-          padding: EdgeInsets.zero,
-          itemCount: sources.length,
-          itemBuilder: (BuildContext context, int i) {
-            final Widget card = SourceHealthCard(source: sources[i]);
-            if (i == 0) {
-              return card;
-            }
-            return Padding(
-              padding: const EdgeInsets.only(top: spacing),
-              child: card,
-            );
-          },
-        ),
-      );
-    }
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double width = constraints.maxWidth;
+        if (sources.length > 8) {
+          return ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 540),
+            child: ListView.builder(
+              padding: EdgeInsets.zero,
+              itemCount: sources.length,
+              itemBuilder: (BuildContext context, int i) {
+                final Widget card = SourceHealthCard(
+                  source: sources[i],
+                  cardWidth: width,
+                );
+                if (i == 0) {
+                  return card;
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(top: spacing),
+                  child: card,
+                );
+              },
+            ),
+          );
+        }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        for (int i = 0; i < sources.length; i++) ...<Widget>[
-          if (i > 0) const SizedBox(height: spacing),
-          SourceHealthCard(source: sources[i]),
-        ],
-      ],
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            for (int i = 0; i < sources.length; i++) ...<Widget>[
+              if (i > 0) const SizedBox(height: spacing),
+              SourceHealthCard(source: sources[i], cardWidth: width),
+            ],
+          ],
+        );
+      },
     );
   }
 
@@ -1223,19 +1406,22 @@ class _ClientShellPageState extends State<ClientShellPage> {
     return SliverLayoutBuilder(
       builder: (BuildContext context, SliverConstraints sliverConstraints) {
         final double width = sliverConstraints.crossAxisExtent;
-        final bool useTwoColumns =
-            textScale <= 1.2 &&
-            (width >= 680 || (cars.length > 1 && width >= 600));
+        final int columns = _computeAdaptiveGridColumns(
+          width,
+          textScale,
+          allowMultiColumn: true,
+        );
 
-        if (!useTwoColumns) {
+        if (columns == 1) {
           final bool useTabularFooter = width >= 280 && textScale <= 1.35;
-          final bool compactCard = width < 430 || textScale > 1.15;
+          final bool compactCard = width < 400 || textScale > 1.15;
           if (cars.length == 1) {
             return SliverToBoxAdapter(
               child: OperationalCarCard(
                 car: cars.first,
                 useTabularFooter: useTabularFooter,
                 compactCard: compactCard,
+                cardWidth: width,
               ),
             );
           }
@@ -1246,6 +1432,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                 car: cars[index],
                 useTabularFooter: useTabularFooter,
                 compactCard: compactCard,
+                cardWidth: width,
               );
               if (index == 0) {
                 return card;
@@ -1258,10 +1445,9 @@ class _ClientShellPageState extends State<ClientShellPage> {
           );
         }
 
-        const int columns = 2;
-        final double cardWidth = (width - spacing) / columns;
+        final double cardWidth = (width - (spacing * (columns - 1))) / columns;
         final bool useTabularFooter = cardWidth >= 280 && textScale <= 1.35;
-        final bool compactCard = cardWidth < 430 || textScale > 1.15;
+        final bool compactCard = cardWidth < 400 || textScale > 1.15;
         final int rowCount = (cars.length + columns - 1) ~/ columns;
 
         return SliverList.builder(
@@ -1281,6 +1467,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                               stretchToRowHeight: true,
                               useTabularFooter: useTabularFooter,
                               compactCard: compactCard,
+                              cardWidth: cardWidth,
                             )
                           : const SizedBox.shrink(),
                     ),
@@ -1328,14 +1515,20 @@ class _ClientShellPageState extends State<ClientShellPage> {
     return SliverLayoutBuilder(
       builder: (BuildContext context, SliverConstraints sliverConstraints) {
         final double width = sliverConstraints.crossAxisExtent;
-        final bool useTwoColumns =
-            allowMultiColumn && width >= 680 && textScale <= 1.35;
+        final int columns = _computeAdaptiveGridColumns(
+          width,
+          textScale,
+          allowMultiColumn: allowMultiColumn,
+        );
 
-        if (!useTwoColumns) {
+        if (columns == 1) {
           return SliverList.builder(
             itemCount: sources.length,
             itemBuilder: (BuildContext context, int index) {
-              final Widget card = SourceHealthCard(source: sources[index]);
+              final Widget card = SourceHealthCard(
+                source: sources[index],
+                cardWidth: width,
+              );
               if (index == 0) {
                 return card;
               }
@@ -1347,7 +1540,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
           );
         }
 
-        const int columns = 2;
+        final double cardWidth = (width - (spacing * (columns - 1))) / columns;
         final int rowCount = (sources.length + columns - 1) ~/ columns;
         return SliverList.builder(
           itemCount: rowCount,
@@ -1364,6 +1557,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                           ? SourceHealthCard(
                               source: sources[start + col],
                               fillRowHeight: true,
+                              cardWidth: cardWidth,
                             )
                           : const SizedBox.shrink(),
                     ),

@@ -211,12 +211,10 @@ class _HostStatusGrid extends StatelessWidget {
     );
 
     final bool hasReset = revisionReset != null;
-    final Color revFg = hasReset
-        ? palette.info
-        : (isLive ? palette.ok : palette.caution);
+    final Color revFg = hasReset ? palette.info : palette.subtleText;
     final Color revBg = hasReset
         ? palette.infoContainer
-        : (isLive ? palette.okContainer : palette.cautionContainer);
+        : palette.elevatedSurface;
 
     final int carsCount = snapshot.operationalCars.length;
     final int sourcesCount = snapshot.sources.length;
@@ -264,8 +262,10 @@ class _HostStatusGrid extends StatelessWidget {
             icon: hasReset ? Icons.restart_alt_rounded : Icons.tag_rounded,
             iconForeground: revFg,
             iconBackground: revBg,
+            isSecondary: true,
             label: 'Host Revision',
             value: '#${snapshot.revision}',
+            valueColor: hasReset ? palette.info : palette.subtleText,
             trailingBadge: hasReset
                 ? SemanticBadge(
                     label:
@@ -291,8 +291,9 @@ class _HostStatusGrid extends StatelessWidget {
           _StatusStripCard(
             key: const Key('status-card-summary'),
             icon: Icons.layers_outlined,
-            iconForeground: palette.info,
-            iconBackground: palette.infoContainer,
+            iconForeground: palette.subtleText,
+            iconBackground: palette.elevatedSurface,
+            isSecondary: true,
             hideAvatarOnCompactDesktop: compactSummaryCard,
             label: 'Snapshot Summary',
             customContent: Wrap(
@@ -406,6 +407,7 @@ class _StatusStripCard extends StatelessWidget {
     this.valueColor,
     this.trailingBadge,
     this.customContent,
+    this.isSecondary = false,
     this.hideAvatarOnCompactDesktop = false,
   });
 
@@ -418,6 +420,7 @@ class _StatusStripCard extends StatelessWidget {
   final Color? valueColor;
   final Widget? trailingBadge;
   final Widget? customContent;
+  final bool isSecondary;
   final bool hideAvatarOnCompactDesktop;
 
   @override
@@ -427,26 +430,37 @@ class _StatusStripCard extends StatelessWidget {
     final double screenWidth = MediaQuery.sizeOf(context).width;
     final bool compact = screenWidth < 520 || textScale > 1.35;
     final bool showAvatar = !compact && !hideAvatarOnCompactDesktop;
+    final Color cardBg = isSecondary
+        ? Color.lerp(palette.surface, palette.canvas, 0.35)!
+        : palette.surface;
+    final Color borderColor = isSecondary
+        ? palette.border.withValues(alpha: 0.72)
+        : palette.border;
 
     return Tooltip(
       message: tooltip,
       child: Card(
+        color: cardBg,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: borderColor),
+        ),
         child: Padding(
           padding: EdgeInsets.symmetric(
-            horizontal: compact ? 10 : 14,
-            vertical: compact ? 8 : 12,
+            horizontal: compact ? 10 : (isSecondary ? 12 : 14),
+            vertical: compact ? 8 : (isSecondary ? 10 : 12),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
               if (showAvatar) ...<Widget>[
                 CircleAvatar(
-                  radius: 18,
+                  radius: isSecondary ? 15 : 18,
                   backgroundColor: iconBackground,
                   foregroundColor: iconForeground,
-                  child: Icon(icon, size: 19),
+                  child: Icon(icon, size: isSecondary ? 16 : 19),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: isSecondary ? 10 : 12),
               ],
               Expanded(
                 child: Column(
@@ -459,8 +473,10 @@ class _StatusStripCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
+                        fontSize: isSecondary ? 11.0 : 11.5,
+                        fontWeight: isSecondary
+                            ? FontWeight.w500
+                            : FontWeight.w600,
                         color: palette.mutedText,
                       ),
                     ),
@@ -480,8 +496,10 @@ class _StatusStripCard extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               style: instrumentTabularStyle(
                                 context,
-                                fontSize: 14.5,
-                                fontWeight: FontWeight.w700,
+                                fontSize: isSecondary ? 13.5 : 15.0,
+                                fontWeight: isSecondary
+                                    ? FontWeight.w600
+                                    : FontWeight.w700,
                                 color:
                                     valueColor ??
                                     Theme.of(context).colorScheme.onSurface,

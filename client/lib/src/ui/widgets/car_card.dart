@@ -11,12 +11,14 @@ class OperationalCarCard extends StatelessWidget {
     this.stretchToRowHeight = false,
     this.useTabularFooter = true,
     this.compactCard = false,
+    this.cardWidth,
   });
 
   final OperationalCar car;
   final bool stretchToRowHeight;
   final bool useTabularFooter;
   final bool compactCard;
+  final double? cardWidth;
 
   (Color iconFg, Color iconBg) _avatarColors(InstrumentPalette palette) {
     if (car.operatingMode == CarOperatingMode.fireService ||
@@ -37,6 +39,11 @@ class OperationalCarCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
     final (Color avatarFg, Color avatarBg) = _avatarColors(palette);
+    final double effectiveWidth = cardWidth ?? MediaQuery.sizeOf(context).width;
+    final double headerInnerWidth = (effectiveWidth - 32).clamp(160.0, 1200.0);
+    final double maxModeWidth = (headerInnerWidth * 0.48).clamp(92.0, 168.0);
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final bool compactGraphic = headerInnerWidth < 330 || textScale > 1.35;
 
     return Card(
       child: Column(
@@ -80,7 +87,7 @@ class OperationalCarCard extends StatelessWidget {
                     ),
                     const SizedBox(width: 8),
                     ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 168),
+                      constraints: BoxConstraints(maxWidth: maxModeWidth),
                       child: _ModeReadout(mode: car.operatingMode),
                     ),
                   ],
@@ -88,29 +95,17 @@ class OperationalCarCard extends StatelessWidget {
                 const SizedBox(height: 16),
 
                 // 2. Primary Visual Body: 76x88 Elevator Elevation Graphic + Location Readout
-                Builder(
-                  builder: (BuildContext context) {
-                    final double textScale = MediaQuery.textScalerOf(context)
-                        .scale(1.0);
-                    final double screenWidth = MediaQuery.sizeOf(context).width;
-                    final bool compactGraphic =
-                        compactCard || screenWidth < 380 || textScale > 1.35;
-
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: <Widget>[
-                        _ElevatorCarElevationGraphic(
-                          door: car.door,
-                          motion: car.motion,
-                          compact: compactGraphic,
-                        ),
-                        SizedBox(width: compactGraphic ? 12 : 16),
-                        Expanded(
-                          child: _LocationReadout(location: car.location),
-                        ),
-                      ],
-                    );
-                  },
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: <Widget>[
+                    _ElevatorCarElevationGraphic(
+                      door: car.door,
+                      motion: car.motion,
+                      compact: compactGraphic,
+                    ),
+                    SizedBox(width: compactGraphic ? 12 : 16),
+                    Expanded(child: _LocationReadout(location: car.location)),
+                  ],
                 ),
               ],
             ),
@@ -127,7 +122,7 @@ class OperationalCarCard extends StatelessWidget {
                 door: car.door,
                 reportedDestination: car.reportedDestination,
                 useTabularColumns: useTabularFooter,
-                compactCard: compactCard,
+                compactCard: compactCard || effectiveWidth < 400,
               ),
             ],
           ),
@@ -779,8 +774,7 @@ class _CarTelemetryFooter extends StatelessWidget {
     final bool showThreeColumns = useTabularColumns && textScale <= 1.35;
 
     if (showThreeColumns) {
-      final double screenWidth = MediaQuery.sizeOf(context).width;
-      final bool compactCols = compactCard || screenWidth < 1100;
+      final bool compactCols = compactCard;
       final double divMargin = compactCols ? 6.0 : 8.0;
       return Padding(
         padding: EdgeInsets.symmetric(

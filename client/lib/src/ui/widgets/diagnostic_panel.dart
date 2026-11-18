@@ -295,8 +295,8 @@ class _DiagnosticEvidencePanelState extends State<DiagnosticEvidencePanel> {
             ),
           );
         } else {
-          final double boundedMaxHeight = (viewport.height - 260).clamp(
-            320.0,
+          final double boundedMaxHeight = (viewport.height - 320).clamp(
+            280.0,
             680.0,
           );
           logSurface = Card(
@@ -765,12 +765,17 @@ class _DiagnosticLogRow extends StatelessWidget {
                     icon: diagnosticLayerIcon(entry.layer),
                     tooltip: 'Diagnostic layer: ${entry.layer.wireValue}',
                   ),
-                  Text(
-                    entry.id,
-                    style: instrumentTabularStyle(
-                      context,
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
+                  Tooltip(
+                    message: entry.id,
+                    child: Text(
+                      entry.id,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: instrumentTabularStyle(
+                        context,
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 ],
@@ -868,45 +873,51 @@ class _DiagnosticContextChip extends StatelessWidget {
     final Color effectiveValueColor =
         accentColor ?? Theme.of(context).colorScheme.onSurface;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8.5, vertical: 4.5),
-      decoration: BoxDecoration(
-        color: palette.elevatedSurface,
-        borderRadius: BorderRadius.circular(7),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(icon, size: 13, color: accentColor ?? palette.mutedText),
-          const SizedBox(width: 5),
-          Flexible(
-            child: Text.rich(
-              TextSpan(
-                children: <InlineSpan>[
-                  TextSpan(
-                    text: '$label: ',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w500,
-                      color: palette.mutedText,
-                    ),
-                  ),
-                  TextSpan(
-                    text: value,
-                    style: instrumentTabularStyle(
-                      context,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: effectiveValueColor,
-                    ),
-                  ),
-                ],
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+    return Tooltip(
+      message: '$label: $value',
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8.5, vertical: 4.5),
+          decoration: BoxDecoration(
+            color: palette.elevatedSurface,
+            borderRadius: BorderRadius.circular(7),
           ),
-        ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(icon, size: 13, color: accentColor ?? palette.mutedText),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text.rich(
+                  TextSpan(
+                    children: <InlineSpan>[
+                      TextSpan(
+                        text: '$label: ',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w500,
+                          color: palette.mutedText,
+                        ),
+                      ),
+                      TextSpan(
+                        text: value,
+                        style: instrumentTabularStyle(
+                          context,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: effectiveValueColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

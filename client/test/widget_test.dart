@@ -6,6 +6,7 @@ import 'package:liftassistant_client/src/api/host_url.dart';
 import 'package:liftassistant_client/src/state/client_controller.dart';
 import 'package:liftassistant_client/src/transport/host_transport.dart';
 import 'package:liftassistant_client/src/ui/app.dart';
+import 'package:liftassistant_client/src/ui/preview_fixtures.dart';
 import 'package:liftassistant_client/src/ui/widgets/car_card.dart';
 import 'package:liftassistant_client/src/ui/widgets/diagnostic_panel.dart';
 import 'package:liftassistant_client/src/ui/widgets/host_connection_dialog.dart';
@@ -395,7 +396,10 @@ void main() {
         find.byKey(const Key('overview-inspect-all-diagnostics-button')),
       );
       await tester.pumpAndSettle();
+      expect(find.byKey(const Key('diagnostics-page-header')), findsOneWidget);
+      expect(find.byKey(const Key('system-status-strip-grid')), findsNothing);
       expect(find.text('Host Diagnostics'), findsOneWidget);
+      expect(find.text('2 events'), findsOneWidget);
       expect(
         find.textContaining('Machine-readable Host evidence only'),
         findsOneWidget,
@@ -485,7 +489,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('readiness.changed'), findsOneWidget);
 
-      // Navigate to dedicated Cars and Sources sections via left NavigationRail.
+      // Navigate to dedicated Cars and Sources sections via left NavigationRail:
+      // neither repeats the Overview 4-card dashboard strip, and both render DedicatedPageHeader.
       await tester.tap(
         find.descendant(
           of: find.byType(NavigationRail),
@@ -494,6 +499,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('cars-section-scroll')), findsOneWidget);
+      expect(find.byKey(const Key('cars-page-header')), findsOneWidget);
+      expect(find.byKey(const Key('system-status-strip-grid')), findsNothing);
+      expect(find.text('2 operational cars'), findsOneWidget);
       expect(find.byType(OperationalCarCard), findsNWidgets(2));
 
       await tester.tap(
@@ -504,6 +512,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('sources-section-scroll')), findsOneWidget);
+      expect(find.byKey(const Key('sources-page-header')), findsOneWidget);
+      expect(find.byKey(const Key('system-status-strip-grid')), findsNothing);
+      expect(find.text('2 sources'), findsOneWidget);
+      expect(find.text('3 bindings'), findsOneWidget);
       expect(find.byType(SourceHealthCard), findsNWidgets(2));
 
       // Open and close on-demand semantic reference modal.
@@ -1127,7 +1139,7 @@ void main() {
       expect(singleCarRect.right, lessThan(diagPanelRect.left));
 
       // In dedicated Cars and Sources sections on desktop, a single card occupies
-      // 1 column of the 2-column grid rather than stretching across the full 1230+px workspace.
+      // 1 column of the adaptive grid rather than stretching across the full workspace.
       await tester.tap(
         find.descendant(
           of: find.byType(NavigationRail),
@@ -1155,6 +1167,322 @@ void main() {
         sourcesTabSingleCardRect.width,
         equals(carsTabSingleCardRect.width),
       );
+    },
+  );
+
+  testWidgets(
+    'stress-tests synthetic multi-car (4) / multi-source (3) / 24-diagnostic / NotReady / Reconnecting state across wide (1560px), medium (900px), and narrow/mobile (390px) viewports',
+    (WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1560, 960);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final PreviewFixtureTransport transport = PreviewFixtureTransport(
+        simulateReconnectingAfterInitialSnapshot: true,
+      );
+      final ClientController controller = ClientController(
+        transport: transport,
+        initialUrlInput: 'http://127.0.0.1:8080',
+        retryBackoff: (_) => const Duration(seconds: 30),
+      );
+      addTearDown(() {
+        controller.dispose();
+        transport.dispose();
+      });
+
+      await tester.pumpWidget(
+        LiftAssistantClientApp(
+          controller: controller,
+          initialHostUrl: 'http://127.0.0.1:8080',
+          autoConnect: true,
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(tester.takeException(), isNull);
+
+      // 1. Wide Desktop (1560x960) — Overview:
+      // Shows Global Summary (Synchronizing / NotReady / #84 Retained / 4 Cars, 3 Sources, 24 Events),
+      // Reconnecting retained-snapshot alert banner, 2-column dashboard layout, and 6-item preview.
+      expect(find.byKey(const Key('system-status-strip-grid')), findsOneWidget);
+      expect(
+        find.byKey(const Key('stale-retained-snapshot-banner')),
+        findsOneWidget,
+      );
+      expect(find.text('RECONNECTING'), findsOneWidget);
+      expect(find.text('Synchronizing'), findsOneWidget);
+      expect(find.text('NotReady'), findsOneWidget);
+      expect(find.text('4 Cars'), findsOneWidget);
+      expect(find.text('3 Sources'), findsOneWidget);
+      expect(find.text('24 Events'), findsOneWidget);
+      expect(find.text('Showing 6 of 24 recent events'), findsOneWidget);
+
+      final Rect wideOvCarsHeader = tester.getRect(
+        find.widgetWithText(SectionHeader, 'Operational Cars'),
+      );
+      final Rect wideOvDiagHeader = tester.getRect(
+        find.widgetWithText(SectionHeader, 'Recent Diagnostics'),
+      );
+      expect(wideOvCarsHeader.top, equals(wideOvDiagHeader.top));
+      expect(wideOvCarsHeader.left, lessThan(wideOvDiagHeader.left));
+
+      // 2. Wide Desktop (1560x960) — Dedicated Cars page:
+      // No Overview summary cards; renders DedicatedPageHeader + 3-column adaptive grid for 4 cars,
+      // with zero horizontal layout jump from Overview's left content margin.
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationRail),
+          matching: find.text('Cars'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('system-status-strip-grid')), findsNothing);
+      expect(find.byKey(const Key('cars-page-header')), findsOneWidget);
+      final Rect carsPageHeaderRect = tester.getRect(
+        find.byKey(const Key('cars-page-header')),
+      );
+      expect(carsPageHeaderRect.left, equals(wideOvCarsHeader.left));
+      expect(find.text('4 operational cars'), findsOneWidget);
+      expect(
+        find.byKey(const Key('cars-page-non-resolved-badge')),
+        findsOneWidget,
+      );
+      expect(find.text('1 non-resolved binding'), findsOneWidget);
+      expect(
+        find.byKey(const Key('stale-retained-snapshot-banner')),
+        findsOneWidget,
+      );
+      expect(find.byType(OperationalCarCard), findsNWidgets(4));
+
+      final Rect wideCar0 = tester.getRect(
+        find.byType(OperationalCarCard).at(0),
+      );
+      final Rect wideCar1 = tester.getRect(
+        find.byType(OperationalCarCard).at(1),
+      );
+      final Rect wideCar2 = tester.getRect(
+        find.byType(OperationalCarCard).at(2),
+      );
+      final Rect wideCar3 = tester.getRect(
+        find.byType(OperationalCarCard).at(3),
+      );
+      expect(wideCar0.top, equals(wideCar1.top));
+      expect(wideCar1.top, equals(wideCar2.top));
+      expect(wideCar0.left, lessThan(wideCar1.left));
+      expect(wideCar1.left, lessThan(wideCar2.left));
+      expect(wideCar3.top, greaterThan(wideCar0.bottom));
+      expect((wideCar3.left - wideCar0.left).abs(), lessThan(1.0));
+      expect((wideCar3.width - wideCar0.width).abs(), lessThan(1.0));
+
+      // 3. Wide Desktop (1560x960) — Dedicated Sources page:
+      // No Overview summary cards; renders DedicatedPageHeader + 3-column adaptive grid for 3 sources.
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationRail),
+          matching: find.text('Sources'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('system-status-strip-grid')), findsNothing);
+      expect(find.byKey(const Key('sources-page-header')), findsOneWidget);
+      final Rect sourcesPageHeaderRect = tester.getRect(
+        find.byKey(const Key('sources-page-header')),
+      );
+      expect(sourcesPageHeaderRect.left, equals(wideOvCarsHeader.left));
+      expect(find.text('3 sources'), findsOneWidget);
+      expect(find.text('9 bindings'), findsOneWidget);
+      expect(find.text('1 stale'), findsOneWidget);
+      expect(find.byType(SourceHealthCard), findsNWidgets(3));
+
+      final Rect wideSrc0 = tester.getRect(find.byType(SourceHealthCard).at(0));
+      final Rect wideSrc1 = tester.getRect(find.byType(SourceHealthCard).at(1));
+      final Rect wideSrc2 = tester.getRect(find.byType(SourceHealthCard).at(2));
+      expect(wideSrc0.top, equals(wideSrc1.top));
+      expect(wideSrc1.top, equals(wideSrc2.top));
+      expect(wideSrc0.left, lessThan(wideSrc1.left));
+      expect(wideSrc1.left, lessThan(wideSrc2.left));
+      expect(wideSrc0.height, equals(wideSrc1.height));
+      expect(wideSrc1.height, equals(wideSrc2.height));
+
+      // Verify first binding row in shorter Card 2 (2 bindings) is top-aligned at the exact
+      // same vertical position as the first binding row in Card 0 (4 bindings) without a mid-card Spacer gap.
+      final Rect src0FirstBindingText = tester.getRect(
+        find.descendant(
+          of: find.byType(SourceHealthCard).at(0),
+          matching: find.text('lift-north-A'),
+        ),
+      );
+      final Rect src2FirstBindingText = tester.getRect(
+        find.descendant(
+          of: find.byType(SourceHealthCard).at(2),
+          matching: find.text('lift-west-express-C'),
+        ),
+      );
+      expect(
+        (src0FirstBindingText.top - src2FirstBindingText.top).abs(),
+        lessThan(2.0),
+      );
+
+      // Verify long CarId binding row in Card 0 stays on a single horizontal line
+      // rather than wrapping its badges to a second line.
+      final Rect src0LongCarText = tester.getRect(
+        find.descendant(
+          of: find.byType(SourceHealthCard).at(0),
+          matching: find.text(
+            'building-north-tower-high-rise-service-elevator-car-02',
+          ),
+        ),
+      );
+      expect(
+        (src0LongCarText.top - src0FirstBindingText.bottom).abs(),
+        lessThan(30.0),
+      );
+
+      // 4. Wide Desktop (1560x960) — Dedicated Diagnostics page:
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationRail),
+          matching: find.text('Diagnostics'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('system-status-strip-grid')), findsNothing);
+      expect(find.byKey(const Key('diagnostics-page-header')), findsOneWidget);
+      final Rect diagPageHeaderRect = tester.getRect(
+        find.byKey(const Key('diagnostics-page-header')),
+      );
+      expect(diagPageHeaderRect.left, equals(wideOvCarsHeader.left));
+      expect(find.text('24 events'), findsOneWidget);
+      expect(find.byKey(const Key('diagnostics-list-view')), findsOneWidget);
+
+      // Filtering updates DedicatedPageHeader with matching badge + Reset filters action.
+      await tester.tap(find.byKey(const Key('diag-filter-layer-mapping')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('diagnostics-page-filtered-badge')),
+        findsOneWidget,
+      );
+      expect(find.text('3 matching'), findsOneWidget);
+      expect(
+        find.byKey(const Key('diagnostics-header-reset-button')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const Key('diagnostics-header-reset-button')),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('diagnostics-page-filtered-badge')),
+        findsNothing,
+      );
+
+      // 5. Medium Layout (900x800 tablet / small desktop):
+      // Overview reflows vertically (Operational Cars above Observation Sources above Recent Diagnostics)
+      // while Cars and Sources use a 2-column adaptive grid.
+      tester.view.physicalSize = const Size(900, 800);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationRail),
+          matching: find.text('Overview'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(CustomScrollView), findsOneWidget);
+      final Rect ovMedCar0 = tester.getRect(
+        find.byType(OperationalCarCard).at(0),
+      );
+      final Rect ovMedCar1 = tester.getRect(
+        find.byType(OperationalCarCard).at(1),
+      );
+      expect(ovMedCar0.top, equals(ovMedCar1.top));
+      expect(ovMedCar0.left, lessThan(ovMedCar1.left));
+      // Recent Diagnostics is stacked below in CustomScrollView rather than side-by-side at the top.
+      expect(
+        find.widgetWithText(SectionHeader, 'Recent Diagnostics'),
+        findsNothing,
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationRail),
+          matching: find.text('Cars'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final Rect medCar0 = tester.getRect(
+        find.byType(OperationalCarCard).at(0),
+      );
+      final Rect medCar1 = tester.getRect(
+        find.byType(OperationalCarCard).at(1),
+      );
+      final Rect medCar2 = tester.getRect(
+        find.byType(OperationalCarCard).at(2),
+      );
+      expect(medCar0.top, equals(medCar1.top));
+      expect(medCar0.left, lessThan(medCar1.left));
+      expect(medCar2.top, greaterThan(medCar0.bottom));
+
+      // 6. Narrow / Mobile Layout (390x844):
+      // Cars, Sources, and Diagnostics stack in 1 column with bottom NavigationBar and zero overflow.
+      tester.view.physicalSize = const Size(390, 844);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byType(NavigationBar), findsOneWidget);
+
+      final Rect mobCar0 = tester.getRect(
+        find.byType(OperationalCarCard, skipOffstage: false).at(0),
+      );
+      final Rect mobCar1 = tester.getRect(
+        find.byType(OperationalCarCard, skipOffstage: false).at(1),
+      );
+      expect(mobCar1.top, greaterThan(mobCar0.bottom));
+      expect(mobCar0.left, equals(mobCar1.left));
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Sources'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.drag(
+        find.byKey(const Key('sources-section-scroll')),
+        const Offset(0, -380),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final Rect mobSrc0 = tester.getRect(
+        find.byType(SourceHealthCard, skipOffstage: false).at(0),
+      );
+      final Rect mobSrc1 = tester.getRect(
+        find.byType(SourceHealthCard, skipOffstage: false).at(1),
+      );
+      expect(mobSrc1.top, greaterThan(mobSrc0.bottom));
+      expect(mobSrc0.left, equals(mobSrc1.left));
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Diagnostics'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('diagnostics-page-header')), findsOneWidget);
+      expect(find.byKey(const Key('system-status-strip-grid')), findsNothing);
+
+      await controller.disconnect();
+      await tester.pumpAndSettle();
     },
   );
 }

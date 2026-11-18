@@ -145,6 +145,144 @@ class SectionHeader extends StatelessWidget {
   }
 }
 
+/// Unified Material 3 header for dedicated pages (`Cars`, `Sources`, `Diagnostics`).
+/// Replaces repeating the 4-card Overview dashboard strip on dedicated views so
+/// page-specific operational content begins immediately below the header.
+class DedicatedPageHeader extends StatelessWidget {
+  const DedicatedPageHeader({
+    super.key,
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.countLabel,
+    this.countBadgeKey,
+    this.trailingBadges = const <Widget>[],
+  });
+
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final String countLabel;
+  final Key? countBadgeKey;
+  final List<Widget> trailingBadges;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+
+    final Widget countBadge = SemanticBadge(
+      key: countBadgeKey,
+      label: countLabel,
+      foreground: palette.info,
+      background: palette.infoContainer,
+      compact: textScale > 1.25,
+    );
+
+    final List<Widget> allBadges = <Widget>[countBadge, ...trailingBadges];
+
+    return Container(
+      padding: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: palette.border)),
+      ),
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool inlineBadges =
+              constraints.maxWidth >= 620 && textScale <= 1.3;
+
+          final Widget leadingIdentity = Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Container(
+                width: 34,
+                height: 34,
+                margin: const EdgeInsets.only(top: 2),
+                decoration: BoxDecoration(
+                  color: palette.infoContainer,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: Icon(icon, size: 18, color: palette.info),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: -0.25,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        height: 1.35,
+                        color: palette.subtleText,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+
+          if (inlineBadges) {
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Expanded(child: leadingIdentity),
+                const SizedBox(width: 16),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: constraints.maxWidth * 0.45,
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      alignment: WrapAlignment.end,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: allBadges,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              leadingIdentity,
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: allBadges,
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
 class SemanticCalloutBanner extends StatelessWidget {
   const SemanticCalloutBanner({
     super.key,

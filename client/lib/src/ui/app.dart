@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../state/client_controller.dart';
+import 'preview_fixtures.dart';
 import 'shell_page.dart';
 import 'theme/instrument_theme.dart';
 import 'widgets/host_connection_dialog.dart';
@@ -12,6 +13,9 @@ const String _envHostUrl = String.fromEnvironment('LIFTASSISTANT_HOST_URL');
 const bool _envAutoConnect = bool.fromEnvironment(
   'LIFTASSISTANT_AUTO_CONNECT',
   defaultValue: true,
+);
+const String _envPreviewFixture = String.fromEnvironment(
+  'LIFTASSISTANT_PREVIEW_FIXTURE',
 );
 
 class LiftAssistantClientApp extends StatefulWidget {
@@ -41,11 +45,23 @@ class _LiftAssistantClientAppState extends State<LiftAssistantClientApp> {
     if (kIsWeb && Uri.base.queryParameters['theme'] == 'light') {
       _themeMode = ThemeMode.light;
     }
-    final (String resolvedUrl, bool shouldAutoConnect) =
-        _resolveStartupTarget();
+    final String? previewMode = _resolvePreviewMode();
+    final (String resolvedUrl, bool shouldAutoConnect) = _resolveStartupTarget(
+      hasPreviewFixture: previewMode != null,
+    );
     if (widget.controller != null) {
       _controller = widget.controller!;
       _ownsController = false;
+    } else if (previewMode != null) {
+      _controller = ClientController(
+        transport: PreviewFixtureTransport(
+          simulateReconnectingAfterInitialSnapshot:
+              previewMode == 'reconnecting',
+        ),
+        initialUrlInput: resolvedUrl,
+        retryBackoff: (_) => const Duration(seconds: 30),
+      );
+      _ownsController = true;
     } else {
       _controller = ClientController(initialUrlInput: resolvedUrl);
       _ownsController = true;
@@ -55,7 +71,24 @@ class _LiftAssistantClientAppState extends State<LiftAssistantClientApp> {
     }
   }
 
-  (String, bool) _resolveStartupTarget() {
+  String? _resolvePreviewMode() {
+    if (widget.controller != null) {
+      return null;
+    }
+    if (_envPreviewFixture == 'stress' ||
+        _envPreviewFixture == 'reconnecting') {
+      return _envPreviewFixture;
+    }
+    if (kIsWeb) {
+      final String? qPreview = Uri.base.queryParameters['preview'];
+      if (qPreview == 'stress' || qPreview == 'reconnecting') {
+        return qPreview;
+      }
+    }
+    return null;
+  }
+
+  (String, bool) _resolveStartupTarget({bool hasPreviewFixture = false}) {
     if (widget.initialHostUrl != null && widget.initialHostUrl!.isNotEmpty) {
       return (widget.initialHostUrl!, widget.autoConnect);
     }
@@ -67,6 +100,9 @@ class _LiftAssistantClientAppState extends State<LiftAssistantClientApp> {
       if (queryHost != null && queryHost.trim().isNotEmpty) {
         return (queryHost.trim(), true);
       }
+    }
+    if (hasPreviewFixture) {
+      return (defaultSuggestedHostUrl(), true);
     }
     return (defaultSuggestedHostUrl(), widget.autoConnect);
   }
