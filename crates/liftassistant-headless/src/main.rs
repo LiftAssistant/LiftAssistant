@@ -1523,7 +1523,8 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     &mut incident_capsule_out,
                     &config.source,
                     &session,
-                )?;
+                    io::stderr().lock(),
+                );
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 println!(
                     "readiness={:?} lifecycle={:?} reason=transport-error",
@@ -1546,7 +1547,8 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     &mut incident_capsule_out,
                     &config.source,
                     &session,
-                )?;
+                    io::stderr().lock(),
+                );
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 reported_lifecycle = host.lifecycle().clone();
                 println!(
@@ -1571,7 +1573,8 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     &mut incident_capsule_out,
                     &config.source,
                     &session,
-                )?;
+                    io::stderr().lock(),
+                );
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 println!(
                     "readiness={:?} lifecycle={:?} reason=ingestion-error",
@@ -1608,15 +1611,23 @@ fn write_source_stale_capsule(
     output: &mut Option<PathBuf>,
     source: &ObservationSourceId,
     session: &ObservationSessionId,
-) -> Result<(), String> {
-    let Some(path) = output.as_ref() else {
-        return Ok(());
+    mut warnings: impl io::Write,
+) {
+    let Some(path) = output.take() else {
+        return;
     };
-    host.capture_incident(CapsuleTrigger::source_payload_stale(source, session))
-        .write_new(path)?;
-    println!("incident capsule captured path={path:?} trigger=source.payload-stale");
-    *output = None;
-    Ok(())
+    match host
+        .capture_incident(CapsuleTrigger::source_payload_stale(source, session))
+        .write_new(&path)
+    {
+        Ok(()) => println!("incident capsule captured path={path:?} trigger=source.payload-stale"),
+        Err(error) => {
+            let _ = writeln!(
+                warnings,
+                "warning: optional incident capsule for {source}/{session} at {path:?} failed: {error}"
+            );
+        }
+    }
 }
 
 fn emit_new_host_diagnostics(host: &ReadOnlyHost, reported_sequence: &mut u64) {
@@ -2941,8 +2952,8 @@ mod tests {
             &mut output,
             &reference_source_id(),
             &reference_session_id(),
-        )
-        .expect("configured incident path captures the first stale trigger");
+            io::sink(),
+        );
         assert_eq!(output, None);
 
         let report = IncidentCapsule::read(&path)
@@ -2951,6 +2962,45 @@ mod tests {
         let cleanup = std::fs::remove_file(&path);
         cleanup.expect("fixture capsule is removed");
         assert_eq!(report.trigger_id, "source.payload-stale");
+    }
+
+    #[test]
+    fn existing_capsule_path_warns_once_and_does_not_stop_read_only_recovery() {
+        let mut host = reference_host();
+        let source = reference_source_id();
+        let session = reference_session_id();
+        let path = env::temp_dir().join(format!(
+            "liftassistant-existing-{}.json",
+            new_host_source_session().unwrap()
+        ));
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        host.ingest_observation(
+            complete_observation(source.clone(), session.clone(), 1, Floor::new(4)).into(),
+        );
+        host.mark_source_payload_stale(source.clone(), session.clone())
+            .unwrap();
+        let mut output = Some(path.clone());
+        let mut warnings = Vec::new();
+        write_source_stale_capsule(&host, &mut output, &source, &session, &mut warnings);
+        let existing = std::fs::metadata(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            existing.len(),
+            0,
+            "create-new never replaces the existing file"
+        );
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        assert!(output.is_none());
+        let warning_count = warnings.len();
+        assert!(String::from_utf8_lossy(&warnings).contains("warning: optional incident capsule"));
+        write_source_stale_capsule(&host, &mut output, &source, &session, &mut warnings);
+        assert_eq!(warnings.len(), warning_count);
+        host.ingest_observation(complete_observation(source, session, 2, Floor::new(4)).into());
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
     }
 
     #[test]
