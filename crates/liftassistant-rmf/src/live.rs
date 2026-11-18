@@ -172,9 +172,11 @@ impl RmfLiveSubscriber {
 
     pub fn receive_until(
         self,
-        handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+        mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
     ) -> Result<(), RmfTransportError> {
-        match self.receive(None, None, None, handler)? {
+        match self.receive(None, None, None, |payload| {
+            payload.map_or(RmfReceiveControl::Continue, &mut handler)
+        })? {
             RmfReceiveOutcome::HandlerStopped => Ok(()),
             RmfReceiveOutcome::PayloadStale { .. } | RmfReceiveOutcome::ShutdownRequested => {
                 unreachable!("receive_until has no payload-silence policy")
@@ -190,21 +192,23 @@ impl RmfLiveSubscriber {
     pub fn receive_until_stale(
         self,
         policy: RmfFreshnessPolicy,
-        handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+        mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
     ) -> Result<RmfReceiveOutcome, RmfTransportError> {
-        self.receive(Some(policy), None, None, handler)
+        self.receive(Some(policy), None, None, |payload| {
+            payload.map_or(RmfReceiveControl::Continue, &mut handler)
+        })
     }
 
     /// Receives payloads with freshness and cooperative process-shutdown supervision.
     ///
-    /// `shutdown_poll_interval` controls only how quickly the host notices its own shutdown
-    /// flag. It does not affect source freshness and must be nonzero.
+    /// The nonzero poll interval bounds idle supervision ticks. The handler receives
+    /// `None` on a tick and `Some` when a payload arrives.
     pub fn receive_until_stale_or_shutdown(
         self,
         policy: RmfFreshnessPolicy,
         shutdown_poll_interval: Duration,
         mut should_shutdown: impl FnMut() -> bool,
-        handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+        handler: impl FnMut(Option<RmfLivePayload>) -> RmfReceiveControl,
     ) -> Result<RmfReceiveOutcome, RmfTransportError> {
         if shutdown_poll_interval.is_zero() {
             return Err(RmfTransportError::Create(
@@ -224,7 +228,7 @@ impl RmfLiveSubscriber {
         freshness: Option<RmfFreshnessPolicy>,
         shutdown_poll_interval: Option<Duration>,
         mut should_shutdown: Option<&mut dyn FnMut() -> bool>,
-        mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+        mut handler: impl FnMut(Option<RmfLivePayload>) -> RmfReceiveControl,
     ) -> Result<RmfReceiveOutcome, RmfTransportError> {
         let spinner = self
             .node
@@ -269,6 +273,9 @@ impl RmfLiveSubscriber {
                             max_silence: policy.max_payload_silence(),
                         });
                     }
+                    if handler(None) == RmfReceiveControl::Stop {
+                        return Ok(RmfReceiveOutcome::HandlerStopped);
+                    }
                     continue;
                 };
                 let Some(result) = next else {
@@ -279,7 +286,7 @@ impl RmfLiveSubscriber {
                 let (message, _) =
                     result.map_err(|error| RmfTransportError::Receive(error.to_string()))?;
                 last_payload_at = Some(Instant::now());
-                if handler(message.into_payload()) == RmfReceiveControl::Stop {
+                if handler(Some(message.into_payload())) == RmfReceiveControl::Stop {
                     return Ok(RmfReceiveOutcome::HandlerStopped);
                 }
             }

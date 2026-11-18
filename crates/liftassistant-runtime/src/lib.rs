@@ -201,6 +201,17 @@ impl ObservationAssembler {
         self.observations
             .retain(|(candidate, _, _), _| candidate != source);
     }
+
+    /// Removes one car's evidence without changing the source/session watermark.
+    pub fn invalidate_car_evidence(
+        &mut self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+        car: &CarId,
+    ) {
+        self.observations
+            .remove(&(source.clone(), session.clone(), car.clone()));
+    }
 }
 
 fn merge_sample<T>(

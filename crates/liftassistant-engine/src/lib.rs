@@ -121,6 +121,10 @@ pub struct SourceSessionTransition {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceObservationInvalidationError {
+    UnboundCar {
+        source: ObservationSourceId,
+        car: CarId,
+    },
     NoActiveSourceSession {
         source: ObservationSourceId,
         requested: ObservationSessionId,
@@ -321,19 +325,7 @@ impl Engine {
         source: ObservationSourceId,
         session: ObservationSessionId,
     ) -> Result<SourceObservationInvalidation, SourceObservationInvalidationError> {
-        let Some(active) = self.active_source_sessions.get(&source) else {
-            return Err(SourceObservationInvalidationError::NoActiveSourceSession {
-                source,
-                requested: session,
-            });
-        };
-        if active != &session {
-            return Err(SourceObservationInvalidationError::InactiveSourceSession {
-                source,
-                active: active.clone(),
-                requested: session,
-            });
-        }
+        self.check_invalidation_session(&source, &session)?;
 
         self.observations.invalidate_source_evidence(&source);
         let mut invalidated_cars: BTreeSet<_> = self
@@ -363,6 +355,56 @@ impl Engine {
             session,
             invalidated_cars,
         })
+    }
+
+    /// Revokes one bound car's evidence and resolved state in the current incarnation.
+    /// Other bindings and the source-global sequence watermark remain intact.
+    pub fn invalidate_car_observations(
+        &mut self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+        car: &CarId,
+    ) -> Result<ObservationBindingRole, SourceObservationInvalidationError> {
+        self.check_invalidation_session(source, session)?;
+        let role = self.observation_binding_role(source, car).ok_or_else(|| {
+            SourceObservationInvalidationError::UnboundCar {
+                source: source.clone(),
+                car: car.clone(),
+            }
+        })?;
+        self.observations
+            .invalidate_car_evidence(source, session, car);
+        self.source_states.remove(&(source.clone(), car.clone()));
+        if role == ObservationBindingRole::Operational {
+            self.operational_states.remove(car);
+        }
+        self.diagnostics.record_source_invalidation(
+            source.clone(),
+            session.clone(),
+            vec![car.clone()],
+        );
+        Ok(role)
+    }
+
+    fn check_invalidation_session(
+        &self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+    ) -> Result<(), SourceObservationInvalidationError> {
+        let Some(active) = self.active_source_sessions.get(source) else {
+            return Err(SourceObservationInvalidationError::NoActiveSourceSession {
+                source: source.clone(),
+                requested: session.clone(),
+            });
+        };
+        if active != session {
+            return Err(SourceObservationInvalidationError::InactiveSourceSession {
+                source: source.clone(),
+                active: active.clone(),
+                requested: session.clone(),
+            });
+        }
+        Ok(())
     }
 
     pub fn car_states(&self) -> Vec<CarState> {

@@ -5,6 +5,7 @@ mod failure_matrix;
 mod http_api;
 mod incident;
 mod read_api;
+mod rmf_host;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
@@ -17,7 +18,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use liftassistant_engine::{
@@ -159,6 +160,12 @@ enum HostEvent {
         session: ObservationSessionId,
         invalidated_cars: Vec<CarId>,
     },
+    CarObservationsRevoked {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        car: CarId,
+        role: ObservationBindingRole,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -189,6 +196,7 @@ enum HostDiagnosticId {
     TransportFailed,
     SourceSessionActivated,
     SourcePayloadStale,
+    CarObservationsRevoked,
     MappingRejected,
     ObservationIncomplete,
     ObservationUnresolved,
@@ -206,6 +214,7 @@ impl HostDiagnosticId {
             Self::TransportFailed => "transport.receive-failed",
             Self::SourceSessionActivated => "source.session-activated",
             Self::SourcePayloadStale => "source.payload-stale",
+            Self::CarObservationsRevoked => "observation.revoked",
             Self::MappingRejected => "mapping.rejected",
             Self::ObservationIncomplete => "observation.incomplete",
             Self::ObservationUnresolved => "observation.unresolved",
@@ -328,6 +337,21 @@ fn classify_host_event(
             (
                 HostDiagnosticLayer::Source,
                 HostDiagnosticId::SourcePayloadStale,
+            )
+        }
+        HostEvent::CarObservationsRevoked {
+            source,
+            session,
+            car,
+            role,
+        } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            context.car = Some(car.clone());
+            context.role = Some(*role);
+            (
+                HostDiagnosticLayer::Observation,
+                HostDiagnosticId::CarObservationsRevoked,
             )
         }
         HostEvent::MappingRejected {
@@ -882,6 +906,37 @@ impl ReadOnlyHost {
         }
     }
 
+    fn revoke_car_observations(
+        &mut self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+        car: &CarId,
+    ) -> Result<(), SourceObservationInvalidationError> {
+        let role = self
+            .engine
+            .invalidate_car_observations(source, session, car)?;
+        self.incident_recorder
+            .record_car_invalidation(source, session, car);
+        let health = self
+            .source_health
+            .get_mut(source)
+            .expect("bound car has source health");
+        health
+            .observations
+            .insert(car.clone(), ObservationAvailability::Revoked);
+        self.diagnostics.record(HostEvent::CarObservationsRevoked {
+            source: source.clone(),
+            session: session.clone(),
+            car: car.clone(),
+            role,
+        });
+        if role == ObservationBindingRole::Operational {
+            self.transition(HostLifecycle::Synchronizing);
+        }
+        self.bump_read_model_revision();
+        Ok(())
+    }
+
     fn capture_incident(&self, trigger: CapsuleTrigger) -> IncidentCapsule {
         self.incident_recorder.capture(
             self.engine.topology(),
@@ -1412,6 +1467,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
             }
         };
         host.note_transport_subscriber_created(adapter.source());
+        let mut car_freshness = rmf_host::RmfCarFreshness::new(freshness);
         publish_read_model(&api_server, &host);
         emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
         let mut ingestion_error = None;
@@ -1420,43 +1476,21 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
             SHUTDOWN_POLL_INTERVAL,
             || shutdown.load(Ordering::Relaxed),
             |payload| {
-                host.note_transport_discovery(adapter.source());
-                let native_entity = payload.state.lift_name.clone();
-                let mapped = match adapter.map(&payload.state) {
-                    Ok(mapped) => mapped,
-                    Err(error) => {
-                        host.record_mapping_rejection(
-                            adapter.source().clone(),
-                            adapter.session().clone(),
-                            native_entity,
-                            error.to_string(),
-                        );
-                        publish_read_model(&api_server, &host);
-                        emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
-                        ingestion_error = Some(error.to_string());
-                        return RmfReceiveControl::Stop;
-                    }
-                };
-                if mapped.topology != topology {
-                    let error = format!(
-                        "source topology {:?} differs from configured host topology {:?}",
-                        mapped.topology.served_floors(),
-                        topology.served_floors()
-                    );
-                    host.record_mapping_rejection(
-                        adapter.source().clone(),
-                        adapter.session().clone(),
-                        native_entity,
-                        error.clone(),
-                    );
+                let before = host.read_model_revision;
+                let result = car_freshness.supervise(
+                    &mut host,
+                    &mut adapter,
+                    Instant::now(),
+                    payload.as_ref().map(|payload| &payload.state),
+                );
+                if host.read_model_revision != before {
                     publish_read_model(&api_server, &host);
                     emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
+                }
+                if let Err(error) = result {
                     ingestion_error = Some(error);
                     return RmfReceiveControl::Stop;
                 }
-                host.ingest_observation(mapped.update);
-                publish_read_model(&api_server, &host);
-                emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 if host.lifecycle() != &reported_lifecycle {
                     reported_lifecycle = host.lifecycle().clone();
                     println!(
@@ -2325,12 +2359,10 @@ fn receive_live_rmf_round(
                     return RmfReceiveControl::Stop;
                 }
             };
-            if mapped.topology != expected_topology {
-                mapping_error = Some(format!(
-                    "live RMF topology {:?} differs from configured Engine topology {:?}",
-                    mapped.topology.served_floors(),
-                    expected_topology.served_floors()
-                ));
+            if let Err(error) =
+                rmf_host::validate_available_floors(&expected_topology, &mapped.topology)
+            {
+                mapping_error = Some(error);
                 return RmfReceiveControl::Stop;
             }
             source_times.push(payload.source_time_nanos);
