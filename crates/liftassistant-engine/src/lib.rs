@@ -1,9 +1,14 @@
 #![forbid(unsafe_code)]
 
+mod controlled;
 mod diagnostics;
 
 use std::collections::{BTreeMap, BTreeSet};
 
+pub use controlled::{
+    Admission, AuthorityError, AuthorityGrant, AuthorityGrantId, ControllerId, IntentRecord,
+    IntentRequest, PrincipalId, WriteBlocker,
+};
 pub use diagnostics::{
     DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, DiagnosticSequence, FlightRecorder,
     IncidentSnapshot,
@@ -159,6 +164,7 @@ pub struct Engine {
     source_states: BTreeMap<(ObservationSourceId, CarId), CarState>,
     operational_states: BTreeMap<CarId, CarState>,
     execution_capabilities: BTreeMap<CarId, ExecutionCapabilities>,
+    controlled: controlled::ControlledIntents,
     diagnostics: FlightRecorder,
 }
 
@@ -180,6 +186,7 @@ impl Engine {
             source_states: BTreeMap::new(),
             operational_states: BTreeMap::new(),
             execution_capabilities: BTreeMap::new(),
+            controlled: controlled::ControlledIntents::default(),
             diagnostics: FlightRecorder::new(capacity),
         }
     }
@@ -588,6 +595,9 @@ impl Engine {
     where
         B: IntentSink,
     {
+        if self.is_controlled() {
+            return Vec::new();
+        }
         let pending: Vec<_> = self.calls.pending_calls().collect();
         let mut events = Vec::new();
 

@@ -481,6 +481,30 @@ pub enum Intent {
     ParkAt { car: CarId, floor: Floor },
 }
 
+impl Intent {
+    pub fn car(&self) -> &CarId {
+        match self {
+            Self::ServeFloor { car, .. } | Self::ParkAt { car, .. } => car,
+        }
+    }
+
+    pub const fn floor(&self) -> Floor {
+        match self {
+            Self::ServeFloor { floor, .. } | Self::ParkAt { floor, .. } => *floor,
+        }
+    }
+}
+
+/// Logical operation identity, independent of the hall call and the controller receipt.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct IntentId(u64);
+
+impl IntentId {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

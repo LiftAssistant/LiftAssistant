@@ -12,7 +12,7 @@ M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slic
 
 **M6A — Controlled Intent Semantics (virtual).** M5 remains complete at its read-only milestone boundary. The HUMAN authorization covers M6.0–M6.8 and the M6A audit. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`.
 
-**M6.0–M6.1 implemented. M6.2 is READY.** Completed calls leave the active registry and the latest 128 completions remain inspectable. Dispatch rejects a target outside the car's explicitly configured execution floors.
+**M6.0–M6.3 implemented. M6.4 is READY.** Completed calls leave the active registry and the latest 128 completions remain inspectable. Dispatch rejects a target outside the car's explicitly configured execution floors. Controlled admission reserves by IntentId, fences revoked grants, and explains write-readiness failures. The lower-controller submission and bounded terminal retention are exercised in the next slice.
 
 ## Validated baseline
 
