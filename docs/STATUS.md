@@ -1,14 +1,12 @@
 # Project status
 
-Updated: 2026-11-19
+Updated: 2026-11-20
 
 ## Current milestone
 
-**M6B.3 — KONE Official Sandbox semantic validation is `BLOCKED_ON_HUMAN_SANDBOX_CREDENTIALS`.**
+**M6B.3 — KONE Official Sandbox semantic validation is `BLOCKED_ON_HUMAN_GROUP_SELECTION`.**
 
-The [M6B.3 contract](M6B3_KONE_SANDBOX_VALIDATION.md) now starts with read-only application inventory. HUMAN confirmed the Sandbox application in KONE Portal. Initial authentication requires only `KONE_CLIENT_ID` and `KONE_CLIENT_SECRET` in the approved local environment. Discover buildings through the official inventory API and use official sources to determine the group before requesting any group-scoped permission. Only a verified, locally allowlisted simulated building/group may receive a destination call.
-
-The example pin is verified. The preflight found neither credential in the approved environment and performed no live authentication or inventory. Building availability, group selection, topology, lifecycle, assignment, monitoring, retry, cancellation and resume remain unobserved. The historical preflight was stopped under its original contract and remains unchanged.
+The [M6B.3 read-only inventory run](M6B3_KONE_SANDBOX_VALIDATION.md#executed-read-only-inventory) authenticated with `application/inventory` and discovered five buildings from the HUMAN-confirmed Sandbox application. Each building listed one group. HUMAN must select one of these five pairs before group-scoped authorization. Detailed topology, actions, submission, lifecycle, assignment, monitoring, retry, cancellation and resume remain unobserved.
 
 M1 Interactive Simulator is closed and human-accepted.
 
