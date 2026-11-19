@@ -92,6 +92,28 @@ research enough to avoid reinvention
 -> only then deepen research if the implementation exposes ambiguity
 ~~~
 
+## M6B.2 isolated CANopen/CiA 417 validation findings
+
+The M6B.2 prior-art pass deliberately separates normative profile material, executable peers, Linux transport behavior, and test-evidence practice.
+
+- **Normative baseline.** CiA states that CANopen Lift CiA 417 version 2.0.0 was published in 2011 and can be downloaded free of charge. The revised 2026 draft proposal series (including 2.4.0 parts and the 2.3.0 pre-defined-PDO part currently listed by CiA) is member-only. M6B.2 therefore freezes 2.0.0 as the default normative baseline and requires exact part/version/checksum provenance before profile-specific implementation. A future legally available edition requires a separate HUMAN decision rather than silent drift.
+  - https://www.can-cia.org/can-knowledge/cia-417-series-profile-for-lift-control-systems
+  - https://www.can-cia.org/news/pr-english?tx_news_pi1%5Baction%5D=detail&tx_news_pi1%5Bcontroller%5D=News&tx_news_pi1%5Bnews%5D=295
+- **Virtual transport.** Linux documents `vcan` as a virtual local CAN interface that transmits and receives CAN frames without CAN controller hardware. CANopenNode/CANopenLinux explicitly supports SocketCAN and documents testing without a real CAN interface through Linux virtual CAN. This supports an isolated protocol experiment, not any conclusion about electrical timing or controller/transceiver behavior.
+  - https://docs.kernel.org/networking/can.html
+  - https://github.com/CANopenNode/CANopenLinux
+- **Independent CiA 417 peer.** Xyntos CANoopEn/CANoopEnDemo provides Apache-2.0 Linux/SocketCAN CiA 417 examples, including a lift hall-call panel and lift call-controller sample. This makes it useful as an independently running executable peer. Its constants, mappings and behavior remain implementation evidence, not the normative definition of CiA 417.
+  - https://github.com/xyntos-ch/CANoopEn
+  - https://github.com/xyntos-ch/CANoopEnDemo
+  - https://xyntos.ch/en/canopen/samples/
+  - https://xyntos.ch/en/canopen/configuration/
+- **Evidence practice.** PX4 bench testing treats simulation and hardware as different evidence layers, requires bounded timeouts and explicit PASS/FAIL outcomes, and retains timestamped raw evidence. Zephyr Twister separates terminal test status from structured recordings and can preserve nested JSON records alongside ordinary logs. M6B.2 borrows only these test-evidence disciplines: bounded waits, provenance, structured verdicts and raw-artifact separation. It does not import either project's runtime architecture.
+  - https://docs.px4.io/main/en/test_and_ci/bench_testing
+  - https://docs.zephyrproject.org/latest/develop/twister/twister_statuses.html
+  - https://docs.zephyrproject.org/latest/develop/twister/harness/console.html
+
+LiftAssistant deliberately does **not** infer that a CAN socket write is application acknowledgement, that a CiA 417 acknowledgement is physical completion, or that a source-native CAN identifier is a LiftAssistant identity/authority token. It also does not add a general CANopen framework merely because the isolated validation needs an external peer.
+
 ## Current elevator-domain references
 
 ### CiA 417 — CANopen application profile for lift control systems
