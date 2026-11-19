@@ -2,6 +2,7 @@
 
 mod controlled;
 mod diagnostics;
+mod external_dispatch;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,6 +14,13 @@ pub use controlled::{
 pub use diagnostics::{
     ControlledIssue, DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, DiagnosticSequence,
     FlightRecorder, IncidentSnapshot,
+};
+pub use external_dispatch::{
+    DispatchOwnership, ExternalAssignmentEvidence, ExternalAssignmentRejection,
+    ExternalAssignmentResult, ExternalDispatchAuthorityError, ExternalDispatchAuthorityGrant,
+    ExternalDispatchAuthorityGrantId, ExternalDispatchConfigurationError, ExternalDispatchDelivery,
+    ExternalDispatchRecord, ExternalDispatchRequest, ExternalDispatchScopeId, ExternalDispatchSink,
+    ExternalDispatchSubmission, ExternalDispatchSubmissionError, NativeAssignmentId,
 };
 pub use liftassistant_runtime::ControllerId;
 
@@ -167,6 +175,7 @@ pub struct Engine {
     operational_states: BTreeMap<CarId, CarState>,
     execution_capabilities: BTreeMap<CarId, ExecutionCapabilities>,
     controlled: controlled::ControlledIntents,
+    external_dispatch: external_dispatch::ExternalDispatches,
     diagnostics: FlightRecorder,
 }
 
@@ -189,6 +198,7 @@ impl Engine {
             operational_states: BTreeMap::new(),
             execution_capabilities: BTreeMap::new(),
             controlled: controlled::ControlledIntents::default(),
+            external_dispatch: external_dispatch::ExternalDispatches::default(),
             diagnostics: FlightRecorder::new(capacity),
         }
     }
@@ -590,6 +600,9 @@ impl Engine {
             match &runtime_event {
                 RuntimeEvent::IntentAccepted(Intent::ServeFloor { car, floor }) => {
                     if let Some(id) = self.calls.assigned_call(car, *floor) {
+                        if self.external_dispatch.owns(id) {
+                            continue;
+                        }
                         assert!(self.calls.mark_serving(id, car));
                         events.push(EngineEvent::CallStateChanged {
                             id,
@@ -631,7 +644,11 @@ impl Engine {
         if self.is_controlled() {
             return Vec::new();
         }
-        let pending: Vec<_> = self.calls.pending_calls().collect();
+        let pending: Vec<_> = self
+            .calls
+            .pending_calls()
+            .filter(|(id, _)| !self.external_dispatch.owns(*id))
+            .collect();
         let mut events = Vec::new();
 
         for (id, call) in pending {

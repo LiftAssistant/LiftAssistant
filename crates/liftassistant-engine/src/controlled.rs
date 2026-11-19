@@ -352,6 +352,7 @@ impl Engine {
         }
         if let Some(id) = request.call {
             let valid = matches!(&request.intent, Intent::ServeFloor { .. })
+                && !self.external_dispatch.owns(id)
                 && self.calls.get(id).is_some_and(|call| {
                     call.state == CallState::Pending && call.call.floor == floor
                 })
