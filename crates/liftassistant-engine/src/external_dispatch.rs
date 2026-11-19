@@ -688,6 +688,22 @@ mod tests {
             ExternalAssignmentResult::Rejected(ExternalAssignmentRejection::InactiveCall(id))
         );
         assert_eq!(engine.calls().get(id).unwrap().state, CallState::Completed);
+
+        // Evict the original terminal record from the bounded Core history. The
+        // external operation record still must not make the retired CallId live.
+        for _ in 0..128 {
+            let CallRegistration::Created(other) = engine.calls.register(call()) else {
+                panic!("completed calls must not deduplicate new service");
+            };
+            assert!(engine.calls.assign(other, CarId::new("A")));
+            assert!(engine.calls.mark_serving(other, &CarId::new("A")));
+            assert!(engine.calls.complete(other, &CarId::new("A")));
+        }
+        assert_eq!(engine.calls().get(id), None);
+        assert_eq!(
+            engine.receive_external_assignment(assignment(id, &scope, "native-deck-B")),
+            ExternalAssignmentResult::Rejected(ExternalAssignmentRejection::InactiveCall(id))
+        );
     }
 
     #[test]
