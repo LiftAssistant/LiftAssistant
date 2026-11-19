@@ -178,7 +178,7 @@ M6A laboratory evidence:
 - write-capable adapter validation profiles;
 - incident capture around rejected/failed/inconsistent intents.
 
-M6B.1 adds isolated semantic validation against the official Open-RMF Hotel simulation. It does not authorize a production gateway or any real device. The next candidate is `M6B.2 — isolated CiA 417/CANopen protocol-layer validation over Linux vcan`, but it remains behind explicit HUMAN review and is not READY merely because M6B.1 completed.
+M6B.1 added isolated semantic validation against the official Open-RMF Hotel simulation and was HUMAN-accepted on 2026-11-19. It does not authorize a production gateway or any real device. HUMAN then selected `M6B.2 — isolated CiA 417/CANopen protocol-layer validation over Linux vcan` and froze its validation contract. M6B.2 is READY only inside that virtual-bus boundary; real CAN, controller cabinets, OEM networks and passenger equipment remain separate HUMAN gates.
 
 Only high-level intents belong here. Raw brake, motor torque, safety-chain bypass, door-lock bypass, or comparable safety primitives remain outside LiftAssistant Core semantics.
 
@@ -228,6 +228,8 @@ Introduce these only when real deployment pressure exists:
 - long-term observability/retention policy.
 
 Do not build an appliance/OS/OTA platform earlier merely because M8 lists one.
+
+Validation evidence bundles introduced during M6B remain private/experimental. After at least two genuinely different external validation families demonstrate a shared stable shape, M8 may split a dedicated Evidence & Reproducibility hardening slice (candidate M8A). Do not freeze that schema or build an artifact platform earlier merely because the candidate exists.
 
 ## M9 — Passenger-production Pilot — gated
 
