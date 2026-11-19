@@ -99,6 +99,8 @@ cargo run -p liftassistant-tui -- --scenario m6a-write-adapter-profile
 
 The profile checks the simulated `ServeFloor` and `ParkAt` boundary for controller binding, per-car execution floors, readiness, grant fencing, IntentId idempotency, correlated receipts, canonical observation reconciliation, cancellation, and restart without resend. It includes the deterministic fault matrix and bounded diagnostic replay. Its evidence applies to VirtualController and SimRuntime inside this process. The headless API and its clients continue to expose read-only observations.
 
+M6B.1 additionally challenges that contract with the independently running official Open-RMF Hotel simulation. The simulation-only `liftassistant-rmf` `hotel_intent_probe` example is intentionally not a normal Host command: it refuses to publish outside its fixed gateway-free test network and is absent from the read-only Host, API and clients. The executable validation cases and their evidence limits are recorded in [`docs/M6B1_OPEN_RMF_VALIDATION.md`](docs/M6B1_OPEN_RMF_VALIDATION.md). A Hotel pass is simulator semantic evidence, not real-elevator, hardware, safety, OEM, CAN/CANopen, production or certification evidence.
+
 Inspect bounded diagnostic capture and deterministic incident replay:
 
 ~~~bash

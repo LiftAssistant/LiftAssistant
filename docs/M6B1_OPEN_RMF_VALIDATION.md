@@ -27,3 +27,23 @@ Complete M6B.1 only after the required matrix and workspace/CI gates pass agains
 ## Evidence limits
 
 The only execution target is the isolated official simulation. Real elevators, hardware, CAN/CANopen/CiA 417, KONE, LCI, OEM compatibility, field safety, production readiness and certification remain unverified. `M6B.2` is a separate HUMAN gate.
+
+## Executed Hotel evidence
+
+The 2026-11-19 validation used the official ROS 2 Kilted Hotel image pinned at `ghcr.io/open-rmf/rmf/rmf_demos@sha256:601a6bb7c04d559fb9ec654d9b7a41650918990e35712036d836f072a6430db5`. The simulator and the Rust probe ran as independent processes in one temporary rootless Podman container attached only to a gateway-free internal subnet. The probe refuses to run when it sees a default route, an unexpected interface set, the wrong fixed test address, or a ROS domain other than 47. The normal Host, HTTP API and clients gained no write path.
+
+The simulation-only `hotel_intent_probe` executable supplies five bounded cases:
+
+| Case | Result and external evidence |
+| --- | --- |
+| Happy / duplicate | `Lift1 -> A` moved from L1 to L2. A holder-bearing state established acceptance while Engine reconciliation remained Pending. One logical submission, ten Engine retries and one identical transport republish produced one trip and completion only after a stopped L2 observation. |
+| Same-target stale state | `IntentId(1)` reached L2. The adapter ended that RMF holder, began a new LiftAssistant source session, replayed the old-session completion and proved it remained fenced. Only a different `IntentId(2)`, new adapter-local holder and new closed-to-open Hotel door cycle completed the second L2 operation. |
+| Restart / disconnect | The source session restarted after dispatch and revoked operational observations. The probe withheld the data plane for 20 seconds while Hotel independently moved L1 to L3. Reconnection observed final L3 in the new session and reconciled the original Intent without a second command. |
+| Wrong state | LiftAssistant desired L2 while the fault harness requested L3. The observed stopped L3 state produced `Diverged { observed: 3F }`, never Satisfied. |
+| Native rejection | Hotel logged `Received request for unavailable floor [not-a-hotel-floor]`. Its interface supplied no typed rejection receipt. LiftAssistant retained Pending reconciliation and converted Awaiting delivery to Indeterminate at the bounded adapter deadline; publication was never treated as completion. |
+
+`Lift2 -> B` was observed concurrently through the same source-global stream. Applying its native name to an adapter configured only for `Lift1 -> A` produced `UnconfiguredLift`; no name-based car was created. RMF lift names, holder strings, lift clocks and source sessions remained adapter context. The LiftAssistant Principal, grant and Intent identities stayed independently allocated in Engine.
+
+The official Hotel path reported normal AGV interaction mode and did not supply credible emergency semantics for this run. Emergency or real safety behavior is therefore not verified. The software-only regression proves that an OutOfService Operational state blocks controlled admission before backend submission, and existing mapper regressions preserve Fire, Offline, Unknown and Emergency distinctions.
+
+Transport discovery was observably imperfect: some first RustDDS reader or writer generations saw no payload or peer even while a ROS CLI subsequently proved the topic active. The probe records this negative evidence and recreates a bounded transport generation without changing `ObservationSessionId`, authority, Principal, grant or Intent. Discovery was never promoted to acceptance or completion evidence. No raw simulator logs are committed.

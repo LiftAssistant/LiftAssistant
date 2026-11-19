@@ -134,6 +134,14 @@ The first Host-to-external-client boundary is an explicitly enabled, headless-ow
 
 `client/` (`liftassistant_client`) establishes the first independent graphical client over `experimental/v0` HTTP + SSE across Android, Linux, and Web using Flutter. It remains completely outside the Rust workspace, synchronizes strictly from complete snapshots (accepting Host-local revision sequence resets across Host restarts and marking retained state non-live while reconnecting), preserves floor-reference versus continuous location, reported-destination evidence boundaries, `Operational` versus `Auxiliary` authority roles, multi-layer health distinctions, and non-fault diagnostic semantics, and remains strictly read-only. Real persistent SSE integration exposed and fixed premature watch-channel closure and shutdown hang on active SSE connections in `liftassistant-headless`, while confirming that browser deployments require same-origin hosting/reverse proxying unless explicit origin policy is later designed alongside authentication/TLS.
 
+## Validated M6 controlled-intent boundary
+
+M6A adds internal high-level controlled intents without changing the external read-only interfaces. Engine owns deterministic `IntentId`, explicit Principal/grant authority, controller binding, admission/readiness, receipt, withdrawal and observation-based reconciliation. Accepted delivery remains distinct from physical satisfaction. Same-ID retry is idempotent, old identities are fenced, terminal history is bounded, and unresolved work remains conflict-fenced across the reversible virtual checkpoint. Core and Engine gain no clock, transport, filesystem, HTTP or vendor dependency.
+
+M6B.1 exercised those semantics against the independently running official Open-RMF Hotel simulation inside a gateway-free test network. A simulation-only example maps `Lift1 -> A` and `Lift2 -> B`, allocates RMF holders only as adapter-local correlations, and is absent from the production Host/API/client path. External movement and door observations proved acceptance-versus-completion, same-ID duplicate suppression, a second same-floor lifecycle after stale-session replay, source-session restart before and after dispatch, completion during a 20-second observation outage, wrong-floor divergence, and unavailable-floor delivery uncertainty. RMF names, holder sessions and lift time did not become a Principal, grant, Intent, Car identity or LiftAssistant source session. Initial DDS peer discovery sometimes required bounded reader/writer recreation even while the official topic existed, reinforcing that discovery is not payload, receipt or completion evidence.
+
+This remains simulator-only semantic evidence. It does not validate real hardware, passenger safety, CAN/CANopen/CiA 417, OEM protocols, production deployment or certification. M6B.2 remains a separate HUMAN gate.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

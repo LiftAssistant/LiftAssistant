@@ -4,13 +4,25 @@ Updated: 2026-11-19
 
 ## Current milestone
 
-**M6B.1 — Open-RMF Isolated Semantic Validation is in progress.**
+**M6B.1 — Open-RMF Isolated Semantic Validation is COMPLETE and awaits HUMAN review before any M6B.2 work.**
 
 M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5 and M6A remain complete within their read-only and virtual scopes. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. HUMAN selected the official Open-RMF Hotel simulation as the M6B.1 target. The [frozen M6B.1 validation contract](M6B1_OPEN_RMF_VALIDATION.md) governs acceptance for this slice. M6B.2 remains behind HUMAN review.
+M5 and M6A remain complete within their read-only and virtual scopes. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. HUMAN selected the official Open-RMF Hotel simulation as the M6B.1 target. The [frozen M6B.1 validation contract](M6B1_OPEN_RMF_VALIDATION.md) was executed against that external simulation. M6B.2 remains behind HUMAN review and is not READY.
+
+### M6B.1 completion audit
+
+- **External system and isolation.** The official ROS 2 Kilted Hotel image was pinned by digest and ran independently from the Rust probe. Both processes were confined to a temporary rootless Podman container on a gateway-free internal subnet. The probe verifies that isolation before it can publish. No real lift, controller, CAN interface, OEM endpoint or site network was contacted.
+- **Lifecycle and physical evidence.** A Lift1 L1-to-L2 trip separated Engine admission, local publication, holder observation, accepted receipt and a later stopped-at-L2 physical outcome. Ten Engine retries did not resubmit. An identical transport republish produced no second trip. Accepted never implied Satisfied.
+- **Stale state and restart.** A first Intent reached L2, its RMF holder was explicitly released, and the adapter began a new LiftAssistant source session. Replaying the old completion did not restore operational state. A different IntentId for L2 remained pending until a new holder produced a new closed-to-open door cycle. Separate proofs restarted before dispatch and after dispatch, withheld observations for 20 seconds while Hotel reached L3, then reconciled the original operation from new-session evidence without resubmission.
+- **Failure and mapping.** Requesting L2 while fault-injecting an L3 native target produced explicit divergence. Hotel rejected a nonexistent floor in its own log but supplies no typed rejection receipt, so the operation stayed physically Pending and its delivery became Indeterminate at the adapter deadline. Lift1 maps explicitly to A and Lift2 to B; Lift2 is rejected by an adapter configured only for Lift1, with no implicit `CarId` creation.
+- **Identity and authority.** Principal, grant and Intent identities remain Engine-owned. RMF lift names, holder strings, source clocks and message/session context remain adapter-local. Transport recreation and source-session restart do not grant authority, create a Principal, allocate a replacement Intent or imply physical completion. Core and Engine gained no RMF, ROS, network, wall-clock or filesystem dependency. The normal Host/API/CLI/Flutter surfaces remain read-only.
+- **Software safety boundary.** Hotel supplied normal AGV semantics, not credible emergency behavior. A focused Engine regression proves OutOfService Operational state blocks controlled admission before submission; mapper regressions retain exceptional-mode distinctions. This is `SIMULATED SOFTWARE SEMANTICS ONLY`, not safety validation.
+- **Negative evidence.** Some first RustDDS reader or writer generations did not see the peer even while the official topic existed. Bounded transport recreation recovered without changing the source session, authority or operation. This reinforces that discovery is not payload, acceptance or completion evidence. Intermediate harness assertions also exposed the need to release an RMF holder before testing a distinct same-floor lifecycle; those failures were not erased by the final passing run.
+- **Validation.** Local gates passed: formatting; locked all-target workspace Clippy with warnings denied; 144 workspace tests; all nine TUI scenarios; four non-live headless scenarios; and the actual Rust/Cargo 1.85.0 all-target workspace check. Hosted [CI run 44438524440](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44438524440) passed both stable format/Clippy/test and Rust 1.85 jobs on the implementation commit.
+- **Limits.** Real elevator behavior, hardware, field safety, CAN/CANopen/CiA 417, KONE/LCI/OEM compatibility, production readiness, process-crash durability and certification remain NOT VERIFIED. No raw simulator log or temporary container state is part of the repository evidence.
 
 ### M6A completion audit
 
