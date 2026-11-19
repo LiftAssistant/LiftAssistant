@@ -135,7 +135,7 @@ Overall classification is **SEMANTIC_MISMATCH**. The observed OEM operation acce
 
 `HallCall`, `CallState`, `Intent`, `Receipt`, `Reconciliation`, Core dispatch, Principal/Authority semantics and production write surfaces are unchanged. No KONE product crate or fixture was added, no production/real installation was contacted, and no M7 work began. This run cannot establish real motion/door behavior, production reliability, cancellation effects, call idempotency, regulatory safety or conformance.
 
-Closing local regression passed formatting, locked all-target Clippy with warnings denied, all 144 workspace tests with one expected ignored test, the actual Rust/Cargo 1.85.0 locked all-target workspace check, all nine TUI scenarios and all four non-live headless scenarios. Hosted CI is required on the final documentation revision and remains a separate claim until it completes.
+Closing local regression passed formatting, locked all-target Clippy with warnings denied, all 144 workspace tests with one expected ignored test, the actual Rust/Cargo 1.85.0 locked all-target workspace check, all nine TUI scenarios and all four non-live headless scenarios. Secret-free hosted [CI run 44575372614](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44575372614) passed the Stable format/Clippy/test job and the Rust 1.85 workspace job on the evidence commit.
 
 The validation terminal is:
 

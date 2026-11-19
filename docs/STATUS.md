@@ -12,7 +12,7 @@ The evidence establishes a semantic mismatch rather than a failed experiment. KO
 
 Private Evidence v0 remains outside Git and passed credential/token-bearing URL/header scans. An earlier candidate-audit PTY attempt locally echoed the already supplied inputs before formal validation enabled terminal echo suppression; no credential value was committed or retained in Evidence v0. The final run used hidden standard input. No production KONE adapter, Core/public semantic change, write route, real installation, M7 work or production claim was introduced.
 
-Closing local validation passed formatting, locked all-target Clippy, all 144 workspace tests with one expected ignored test, the actual Rust/Cargo 1.85.0 all-target check, nine TUI scenarios and four non-live headless scenarios. Hosted secret-free CI remains pending on the final documentation commit.
+Closing local validation passed formatting, locked all-target Clippy, all 144 workspace tests with one expected ignored test, the actual Rust/Cargo 1.85.0 all-target check, nine TUI scenarios and four non-live headless scenarios. Secret-free hosted [CI run 44575372614](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44575372614) passed its Stable and Rust 1.85 jobs on the evidence commit.
 
 **Terminal:** `M6B.3 VALIDATION COMPLETE — HUMAN SEMANTIC REVIEW REQUIRED. Full Sandbox evidence collected; no Core redesign implemented.` HUMAN must decide whether and how group-owned OEM dispatch can coexist with the current car-specific controlled-intent contract. Do not enter M7 or implement that redesign from this result.
 
