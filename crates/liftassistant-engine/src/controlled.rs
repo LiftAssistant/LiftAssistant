@@ -839,6 +839,46 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_operational_mode_blocks_controlled_admission() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let car = CarId::new("A");
+        let source = ObservationSourceId::new("physical");
+        let mut backend = TestController(ControllerId::new("virtual"));
+        engine
+            .bind_controlled_car(car.clone(), backend.0.clone())
+            .unwrap();
+        let grant = engine
+            .grant_authority(&car, PrincipalId::new("test"))
+            .unwrap();
+        engine
+            .bind_observation(
+                source.clone(),
+                car.clone(),
+                crate::ObservationBindingRole::Operational,
+            )
+            .unwrap();
+        engine
+            .begin_source_session(source, ObservationSessionId::new("test-incarnation"))
+            .unwrap();
+        engine.set_execution_capabilities(car.clone(), ExecutionCapabilities::reference_defaults());
+        let mut state = CarState::new("A", Floor::new(1));
+        state.mode = OperatingMode::OutOfService;
+        observe(&mut engine, &state, 1);
+
+        let request = engine.issue_controlled_intent(
+            Intent::ServeFloor {
+                car,
+                floor: Floor::new(2),
+            },
+            None,
+        );
+        assert_eq!(
+            engine.submit_controlled(request, &grant, &mut backend),
+            Admission::Blocked(WriteBlocker::Mode(OperatingMode::OutOfService))
+        );
+    }
+
+    #[test]
     fn unsupported_expiry_keeps_the_uncertain_operation_and_blocks_supersession() {
         let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
         let car = CarId::new("A");
