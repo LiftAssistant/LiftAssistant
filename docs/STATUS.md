@@ -4,17 +4,19 @@ Updated: 2026-11-19
 
 ## Current milestone
 
-**M6B.2 — Isolated CiA 417 / CANopen protocol-layer validation over Linux `vcan` is COMPLETE and awaits HUMAN completion review.**
+**M6B.2 — Isolated CiA 417 / CANopen protocol-layer validation over Linux `vcan` is COMPLETE and HUMAN-accepted.**
 
 M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5 and M6A remain complete within their read-only and virtual scopes. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. M6B.1 was HUMAN-accepted on 2026-11-19 after the official Open-RMF Hotel simulation completed the frozen A-H semantic validation matrix without changing M6A public semantics or production write surfaces. HUMAN has now selected the next isolated target and frozen the [M6B.2 CiA 417 / CANopen over Linux vcan validation contract](M6B2_CIA417_VCAN_VALIDATION.md).
+M5 and M6A remain complete within their read-only and virtual scopes. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. M6B.1 was HUMAN-accepted on 2026-11-19 after the official Open-RMF Hotel simulation completed the frozen A-H semantic validation matrix without changing M6A public semantics or production write surfaces.
+
+HUMAN accepted the result under the [M6B.2 CiA 417 / CANopen over Linux vcan validation contract](M6B2_CIA417_VCAN_VALIDATION.md), including the unmodified peer's encoding differences and the limits of wire-level correlation.
 
 M6B.2 is limited to a version-pinned, source-backed protocol subset on a positively identified virtual CAN interface with an independent peer process. It does not authorize real CAN hardware, controller cabinets, OEM networks, passenger equipment, production write routes, or M7 work. Evidence v0 is an experimental validation artifact only; it is not a public schema or new infrastructure platform.
 
-The four HUMAN-supplied CiA 417 2.0.0 PAS documents passed SHA-256 verification. The [Hall Call Up matrix](M6B2_CIA417_VCAN_VALIDATION.md#executed-hall-call-up-matrix) passed A–I against the pinned independent panel and Call Controller after two documented fixture encoding adjustments. The unmodified application negative control remains FAIL for D. The [normative audit](M6B2_CIA417_VCAN_VALIDATION.md#pinned-peer-comparison) records that Part 3-1 Table 84 and Part 2 Table 11 give different request receiver mapping references. The tested virtual-input route and its evidence remain scoped to this fixture.
+The four HUMAN-supplied CiA 417 2.0.0 PAS documents passed SHA-256 verification. The [Hall Call Up matrix](M6B2_CIA417_VCAN_VALIDATION.md#executed-hall-call-up-matrix) passed A–I against the pinned independent panel and Call Controller after two documented fixture encoding adjustments. The unmodified CANoopEnDemo negative control remains FAIL for D and has no validation as a CiA 417 2.0.0 reference. The [normative audit](M6B2_CIA417_VCAN_VALIDATION.md#pinned-peer-comparison) records that Part 3-1 Table 84 and Part 2 Table 11 give different request receiver mapping references. The tested Hall Call Up wire exchange carries neither a LiftAssistant operation ID nor an incarnation ID. Old-evidence fencing in this proof relies on harness/runtime provenance.
 
 Closing validation passed formatting, locked all-target Clippy, 144 workspace tests, the exact Rust 1.85.0 workspace check, nine TUI scenarios and four non-live headless scenarios. [Hosted CI](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44487952786) passed Stable and Rust 1.85 on the implementation commit. The fixture introduced no product runtime changes. Real CAN, controllers, physical motion, passenger safety, OEM compatibility, conformance and production operation remain unverified. M7 and real hardware require separate HUMAN authorization.
 
