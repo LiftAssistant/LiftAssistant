@@ -4,9 +4,11 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6B.3 — KONE Official Sandbox semantic validation is `BLOCKED_ON_HUMAN_GROUP_SELECTION`.**
+**M6B.3 — KONE Official Sandbox semantic validation candidate audit is READY.**
 
-The [M6B.3 read-only inventory run](M6B3_KONE_SANDBOX_VALIDATION.md#executed-read-only-inventory) authenticated with `application/inventory` and discovered five buildings from the HUMAN-confirmed Sandbox application. Each building listed one group. HUMAN must select one of these five pairs before group-scoped authorization. Detailed topology, actions, submission, lifecycle, assignment, monitoring, retry, cancellation and resume remain unobserved.
+The [M6B.3 read-only inventory run](M6B3_KONE_SANDBOX_VALIDATION.md#executed-read-only-inventory) authenticated with `application/inventory` and discovered five buildings from the HUMAN-confirmed Sandbox application. Each building listed one group. HUMAN has clarified that ordinary fixture selection inside this approved Sandbox envelope is SELF-ITERATION. Audit all candidates with bounded read-only official requests, score eligible fixtures deterministically, select a normal route, and continue the A–K matrix without requiring manual building/group selection.
+
+The prior `BLOCKED_ON_HUMAN_GROUP_SELECTION` result remains valid historical evidence for its frozen contract. Detailed topology, actions, submission, lifecycle, assignment, monitoring, retry, cancellation and resume remain unobserved until the new audit runs.
 
 M1 Interactive Simulator is closed and human-accepted.
 
