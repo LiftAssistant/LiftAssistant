@@ -145,6 +145,19 @@ M6B.1 exercised those semantics against the independently running official Open-
 
 The Hotel evidence is scoped to the official simulator. The separately accepted M6B.2 proof exercised a CiA 417 2.0.0 Hall Call Up subset over Linux `vcan` with a pinned independent peer. The passing fixture needed two encoding adjustments, and the unmodified CANoopEnDemo failed the corresponding negative control. The exchange carried no LiftAssistant operation or incarnation ID. Fencing old evidence depended on harness/runtime provenance. Both proofs leave real hardware, passenger safety, OEM compatibility, production deployment and certification open.
 
+M6B.3 was HUMAN-accepted as bounded KONE Sandbox validation evidence while
+retaining its `SEMANTIC_MISMATCH`: a group-owned source/destination request was
+accepted without a car selector, native allocation appeared only later, and no
+valid allocation-to-`CarId` mapping was established. M6C therefore preserves
+car-specific `Intent` and per-car authority while adding an internal,
+capability-oriented dispatch-ownership axis. External-owned work begins as an
+existing `HallCall`/`CallId`, stays `Pending` after submission, uses an explicit
+revocable dispatch-scope grant independent of any car, and reaches
+`Assigned(CarId)` only after explicit native-to-logical mapping. Vendor
+credentials and identities confer no LiftAssistant authority. Receipt,
+serving/completion, cancellation, reconciliation, session recovery,
+destination-call semantics and production adapters remain later review work.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

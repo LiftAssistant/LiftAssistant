@@ -17,6 +17,40 @@ CiA's [417 application profile](https://can-cia.org/can-knowledge/cia-417-series
 
 [Kafka's message format](https://kafka.apache.org/21/implementation/message-format/) retains producer sequence information for partition duplicate checking. The analogous local scope is the controlled car. Its execution watermark can fence retired operation IDs without coupling admission across independent cars.
 
+## M6C dispatch-ownership finding
+
+The accepted M6B.3 KONE Sandbox evidence demonstrated a group-owned
+source/destination request with no car selector and later
+`allocated_lift_deck` evidence, but no proven mapping from that value to a
+LiftAssistant `CarId`. In contrast, official Open-RMF
+[`LiftRequest`](https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftRequest.msg)
+names a lift before execution and reports progress separately through
+[`LiftState`](https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg).
+The [KABAM/CHART KONE RMF adapter](https://github.com/KABAM-Robotics/lift_kone_adapter)
+is implementation evidence that a multi-lift KONE group can be translated into
+that named-lift interface; it does not make its adapter-local translation a
+vendor-neutral rule. The separate
+[KONE OPC integration](https://github.com/chart-sg/lift_kone_opccontroller)
+is car-specific evidence, so capability follows the configured backend rather
+than the vendor name.
+
+[Octa LCI](https://github.com/octarobotics/lci-rmf-adapter) retains explicit
+lift/requester context and adapter-local origin/destination translation while
+separating requests from observed results. [QuikSync](https://github.com/quikbot/open-rmf-adapters-quiksync)
+uses explicit session/execution correlation and performs vendor translation
+behind its connector. These reinforce correlation and boundary separation, but
+their transport, retry, locking, platform and lifecycle policies are not Core
+semantics.
+
+Together the evidence supports dispatch ownership as a real independent axis:
+LiftAssistant-owned selection produces the existing car-specific `Intent`,
+whereas an external owner receives a car-free service request and may provide a
+mapped assignment later. LiftAssistant therefore reuses its `Pending ->
+Assigned(CarId)` call lifecycle, requires explicit native-to-logical mapping and
+uses a separate dispatch-scope authority grant. Vendor identity, credentials,
+transport acknowledgement, assignment and physical completion remain distinct.
+This M6C decision is internal and reversible.
+
 ## M5 read-only lifecycle corrections
 
 - [Kubernetes object UIDs](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids) and [systemd invocation IDs](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html) distinguish stable names from individual lifetimes. [Kafka producer fencing](https://kafka.apache.org/35/design/protocol/) rejects superseded producers using current identity/epoch. LiftAssistant takes the fresh opaque incarnation and current-token fence. Its token carries no numeric epoch or event order. Bounded replay artifacts can check uniqueness separately.

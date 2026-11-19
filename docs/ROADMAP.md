@@ -180,7 +180,15 @@ M6A laboratory evidence:
 
 M6B.1 added isolated semantic validation against the official Open-RMF Hotel simulation and was HUMAN-accepted on 2026-11-19. M6B.2 completed and received HUMAN acceptance for isolated CiA 417/CANopen protocol-layer validation over Linux `vcan`. Both results are scoped to their test environments. Real CAN, controller cabinets, OEM networks, passenger equipment and production gateways remain separate HUMAN gates.
 
-M6B.3 completed the [official KONE Sandbox validation contract](M6B3_KONE_SANDBOX_VALIDATION.md) and found a semantic mismatch: KONE accepts a group-owned source/destination operation without a car selector and exposes allocation only after submission, while the current controlled `ServeFloor` intent names a car before admission. The full result is HUMAN_PENDING. Any model, identity, authority, production adapter or M7 change requires separate HUMAN review.
+M6B.3 completed the [official KONE Sandbox validation contract](M6B3_KONE_SANDBOX_VALIDATION.md), found a semantic mismatch and was HUMAN-accepted as bounded evidence. KONE accepts a group-owned source/destination operation without a car selector and exposes allocation only after submission, while the current controlled `ServeFloor` intent names a car before admission. Acceptance preserves that mismatch and does not approve native identity mapping, lifecycle mapping, production integration or M7.
+
+M6C.0 freezes [dispatch ownership](M6C_DISPATCH_OWNERSHIP.md) as an internal,
+independent semantic axis. M6C.1a proves only the deterministic external-owned
+path from an existing hall call through car-free submission, explicit
+dispatch-scope authority and mapped late assignment to `Assigned(CarId)`.
+M6C.1b and later work must separately review serving/completion, receipts,
+cancellation, reconciliation, reconnect/recovery, destination-call semantics
+and live adapter evidence. M7 remains a later HUMAN gate.
 
 Only high-level intents belong here. Raw brake, motor torque, safety-chain bypass, door-lock bypass, or comparable safety primitives remain outside LiftAssistant Core semantics.
 
