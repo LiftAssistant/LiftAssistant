@@ -4,13 +4,13 @@ Updated: 2026-11-19
 
 ## Current milestone
 
-**M6A — Controlled Intent Semantics (virtual) is COMPLETE. Completion mode is HUMAN-CHECK.**
+**M6B.1 — Open-RMF Isolated Semantic Validation is in progress.**
 
 M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5 remains complete at its read-only milestone boundary. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. M6.0–M6.8 are implemented and audited in the virtual lab. M6B awaits a HUMAN decision on an isolated validation target. No next implementation item is READY.
+M5 and M6A remain complete within their read-only and virtual scopes. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. HUMAN selected the official Open-RMF Hotel simulation as the M6B.1 target. The [frozen M6B.1 validation contract](M6B1_OPEN_RMF_VALIDATION.md) governs acceptance for this slice. M6B.2 remains behind HUMAN review.
 
 ### M6A completion audit
 
