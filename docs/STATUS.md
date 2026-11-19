@@ -4,7 +4,7 @@ Updated: 2026-11-19
 
 ## Current milestone
 
-**M6B.2 — Isolated CiA 417 / CANopen protocol-layer validation over Linux `vcan` has passed the local matrix. Hosted CI and completion review are pending.**
+**M6B.2 — Isolated CiA 417 / CANopen protocol-layer validation over Linux `vcan` is COMPLETE and awaits HUMAN completion review.**
 
 M1 Interactive Simulator is closed and human-accepted.
 
@@ -15,6 +15,8 @@ M5 and M6A remain complete within their read-only and virtual scopes. Second-fam
 M6B.2 is limited to a version-pinned, source-backed protocol subset on a positively identified virtual CAN interface with an independent peer process. It does not authorize real CAN hardware, controller cabinets, OEM networks, passenger equipment, production write routes, or M7 work. Evidence v0 is an experimental validation artifact only; it is not a public schema or new infrastructure platform.
 
 The four HUMAN-supplied CiA 417 2.0.0 PAS documents passed SHA-256 verification. The [Hall Call Up matrix](M6B2_CIA417_VCAN_VALIDATION.md#executed-hall-call-up-matrix) passed A–I against the pinned independent panel and Call Controller after two documented fixture encoding adjustments. The unmodified application negative control remains FAIL for D. The [normative audit](M6B2_CIA417_VCAN_VALIDATION.md#pinned-peer-comparison) records that Part 3-1 Table 84 and Part 2 Table 11 give different request receiver mapping references. The tested virtual-input route and its evidence remain scoped to this fixture.
+
+Closing validation passed formatting, locked all-target Clippy, 144 workspace tests, the exact Rust 1.85.0 workspace check, nine TUI scenarios and four non-live headless scenarios. [Hosted CI](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44487952786) passed Stable and Rust 1.85 on the implementation commit. The fixture introduced no product runtime changes. Real CAN, controllers, physical motion, passenger safety, OEM compatibility, conformance and production operation remain unverified. M7 and real hardware require separate HUMAN authorization.
 
 ### M6B.1 completion audit
 

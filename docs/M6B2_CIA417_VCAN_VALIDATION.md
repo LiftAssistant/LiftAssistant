@@ -211,7 +211,7 @@ HUMAN supplied the CiA PAS documents directly from CiA. Each cover identifies ve
 
 | Part and title in the CANopen application profile for lift control systems | SHA-256 | Selected references |
 | --- | --- | --- |
-| 417-1, General definitions | `3fa6fc651d6239da5685c711989d824da6321efccdb0dec84de69f91a13d89d4` | §§4.2.2–4.2.4 |
+| 417-1, General definitions | `3fa6fc651d6239da5685c711989d824da6321efccdb0dec84de69f91a13d89d4` | §§4.2.2–4.2.4, §6.2 Table 1 |
 | 417-2, Virtual device definitions | `512df32879811591a8df7c1bae87af293c691218a38264210db071bf278b8638` | §§5.3.3–5.3.5, Tables 6–11 |
 | 417-3-1, Pre-defined PDOs for lift application 0 | `22d7c1d4c5b6f734fcb3a426796d080b5061d4ef9baab691eb04572a5074088a` | §§4.2.2–4.2.3, 4.3.2–4.3.3, Tables 6, 8, 10, 12, 82, 84, 86, 88 |
 | 417-4, Detailed application data objects | `9990d1906042ed3114ab220c0fba05cef7000432e46946c7149d45b6a6e16d68` | §§4.3.8–4.3.9, 4.4.1, 4.4.6, Figures 6–10, 16, 20–23, Tables 23–24, 29–31, 40, 42, 50–54 |
@@ -225,6 +225,7 @@ This slice pairs the panel and Call Controller at the preflight pins. The peer's
 | Basic function and sub-function | Standard hall call and Up, `02/01` on each direction's defined PDO | MATCH |
 | Lift field | Lift 1 bit, `01` | MATCH |
 | Floor/panel field | Floor panel 1, `01` | MATCH |
+| Node-ID assignment | Part 1 §6.2 Table 1 recommends 21–85 for floor panels in shaft networks. | DIFFERENCE from guidance: the isolated upstream panel uses node 10. Kept that fixture assignment. Part 3-1's PDO formula uses the selected node ID. |
 | Door assignment | Door 1 in the low nibble with zero upper nibble, `01` | DIFFERENCE: `11` uses a populated upper nibble. Adjusted both selected call encoders and comparators. |
 | Request data | Unlocked, set input `01`. Cleared input is `00`. | MATCH for this fixture |
 | Confirmation data | Indication status is bit 0. Affirmation is bit 7. This fixture selects both, `81`. | DIFFERENCE: `01` indicates status only. `IsStatusOn()` checks bit 0. Adjusted the controller's positive output. The harness requires the predicate on the captured frame in addition to the panel log. |
@@ -237,6 +238,8 @@ The upstream two-process run, with only the interface binding changed, showed re
 ### Executed Hall Call Up matrix
 
 The adjusted pair ran in separate Linux processes, plus a separate `candump` process, on the verified `vcan-m6b2` interface in a fresh unprivileged network namespace on Manjaro Linux 6.18.55-1. The panel and controller used separate PTYs. The peer source files, both binaries, `candump`, and the temporary external patch are identified by SHA-256 in the private bundle. The adjusted run verifies the retained upstream negative bundle and records its hashes.
+
+Closing evidence is `2026-11-19-hall-fixture-35706b2e` on implementation commit `90d3c68` (45 causal events, 140 captured frames). The upstream negative control is `2026-11-19-hall-upstream-566e631f`. The external fixture diff SHA-256 is `096fc20c9fbc763e6dd37a648c4d97a610d56299e2414c8f3e930342b04b30c3`. Raw bundles are retained outside Git.
 
 | Case | Adjusted run | Evidence |
 | --- | --- | --- |
