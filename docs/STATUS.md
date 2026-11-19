@@ -4,13 +4,15 @@ Updated: 2026-11-19
 
 ## Current milestone
 
-**M6B.1 — Open-RMF Isolated Semantic Validation is COMPLETE and awaits HUMAN review before any M6B.2 work.**
+**M6B.2 — Isolated CiA 417 / CANopen protocol-layer validation over Linux `vcan` is READY for SELF-ITERATION under the frozen contract.**
 
 M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5 and M6A remain complete within their read-only and virtual scopes. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. HUMAN selected the official Open-RMF Hotel simulation as the M6B.1 target. The [frozen M6B.1 validation contract](M6B1_OPEN_RMF_VALIDATION.md) was executed against that external simulation. M6B.2 remains behind HUMAN review and is not READY.
+M5 and M6A remain complete within their read-only and virtual scopes. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. M6B.1 was HUMAN-accepted on 2026-11-19 after the official Open-RMF Hotel simulation completed the frozen A-H semantic validation matrix without changing M6A public semantics or production write surfaces. HUMAN has now selected the next isolated target and frozen the [M6B.2 CiA 417 / CANopen over Linux vcan validation contract](M6B2_CIA417_VCAN_VALIDATION.md).
+
+M6B.2 is limited to a version-pinned, source-backed protocol subset on a positively identified virtual CAN interface with an independent peer process. It does not authorize real CAN hardware, controller cabinets, OEM networks, passenger equipment, production write routes, or M7 work. Evidence v0 is an experimental validation artifact only; it is not a public schema or new infrastructure platform.
 
 ### M6B.1 completion audit
 
