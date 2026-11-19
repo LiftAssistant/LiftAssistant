@@ -44,6 +44,9 @@ It is not primarily a new elevator brand and not merely a monitoring dashboard.
 15. Complete operational state should not be weakened merely to fit incomplete external sources; external uncertainty should be represented before operational-state resolution.
 16. Production deployment must remain safe when LiftAssistant or one of its user-facing components is unavailable; the lower execution/safety domain remains independently responsible for elevator safety.
 17. The virtual intent lab establishes separate call and operation identities, explicit per-car writer grants, and separate receipt, desired withdrawal, and observation-based reconciliation. Bounded histories and per-car admission fences preserve idempotency through the virtual restart proof. External controller behavior and durable crash recovery require separate evidence.
+18. M6B.1's official Open-RMF Hotel validation was HUMAN-accepted on 2026-11-19. It strengthened external semantic evidence without changing M6A public identity/authority semantics or exposing a production write route.
+19. M6B.2 is approved only as isolated CiA 417/CANopen protocol-layer validation over a positively identified Linux `vcan` interface. The default normative profile baseline is the officially published CiA 417 2.0.0 series; newer/member-only editions require an explicit HUMAN decision. Real CAN hardware and passenger equipment remain outside this approval.
+20. Validation Evidence v0 may record bounded provenance, verdicts, causal events and raw protocol logs during M6B.2, but remains private/experimental and harness-local. It must not become a generic event framework or public schema before multiple external validation families demonstrate a shared need.
 
 ## Product philosophy
 
