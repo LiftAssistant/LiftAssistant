@@ -135,7 +135,7 @@ Open-RMF is robotics/building-infrastructure middleware, not the target architec
 
 The official Hotel lift plugin provides reliable `lift_requests` input and separate reliable `lift_states` output. Its granted requester session remains in reported state, and releasing that holder is a distinct `REQUEST_END_SESSION` request. The plugin rejects an unavailable floor with a simulator warning rather than a typed per-request rejection message. M6B.1 therefore keeps the holder as adapter-local correlation, uses independent observed state for physical reconciliation, performs an explicit session release before a second same-floor lifecycle, and treats a request with neither acceptance nor completion evidence as indeterminate at a host-owned deadline. It does not manufacture a rejection receipt or reinterpret the holder as a LiftAssistant Principal, grant, Intent, or source session.
 
-Official plugin source: https://github.com/open-rmf/rmf_simulation/blob/main/rmf_robot_sim_gz_plugins/src/lift.cpp
+Official plugin source: https://github.com/open-rmf/rmf_simulation/blob/main/rmf_building_sim_gz_plugins/src/lift.cpp
 
 ### Redfish — architectural prior art, not lift-domain semantics
 
