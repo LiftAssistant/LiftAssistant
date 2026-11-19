@@ -180,6 +180,8 @@ M6A laboratory evidence:
 
 M6B.1 added isolated semantic validation against the official Open-RMF Hotel simulation and was HUMAN-accepted on 2026-11-19. M6B.2 completed and received HUMAN acceptance for isolated CiA 417/CANopen protocol-layer validation over Linux `vcan`. Both results are scoped to their test environments. Real CAN, controller cabinets, OEM networks, passenger equipment and production gateways remain separate HUMAN gates.
 
+M6B.3 examines group-owned dispatch against the existing controlled-intent semantics in the [official KONE Sandbox validation contract](M6B3_KONE_SANDBOX_VALIDATION.md). Live validation depends on confirmed Sandbox application and resource provenance. Any architecture change requires separate HUMAN review.
+
 Only high-level intents belong here. Raw brake, motor torque, safety-chain bypass, door-lock bypass, or comparable safety primitives remain outside LiftAssistant Core semantics.
 
 ## M7 — Production Intent Gateway

@@ -4,7 +4,9 @@ Updated: 2026-11-19
 
 ## Current milestone
 
-**M6B.2 — Isolated CiA 417 / CANopen protocol-layer validation over Linux `vcan` is COMPLETE and HUMAN-accepted.**
+**M6B.3 — KONE Official Sandbox semantic validation is `BLOCKED_ON_HUMAN_SANDBOX_SETUP`.**
+
+The [M6B.3 contract](M6B3_KONE_SANDBOX_VALIDATION.md) is frozen and its official example pin verified. Live work becomes READY only for a verified official Sandbox application and one explicitly allowlisted simulated building/group supplied with approved external credentials. The preflight could verify the public source pin only. Live authentication, topology, call, assignment, monitoring, retry, cancellation and resume remain BLOCKED. The official destination-call example gives a group-dispatch hypothesis. The semantic verdict requires actual Sandbox evidence.
 
 M1 Interactive Simulator is closed and human-accepted.
 
@@ -12,7 +14,9 @@ M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slic
 
 M5 and M6A remain complete within their read-only and virtual scopes. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. M6B.1 was HUMAN-accepted on 2026-11-19 after the official Open-RMF Hotel simulation completed the frozen A-H semantic validation matrix without changing M6A public semantics or production write surfaces.
 
-HUMAN accepted the result under the [M6B.2 CiA 417 / CANopen over Linux vcan validation contract](M6B2_CIA417_VCAN_VALIDATION.md), including the unmodified peer's encoding differences and the limits of wire-level correlation.
+### M6B.2 completion audit
+
+M6B.2 is COMPLETE and HUMAN-accepted. HUMAN accepted the result under the [M6B.2 CiA 417 / CANopen over Linux vcan validation contract](M6B2_CIA417_VCAN_VALIDATION.md), including the unmodified peer's encoding differences and the limits of wire-level correlation.
 
 M6B.2 is limited to a version-pinned, source-backed protocol subset on a positively identified virtual CAN interface with an independent peer process. It does not authorize real CAN hardware, controller cabinets, OEM networks, passenger equipment, production write routes, or M7 work. Evidence v0 is an experimental validation artifact only; it is not a public schema or new infrastructure platform.
 
