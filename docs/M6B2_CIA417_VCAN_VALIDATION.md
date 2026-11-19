@@ -168,3 +168,39 @@ Still NOT VERIFIED after M6B.2:
 - CiA conformance/certification.
 
 Stop after M6B.2 for HUMAN completion review. Do not automatically enter M7, real hardware, or a passenger-production environment.
+
+## Executed preflight
+
+The preflight ran on Manjaro Linux 6.18.55-1 in an unprivileged user and network namespace with only loopback and the newly created `vcan-m6b2` link. It verified the link kind before starting the peer or opening a SocketCAN socket. A separate run with a same-name dummy link exited before either action and produced an empty CAN capture.
+
+The independent peer was the CANoopEnDemo Linux CiA 417 call-panel sample at `e26f4ed600b55d2472d240bad85b422c21b84c7d` with the CANoopEn submodule at `b421de2b80c69becb24f17e02512ba5e9188bae7`. The only source edit selected the test interface. The preflight observed peer boot-up, sent a generic CANopen SDO read of Device Type, and observed the peer's response. A separate `candump` process recorded both directions. This exchange supplies transport and peer evidence. The application-level hall-call mapping and acknowledgement remain untested.
+
+| Case | Preflight verdict | Evidence |
+| --- | --- | --- |
+| A | BLOCKED | The [CiA 417 catalog](https://www.can-cia.org/can-knowledge/cia-417-series-profile-for-lift-control-systems) lists Parts 1, 2, 3-1 and 4 at 2.0.0 as PAS with login required. Official PDFs, local checksums and the profile subset are pending. |
+| B | PASS | Kernel link kind `vcan`, plus refusal of a same-name `dummy` in a separate namespace. |
+| C | PASS | The independent pinned panel replied to the generic CANopen query. Boot-up and the request/response appear in `can.log`. |
+| D | BLOCKED | The transport read records send and response separately. CiA 417 application acknowledgement remains untested. |
+| E | BLOCKED | Application-level duplicate and retry behavior requires the sourced slice. |
+| F | BLOCKED | Application lifecycle restart and stale-sample fencing require the sourced slice. |
+| G | BLOCKED | Unsupported application objects and wrong application states require a source-backed mapping. |
+| H | BLOCKED | The preflight has no LiftAssistant identity mapping or authority path. Those boundaries still require review against the implemented application slice. |
+| I | PASS | Evidence v0 retains all seven files and individual verdicts for the preflight. The program returns nonzero while the required application cases are blocked. |
+
+### Repeat the preflight
+
+Use Python 3.11 or later, Git, iproute2, unshare, a C/C++ build toolchain and a Linux kernel that supports `vcan` in an unprivileged network namespace.
+
+1. Check out [CANoopEnDemo](https://github.com/xyntos-ch/CANoopEnDemo/tree/e26f4ed600b55d2472d240bad85b422c21b84c7d) at the stated pin, and initialize its `CANoopEn` submodule. At `Samples/CanOpenClient/CiA417/Linux/Source/Target/Linux/Start/main.cpp`, change only the `CanInterfaceName` initializer from `"can1"` to `"vcan-m6b2"`. Build with `make -C Samples/CanOpenClient/CiA417/Linux/Make BUILD_DIR=build-m6b2` in that checkout.
+2. Check out [can-utils](https://github.com/linux-can/can-utils/tree/834ceef1f1eabec67625389172eebf1050d2f42b) at the pinned commit and run `make candump` in its root.
+3. From the LiftAssistant checkout, set `peer_dir`, `can_utils_dir` and `evidence_dir` to absolute paths outside the checkout. Run:
+
+   ~~~bash
+   timeout 20s unshare --user --map-root-user --net sh -ec '
+     ip link add dev vcan-m6b2 type vcan
+     ip link set dev vcan-m6b2 up
+     exec python3 tools/m6b2_vcan_preflight.py --peer "$1" --candump "$2" --evidence-root "$3"
+   ' sh "$peer_dir" "$can_utils_dir/candump" "$evidence_dir"
+   ~~~
+
+4. Read the printed bundle path and check `verdicts.json`. To exercise refusal, repeat in a fresh namespace with `type dummy` in the first command. Expect B to report the kernel kind mismatch and `can.log` to be empty.

@@ -4,7 +4,7 @@ Updated: 2026-11-19
 
 ## Current milestone
 
-**M6B.2 — Isolated CiA 417 / CANopen protocol-layer validation over Linux `vcan` is READY for SELF-ITERATION under the frozen contract.**
+**M6B.2 — Isolated CiA 417 / CANopen protocol-layer validation over Linux `vcan` is BLOCKED on the official CiA 417 2.0.0 documents.**
 
 M1 Interactive Simulator is closed and human-accepted.
 
@@ -13,6 +13,8 @@ M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slic
 M5 and M6A remain complete within their read-only and virtual scopes. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. M6B.1 was HUMAN-accepted on 2026-11-19 after the official Open-RMF Hotel simulation completed the frozen A-H semantic validation matrix without changing M6A public semantics or production write surfaces. HUMAN has now selected the next isolated target and frozen the [M6B.2 CiA 417 / CANopen over Linux vcan validation contract](M6B2_CIA417_VCAN_VALIDATION.md).
 
 M6B.2 is limited to a version-pinned, source-backed protocol subset on a positively identified virtual CAN interface with an independent peer process. It does not authorize real CAN hardware, controller cabinets, OEM networks, passenger equipment, production write routes, or M7 work. Evidence v0 is an experimental validation artifact only; it is not a public schema or new infrastructure platform.
+
+The [M6B.2 preflight](M6B2_CIA417_VCAN_VALIDATION.md#executed-preflight) verified the virtual link, rejected a same-name dummy link, and captured a generic CANopen Device Type read and response from an independent, version-pinned CANoopEnDemo panel. The run produced an Evidence v0 bundle with terminal A–I verdicts. The CiA catalog lists the frozen 2.0.0 series as publicly available specifications with login required for download. Official PDFs and their hashes are still needed before selecting and testing the application slice. Cases A and D–H remain BLOCKED. Supply authorized copies of Parts 1, 2, 3-1 and 4 for review and checksum verification. The full matrix and the M6B.2 completion gate remain open.
 
 ### M6B.1 completion audit
 
