@@ -4,7 +4,7 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6C.0 semantic freeze is complete; M6C.1a deterministic implementation is READY.**
+**M6C.0 + M6C.1a are IMPLEMENTED and awaiting HUMAN architecture/quality review.**
 
 The [M6B.3 live Sandbox run](M6B3_KONE_SANDBOX_VALIDATION.md#executed-live-sandbox-validation) completed the frozen A–K matrix with two bounded normal destination calls. All five official-inventory candidates passed read-only topology/actions audit. The deterministic ranking selected the only nine-lift group; its chosen normal route had three common eligible lifts. Exact group scope was sufficient.
 
@@ -29,6 +29,32 @@ may assign a logical car only through explicit native identity mapping. M6C.1a
 is limited to a deterministic in-memory proof through `Assigned(CarId)`; serving,
 completion, receipt, cancellation, reconciliation, live KONE and M7 remain out
 of scope.
+
+M6C.1a adds a separate Engine-owned external-dispatch scope, sink and delivery
+record without modifying `Intent` or `ControlledIntentSink`. A scope binds one
+configured controller, explicit native-assignment-to-`CarId` mappings and one
+current Principal-held grant. Revocation and replacement fence old grants. An
+external call remains `Pending` after submission; only valid assignment evidence
+from the configured controller advances it to `Assigned(CarId)`. Unknown mapping,
+wrong controller/scope, duplicate, conflicting and terminal/retired assignment
+cases are typed and non-destructive. External pending calls are excluded from
+LiftAssistant retry dispatch, and car-specific runtime feedback cannot advance
+them to `Serving` or `Completed`.
+
+The ten focused tests cover all fourteen required contract regressions, including
+unchanged LiftAssistant-owned `ServeFloor` behavior, no external Intent, pending
+submission, mapped assignment, no implicit identity, idempotent duplicate,
+preserved conflict, late terminal evidence, controller/authority fencing,
+per-car/vendor non-authority and no assignment-to-completion promotion. Closing
+local validation passed formatting, locked all-target Clippy, 153 workspace tests
+with one expected ignored test, the exact Rust/Cargo 1.85.0 all-target check, all
+nine TUI scenarios and all four non-live headless scenarios. Core/model/runtime
+dependencies did not change; Engine gained no transport, wall clock, filesystem,
+HTTP or vendor dependency. Secret-free hosted
+[CI run 44600147449](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44600147449)
+passed both Stable format/Clippy/test and Rust 1.85 jobs on the final code commit.
+
+**Terminal:** `M6C.0 + M6C.1a COMPLETE — awaiting HUMAN architecture/quality review. No live KONE validation, destination-call Core expansion, production adapter, or M7 work started.`
 
 M1 Interactive Simulator is closed and human-accepted.
 

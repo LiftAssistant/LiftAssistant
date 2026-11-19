@@ -10,6 +10,30 @@ Controller receipt is correlated by configured controller and operation identity
 
 M6B.1 validates that boundary against the independently running official Open-RMF Hotel simulation. A simulation-only executable under `liftassistant-rmf/examples` supplies the narrow `/lift_requests` writer because it shares the concrete RMF message transport with the existing mapper; it is guarded by a fixed gateway-free test-network check and is not linked into the production Host, HTTP API, CLI or clients. Engine still allocates the Principal, grant and Intent. The example translates an Intent into an adapter-local RMF holder, treats holder observation as receipt evidence only, and completes through canonical Operational observations. Subscriber or writer recreation does not allocate another security identity, grant or Intent and does not resend an unresolved operation. The normal RMF adapter and long-running Host remain subscription-only.
 
+## M6C external dispatch ownership boundary
+
+Dispatch ownership is independent from `Intent`. LiftAssistant-owned calls keep
+the existing path from `HallCall` through deterministic logical-car selection to
+the car-specific `ServeFloor` intent. An external-controller-owned call instead
+uses a separate internal sink carrying only its `CallId`, `HallCall` and
+configured dispatch scope. Submission records boundary-local delivery state but
+leaves the call `Pending`; it creates no placeholder car or `Intent`.
+
+Each external dispatch scope binds one configured `ControllerId`, explicit
+opaque-native-assignment-to-`CarId` mappings, and at most one current
+Principal-held dispatch grant. This grant is separate from existing per-car
+authority, is revocable/fenceable, and is required before submission. Controller
+or vendor authentication does not create it. Assignment evidence from the
+configured controller advances only `Pending -> Assigned(CarId)` after explicit
+mapping. Unknown mappings, wrong controller/scope, conflicting reassignment and
+terminal/retired calls return typed non-mutating results; identical assignment is
+idempotent.
+
+This boundary is internal and reversible. It adds no vendor type to Core,
+changes no `Intent`, `Receipt`, `WithdrawalOutcome` or `Reconciliation`, and
+defines no external serving/completion, cancellation, reconnect, destination
+call, production adapter or public write API semantics.
+
 ## Current composition
 
 ~~~text
