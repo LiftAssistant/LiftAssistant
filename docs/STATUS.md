@@ -4,11 +4,17 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6B.3 — KONE Official Sandbox semantic validation candidate audit is READY.**
+**M6B.3 — KONE Official Sandbox semantic validation is HUMAN_PENDING.**
 
-The [M6B.3 read-only inventory run](M6B3_KONE_SANDBOX_VALIDATION.md#executed-read-only-inventory) authenticated with `application/inventory` and discovered five buildings from the HUMAN-confirmed Sandbox application. Each building listed one group. HUMAN has clarified that ordinary fixture selection inside this approved Sandbox envelope is SELF-ITERATION. Audit all candidates with bounded read-only official requests, score eligible fixtures deterministically, select a normal route, and continue the A–K matrix without requiring manual building/group selection.
+The [M6B.3 live Sandbox run](M6B3_KONE_SANDBOX_VALIDATION.md#executed-live-sandbox-validation) completed the frozen A–K matrix with two bounded normal destination calls. All five official-inventory candidates passed read-only topology/actions audit. The deterministic ranking selected the only nine-lift group; its chosen normal route had three common eligible lifts. Exact group scope was sufficient.
 
-The prior `BLOCKED_ON_HUMAN_GROUP_SELECTION` result remains valid historical evidence for its frozen contract. Detailed topology, actions, submission, lifecycle, assignment, monitoring, retry, cancellation and resume remain unobserved until the new audit runs.
+The evidence establishes a semantic mismatch rather than a failed experiment. KONE accepted `group + source + destination` without a car selector and later exposed `allocated_lift_deck`; the observed Sandbox stream contained no field named `liftId`. LiftAssistant `Intent::ServeFloor` names a car before admission. Call A separated construction, socket send, successful action response, `being_served`, simulated position/door evidence and `served`. Official session resume returned `ok`/201, but the requested 30-second latest-state window produced no replay in the bounded observation; re-subscribing then produced `served`. Call B's immediate delete received an adjacent 201 acknowledgement, while no correlated typed cancellation or terminal event arrived in the bounded window. No call resubmission or idempotency claim was made.
+
+Private Evidence v0 remains outside Git and passed credential/token-bearing URL/header scans. An earlier candidate-audit PTY attempt locally echoed the already supplied inputs before formal validation enabled terminal echo suppression; no credential value was committed or retained in Evidence v0. The final run used hidden standard input. No production KONE adapter, Core/public semantic change, write route, real installation, M7 work or production claim was introduced.
+
+Closing local validation passed formatting, locked all-target Clippy, all 144 workspace tests with one expected ignored test, the actual Rust/Cargo 1.85.0 all-target check, nine TUI scenarios and four non-live headless scenarios. Hosted secret-free CI remains pending on the final documentation commit.
+
+**Terminal:** `M6B.3 VALIDATION COMPLETE — HUMAN SEMANTIC REVIEW REQUIRED. Full Sandbox evidence collected; no Core redesign implemented.` HUMAN must decide whether and how group-owned OEM dispatch can coexist with the current car-specific controlled-intent contract. Do not enter M7 or implement that redesign from this result.
 
 M1 Interactive Simulator is closed and human-accepted.
 

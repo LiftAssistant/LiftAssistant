@@ -73,3 +73,70 @@ The Authentication v2 request for `application/inventory` and the authenticated 
 Run `2026-11-20-sandbox-live-inventory` retained counts only and correctly stopped at `BLOCKED_ON_HUMAN_GROUP_SELECTION` under the then-frozen contract. That gate was unnecessarily conservative. Inventory had already identified five Sandbox building candidates and one identified group in each. Ordinary candidate audit, fixture scoring and route selection are now SELF-ITERATION work. The historical evidence remains unchanged. At that point no detailed topology or actions had been queried and no elevator call had been constructed or submitted.
 
 Private Evidence v0 run `2026-11-20-sandbox-live-inventory` records the bounded read-only result. A–J remain BLOCKED at their full acceptance boundaries. K passes for this run's artifact completeness. Earlier preflight bundles are retained separately.
+
+## Executed live Sandbox validation
+
+The 2026-11-20 local run used the HUMAN-confirmed official Sandbox application, the pinned official examples and a one-shot external Python harness. The harness was SHA-256 pinned in the private manifest and remained outside LiftAssistant. It used Python 3.13.9, `websockets` 17.1, no network retries, ten-second per-operation transport bounds, a 512-message protocol-log limit, a two-call limit, and exact group-scoped authorization. It contacted only resources returned by the application inventory. Raw evidence remains in a private seven-file Evidence v0 directory outside Git.
+
+All five inventory candidates accepted their exact group scope and returned configuration plus actions. Each exposed direct enabled DestinationCall action `2` and a valid multi-lift route. Stable aliases below identify only this run; no vendor identity became a LiftAssistant identity.
+
+| Candidate | Lifts | Areas | Multi-lift directed routes | Deck/door monitoring score | Result |
+| --- | ---: | ---: | ---: | ---: | --- |
+| candidate-1 | 8 | 126 | 15,750 | 48 | eligible |
+| candidate-2 | 8 | 80 | 6,320 | 24 | eligible |
+| candidate-3 | 8 | 126 | 8,790 | 48 | eligible |
+| candidate-4 | 8 | 80 | 6,320 | 24 | eligible |
+| candidate-5 | 9 | 120 | 5,960 | 54 | selected |
+
+Candidate 5 won at the earlier lift-count ranking criterion before route count was compared. Its lexically first eligible normal route used pseudonyms `area-405101758459` to `area-39e5b4830d4d`, was shared by three lifts and used the group's first stable terminal. Configuration reported nine lifts, eighteen decks, thirty-six doors and 360 per-lift floor entries. Source and destination were derived from explicit floor/side membership; no identifier was guessed.
+
+### Call A, lifecycle and resume
+
+The v2 action request named the exact building/group, origin, destination, terminal and DCS action `2`. It carried no lift/car selector. Evidence records these milestones independently:
+
+1. local request constructed;
+2. WebSocket send completed;
+3. native action response returned `success: true` with vendor request and call-session correlation;
+4. the first subscribed call-state event was `being_served`, containing a one-element `allocated_lift_deck` list;
+5. independent group monitoring showed simulated door and position transitions, including opening/closing and upward movement on one lift topic;
+6. a later call-state event was `served`.
+
+No field named `liftId` appeared in the captured action, call-state or monitoring messages. The experiment does not decode `allocated_lift_deck` into `CarId`; it records that assignment-like vendor evidence first appeared after submission. No `being_allocated` or `served_soon` event was observed. The group monitoring was coherent simulated OEM evidence, but the run did not establish an explicit vendor correlation from the allocated deck value to the monitored lift topic at the destination. `served` therefore remains OEM lifecycle completion and does not prove `Reconciliation::Satisfied`.
+
+After the first lifecycle event, the harness closed the first WebSocket in a controlled way, opened a second connection and sent the official `resume-session` request for the same KONE session with `resendLatestStateUpToSeconds: 30`. KONE returned `type: ok` and status 201. No replay or duplicate arrived during the bounded five-second replay observation. A fresh read-only call-state subscription on the resumed connection later delivered `served`. The evidence proves the session handshake and subsequent use of the resumed connection; it does not claim that latest-state replay occurred, that ordering/freshness was supplied, or that KONE session identity is an `ObservationSessionId`.
+
+### Call B and cancellation uncertainty
+
+The second and final allowed normal call used the reverse valid route. Its action response returned `success: true`. The harness immediately sent the official v2 delete payload with that call's vendor session value. The same connection returned an adjacent status-201 acknowledgement about 0.4 seconds later. The official delete example carries no client `requestId`, and the acknowledgement did not carry the deleted call session or a typed cancellation disposition. No `cancelled`, `canceled`, rejection or other terminal event arrived during the remaining bounded window.
+
+This is terminal evidence for the cancellation case: API-level delete acknowledgement was observed, while semantic cancellation and physical effect remain unconfirmed. The harness did not retry, issue a third call or reinterpret the result as LiftAssistant withdrawal. Call-submission idempotency remains undocumented. Session resume was used for duplicate/retry evidence without resubmitting Call A; no duplicate event was observed.
+
+### Terminal A–K matrix
+
+`PASS` below means the required bounded case was executed and its positive or negative result was retained. It does not turn a semantic mismatch into compatibility.
+
+| Case | Verdict | Evidence-backed conclusion |
+| --- | --- | --- |
+| A — Provenance | PASS | LiftAssistant revision, OS/kernel, harness/runtime versions and hash, official source commit/tree, Sandbox provenance and operation are in the private manifest. |
+| B — Authentication and hygiene | PASS | Formal authentication used hidden standard input. Credentials, tokens, authorization headers and token-bearing URLs are absent from Git and the seven retained files. Synthetic normal/error redaction checks and post-run scans passed. An earlier local candidate-audit PTY echo flaw is retained as negative process evidence; it did not enter Git or Evidence v0. |
+| C — Configuration/actions | PASS | All five candidates were audited read-only; the winner was scored deterministically and revalidated before Call A under exact group scope. |
+| D — Submission/response | PASS | Construction, send completion, successful native response and first call-state are distinct causal events. |
+| E — OEM assignment | PASS | Submission had no lift selector. Assignment-like `allocated_lift_deck` appeared later in `being_served`; no `liftId` field appeared and no `CarId` was inferred. |
+| F — Lifecycle/monitoring | PASS | `being_served`, independent simulated position/door changes and `served` were captured. Explicit allocation-to-monitoring correlation and LiftAssistant physical satisfaction remain unproven. |
+| G — Duplicate/retry | PASS | Official session resume was exercised without call resubmission. No replay duplicate was observed; submission idempotency remains undocumented. |
+| H — Cancellation | PASS | One immediate official delete received an adjacent 201 acknowledgement; no correlated typed cancellation or terminal state arrived. The uncertainty is preserved. |
+| I — Reconnect/resume | PASS | Controlled disconnect and `resume-session` succeeded. No requested latest-state replay was observed before a fresh subscription produced `served`. |
+| J — Identity/authority | PASS | Request, connection, session, building, group, lift/deck/area/door and OAuth identities stayed vendor-local and conveyed no LiftAssistant authority. |
+| K — Evidence v0 | PASS | Seven bounded private files preserve causal events, sanitized protocol traffic, verdicts and negative findings. Known credential and token-bearing URL/header scans passed. |
+
+### Semantic classification and implementation footprint
+
+Overall classification is **SEMANTIC_MISMATCH**. The observed OEM operation accepts a group-owned origin/destination request and decides an allocated deck after submission. Current `Intent::ServeFloor { car, floor }` requires a logical car before controlled admission. A production mapping cannot honestly claim LiftAssistant selected that car, while treating `allocated_lift_deck` as a pre-existing `CarId` would invent identity and ownership.
+
+`HallCall`, `CallState`, `Intent`, `Receipt`, `Reconciliation`, Core dispatch, Principal/Authority semantics and production write surfaces are unchanged. No KONE product crate or fixture was added, no production/real installation was contacted, and no M7 work began. This run cannot establish real motion/door behavior, production reliability, cancellation effects, call idempotency, regulatory safety or conformance.
+
+Closing local regression passed formatting, locked all-target Clippy with warnings denied, all 144 workspace tests with one expected ignored test, the actual Rust/Cargo 1.85.0 locked all-target workspace check, all nine TUI scenarios and all four non-live headless scenarios. Hosted CI is required on the final documentation revision and remains a separate claim until it completes.
+
+The validation terminal is:
+
+> **M6B.3 VALIDATION COMPLETE — HUMAN SEMANTIC REVIEW REQUIRED. Full Sandbox evidence collected; no Core redesign implemented.**
