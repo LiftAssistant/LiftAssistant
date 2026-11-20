@@ -7,7 +7,7 @@ use std::{
 use futures::StreamExt;
 use ros2_client::{
     Context, ContextOptions, Message, MessageTypeName, Name, Node, NodeName, NodeOptions,
-    Subscription, ros2,
+    Publisher, Subscription, builtin_interfaces::Time, ros2,
 };
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,26 @@ struct RmfLiftStateMessage {
 }
 
 impl Message for RmfLiftStateMessage {}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct RmfLiftRequestMessage {
+    lift_name: String,
+    request_time: Time,
+    session_id: String,
+    request_type: u8,
+    destination_floor: String,
+    door_state: u8,
+}
+
+impl Message for RmfLiftRequestMessage {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RmfLiftCommand {
+    pub lift_name: String,
+    pub request_time_nanos: i64,
+    pub session_id: String,
+    pub destination_floor: String,
+}
 
 impl RmfLiftStateMessage {
     fn into_payload(self) -> RmfLivePayload {
@@ -113,6 +133,7 @@ pub enum RmfReceiveOutcome {
 pub enum RmfTransportError {
     Create(String),
     Receive(String),
+    Publish(String),
 }
 
 impl fmt::Display for RmfTransportError {
@@ -120,11 +141,80 @@ impl fmt::Display for RmfTransportError {
         match self {
             Self::Create(message) => write!(f, "failed to create Open-RMF subscription: {message}"),
             Self::Receive(message) => write!(f, "Open-RMF subscription receive failed: {message}"),
+            Self::Publish(message) => write!(f, "Open-RMF request publish failed: {message}"),
         }
     }
 }
 
 impl Error for RmfTransportError {}
+
+/// Open-RMF `/lift_requests` publisher used only by the private M7 gateway process.
+pub struct RmfLiftRequestPublisher {
+    node: Node,
+    publisher: Publisher<RmfLiftRequestMessage>,
+}
+
+impl RmfLiftRequestPublisher {
+    pub fn connect(domain_id: u16, node_name: &str) -> Result<Self, RmfTransportError> {
+        if domain_id > MAX_DDS_DOMAIN_ID {
+            return Err(RmfTransportError::Create(format!(
+                "ROS 2 DDS domain ID {domain_id} exceeds the maximum {MAX_DDS_DOMAIN_ID}"
+            )));
+        }
+        let context = Context::with_options(ContextOptions::new().domain_id(domain_id))
+            .map_err(|error| RmfTransportError::Create(error.to_string()))?;
+        let mut node = context
+            .new_node(
+                NodeName::new("/liftassistant", node_name)
+                    .map_err(|error| RmfTransportError::Create(error.to_string()))?,
+                NodeOptions::new(),
+            )
+            .map_err(|error| RmfTransportError::Create(error.to_string()))?;
+        let qos = ros2::QosPolicyBuilder::new()
+            .history(ros2::policy::History::KeepLast { depth: 1 })
+            .reliability(ros2::policy::Reliability::Reliable {
+                max_blocking_time: ros2::Duration::from_millis(100),
+            })
+            .durability(ros2::policy::Durability::Volatile)
+            .build();
+        let topic = node
+            .create_topic(
+                &Name::new("/", "lift_requests")
+                    .map_err(|error| RmfTransportError::Create(error.to_string()))?,
+                MessageTypeName::new("rmf_lift_msgs", "LiftRequest"),
+                &qos,
+            )
+            .map_err(|error| RmfTransportError::Create(error.to_string()))?;
+        let publisher = node
+            .create_publisher(&topic, Some(qos))
+            .map_err(|error| RmfTransportError::Create(error.to_string()))?;
+        let spinner = node
+            .spinner()
+            .map_err(|error| RmfTransportError::Create(error.to_string()))?;
+        smol::spawn(async move {
+            let _ = spinner.spin().await;
+        })
+        .detach();
+        Ok(Self { node, publisher })
+    }
+
+    pub fn has_subscriber(&self) -> bool {
+        self.publisher.get_subscription_count(&self.node) > 0
+    }
+
+    pub fn publish(&self, command: RmfLiftCommand) -> Result<(), RmfTransportError> {
+        self.publisher
+            .publish(RmfLiftRequestMessage {
+                lift_name: command.lift_name,
+                request_time: Time::from_nanos(command.request_time_nanos),
+                session_id: command.session_id,
+                request_type: 1, // REQUEST_AGV_MODE
+                destination_floor: command.destination_floor,
+                door_state: 2, // DOOR_OPEN
+            })
+            .map_err(|error| RmfTransportError::Publish(format!("{error:?}")))
+    }
+}
 
 /// Read-only Open-RMF `/lift_states` subscriber.
 ///

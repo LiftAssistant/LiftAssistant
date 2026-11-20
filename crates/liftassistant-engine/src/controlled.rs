@@ -349,6 +349,16 @@ impl Engine {
         }
     }
 
+    /// Restore only the bounded operation-identity watermark owned by a durable host.
+    /// This creates no intent, grant, reservation, receipt, or observation state.
+    pub fn restore_controlled_intent_watermark(&mut self, last: IntentId) {
+        assert!(
+            self.controlled.active.is_empty() && self.controlled.last_issued == 0,
+            "controlled intent watermark must be restored before issuing work"
+        );
+        self.controlled.last_issued = last.value();
+    }
+
     /// Restore one previously admitted operation without submitting it again.
     ///
     /// The caller owns durable storage. Engine requires a fresh grant and fresh current
