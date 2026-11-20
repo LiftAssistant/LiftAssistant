@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeSet,
     env,
     error::Error,
     io,
@@ -166,16 +165,21 @@ fn run() -> Result<(), Box<dyn Error>> {
         config.socket_path.display(),
         gateway.readiness()
     );
-    let mut reported_unconfigured_lifts = BTreeSet::new();
+    let mut reported_unconfigured_lift = false;
     while !shutdown.load(Ordering::Relaxed) {
         match observation_rx.recv_timeout(LOOP_POLL) {
             Ok(ObservationEvent::Payload(payload)) => {
                 if let Err(error) = gateway.ingest(payload) {
                     match &error {
                         GatewayIngestError::Adapter(RmfAdapterError::UnconfiguredLift {
-                            lift_name,
                             ..
-                        }) if !reported_unconfigured_lifts.insert(lift_name.clone()) => {}
+                        }) if reported_unconfigured_lift => {}
+                        GatewayIngestError::Adapter(RmfAdapterError::UnconfiguredLift {
+                            ..
+                        }) => {
+                            reported_unconfigured_lift = true;
+                            eprintln!("RMF observation evidence rejected: {error}");
+                        }
                         _ => eprintln!("RMF observation evidence rejected: {error}"),
                     }
                 }
