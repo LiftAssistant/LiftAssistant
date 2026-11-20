@@ -166,10 +166,11 @@ registry. Bounded terminal history and a consume-and-restore checkpoint keep
 old identities fenced without resending. Vendor lifecycle mapping, durable
 recovery, destination calls and production adapters remain later review work.
 
-M6C.0, M6C.1a and M6C.1b passed HUMAN architecture/quality review. The next
-bounded evidence step is the official KONE Sandbox landing-call validation.
-That authorization does not approve a production KONE adapter, destination-call
-Core semantics, M7, or any change to the accepted dispatch-ownership model.
+M6C.0, M6C.1a and M6C.1b passed HUMAN architecture/quality review. The
+subsequent official KONE Sandbox landing-call validation stayed within its
+bounded evidence contract. Neither that authorization nor its accepted result
+approves a production KONE adapter, destination-call Core semantics, M7, or any
+change to the accepted dispatch-ownership model.
 
 M6C.2 completed its two-call official KONE Sandbox landing-call budget with a
 `PARTIAL_MAPPING` result. Current live actions provided explicit UP/DOWN landing
@@ -181,6 +182,19 @@ LiftAssistant therefore retained Submitted delivery with Indeterminate receipt,
 Pending calls and Requested withdrawal. Independent position/door changes were
 not assigned to a logical car. This validated conservative uncertainty handling
 without changing generic M6C semantics or approving a production KONE mapping.
+
+HUMAN accepted M6C.2 as bounded evidence while preserving `PARTIAL_MAPPING` and
+all missing positive lifecycle mappings. An equivalent M6C.3 rerun is not
+required without a changed official capability or a distinct falsifiable
+hypothesis. This acceptance does not approve a production KONE adapter or M7.
+
+An outbound command boundary records conservative state before entering a sink
+that may already have caused an external side effect. Controlled submission
+reserves `Receipt::Indeterminate`, while controlled and external withdrawal
+reserve Requested. If a sink interrupts, the active operation remains fenced
+against duplicate commands, later correlated evidence can still be applied,
+and no prevention claim is fabricated. This is deterministic in-process
+failure containment, not durable process-crash recovery.
 
 ## License
 

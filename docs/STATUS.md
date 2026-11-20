@@ -4,10 +4,30 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6C.2 KONE landing-call Sandbox validation is COMPLETE and awaiting HUMAN
-architecture/quality review.**
+**M6 completion audit is COMPLETE and recommends M6 COMPLETE. Awaiting HUMAN
+milestone-exit and M7-entry decision.**
 
-M6C.0, M6C.1a and M6C.1b are HUMAN-ACCEPTED. M6C.1b implements the
+M6C.2 is HUMAN-ACCEPTED with its `PARTIAL_MAPPING` result and negative evidence
+unchanged. The [full implementation-backed audit](M6_COMPLETION_AUDIT.md)
+found no remaining M6 blocker after fixing interrupted controlled submission
+and controlled/external withdrawal fencing. M6C.3 is not required: another
+equivalent KONE run would not test a distinct generic hypothesis. Missing
+positive vendor lifecycle mappings remain backend-specific/future evidence.
+
+The audit recommends `RECOMMEND_M6_COMPLETE`; it does not make the HUMAN
+milestone decision. M7 is not READY and no M7 implementation, production write
+route, real-equipment work or passenger operation has started. The planning-only
+M7 proposal remains subject to a separate HUMAN architecture/environment gate.
+
+Closing local validation passed formatting, locked workspace all-target Clippy,
+166 workspace tests with one expected ignored test, the exact Rust/Cargo 1.85.0
+all-target check, all nine TUI scenarios and all four non-live Headless
+scenarios. Core/model/Engine dependency boundaries and bounded histories were
+re-audited. The private M6B.3 and M6C.2 Evidence v0 bundles were retained outside
+Git with verified SHA-256 manifests and 0700/0600 permissions; secret-pattern
+scans passed. No live external validation was re-run in this closure pass.
+
+M6C.0, M6C.1a, M6C.1b and M6C.2 are HUMAN-ACCEPTED. M6C.1b implements the
 [frozen internal lifecycle and recovery contract](M6C_DISPATCH_OWNERSHIP.md#m6c1b-external-dispatch-lifecycle-and-recovery).
 Only proven non-submission permits explicit retry of the same CallId. Correlated
 receipts and serving evidence retain their own meanings. Revoked grants fence
@@ -50,7 +70,7 @@ protocol messages and zero drops; credential/token scans passed. The focused
 recorded regression preserves Submitted + Indeterminate + Pending, no resume
 resend and Requested withdrawal through actual Engine APIs.
 
-**Current terminal target:** `M6C.2 COMPLETE — awaiting HUMAN architecture/quality review. KONE landing-call Sandbox evidence collected; no production adapter or M7 work started.`
+**Current terminal target:** `M6 COMPLETION AUDIT COMPLETE — RECOMMEND_M6_COMPLETE. Awaiting HUMAN milestone-exit and M7-entry decision. No M7 implementation started.`
 
 ### M6B.3, M6C.0 and M6C.1a evidence
 

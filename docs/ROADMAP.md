@@ -190,19 +190,30 @@ M6C.1b adds explicit retry, correlated receipt and service progress,
 observation-based completion, withdrawal, bounded retirement and virtual
 restore. M6C.2 requires separate HUMAN review of the generic lifecycle proof
 and authorization for live adapter evidence. M6C.1b subsequently passed that
-review. M6C.2 is now the authorized bounded official KONE Sandbox landing-call
-validation. The run completed with `PARTIAL_MAPPING`: delivery and uncertainty
-fit M6C, while the bounded stream supplied no positive receipt, allocation,
-Serving, terminal or prevention mapping. M6C.2 now awaits HUMAN review. It does
-not authorize a production KONE adapter, destination-call Core semantics,
-generic semantic redesign, M6C.3 or M7. Vendor mappings and durable recovery
-remain later HUMAN gates.
+review. The bounded official KONE Sandbox landing-call run completed with
+`PARTIAL_MAPPING`: delivery and uncertainty fit M6C, while the bounded stream
+supplied no positive receipt, allocation, Serving, terminal or prevention
+mapping. HUMAN accepted that result without promoting the missing mappings or
+authorizing a production KONE adapter.
+
+The [full M6 completion audit](M6_COMPLETION_AUDIT.md) recommends M6 COMPLETE.
+It found and fixed interrupted command-boundary fencing defects, found no
+remaining M6 blocker, and classifies the missing vendor mappings as
+backend-specific/future evidence. M6C.3 is not required without a distinct
+falsifiable hypothesis. M7 remains unapproved; its planning-only entry proposal
+requires a concrete isolated gateway/backend, reuse of existing grants,
+least-privilege process/network boundaries, durable reconciliation and a HIL or
+bench-controller first environment.
 
 Only high-level intents belong here. Raw brake, motor torque, safety-chain bypass, door-lock bypass, or comparable safety primitives remain outside LiftAssistant Core semantics.
 
 ## M7 — Production Intent Gateway
 
 Goal: allow approved high-level LiftAssistant intents to reach validated lower controllers while retaining clear safety and authority boundaries.
+
+Entry is awaiting a HUMAN milestone-exit and architecture/environment decision.
+No M7 implementation is READY merely because M6 has an engineering completion
+recommendation.
 
 Possible scope after M6 evidence:
 

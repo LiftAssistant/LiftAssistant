@@ -5,6 +5,11 @@ M6C.2 experiment before any live landing call is issued. It is an evidence
 contract, not a product adapter design or permission to alter the accepted
 generic external-dispatch model to fit KONE.
 
+The executed M6C.2 result was subsequently **HUMAN-ACCEPTED** as bounded
+evidence with classification `PARTIAL_MAPPING`. Acceptance did not promote any
+missing receipt, allocation, Serving, terminal, prevention or physical mapping,
+and did not authorize an equivalent rerun, a production KONE adapter or M7.
+
 ## Scope and stop boundary
 
 The only live environment is the official KONE Sandbox exposed to one approved
@@ -266,3 +271,8 @@ No `Intent`, `HallCall`, `CallState`, authority, receipt, delivery, assignment,
 Serving, withdrawal or completion semantic changed. Core and Engine gained no
 KONE, network, wall-clock or filesystem dependency. No production adapter,
 public write path, destination-call Core expansion, M6C.3 or M7 work began.
+
+The [M6 completion audit](M6_COMPLETION_AUDIT.md) preserves this negative
+evidence and concludes that another equivalent M6C.3 run is not required. A
+future KONE run needs a changed official capability or a concrete falsifiable
+hypothesis that can provide one of the missing lifecycle mappings.

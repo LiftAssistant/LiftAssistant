@@ -1,9 +1,10 @@
 # M6C dispatch ownership contract
 
-M6C.0, M6C.1a and M6C.1b passed HUMAN architecture/quality review. M6C.2 is
-authorized to challenge this internal, reversible lifecycle against official
-KONE Sandbox landing-call evidence without changing the generic model merely
-to make one vendor mapping pass.
+M6C.0, M6C.1a, M6C.1b and the bounded M6C.2 evidence passed HUMAN
+architecture/quality review. M6C.2 retains its `PARTIAL_MAPPING` result: it
+challenged this internal, reversible lifecycle against official KONE Sandbox
+landing-call evidence without changing the generic model merely to make one
+vendor mapping pass.
 
 This contract records the smallest conclusion supported by the accepted M6B.3
 KONE Sandbox evidence and the targeted prior-art review. It is not a public
@@ -122,7 +123,9 @@ The following M6B.3 findings remain deferred constraints:
   before serving retires the operation and removes its active call without
   recording physical completion. A prevention claim after serving conflicts
   with observed progress. An already recorded withdrawal outcome suppresses
-  repeat commands in this proof.
+  repeat commands in this proof. Engine reserves Requested before entering the
+  sink, so an interrupted sink cannot expose a false unsent withdrawal or
+  trigger a duplicate; this conservative reservation never claims prevention.
 - Physical completion and proven prevention remove active external records.
   Each terminal outcome retains up to 128 recent tombstones with call identity
   and dispatch scope. After
@@ -145,4 +148,7 @@ M6C still has no KONE or other vendor type, product network transport,
 credential, public write API, production adapter, database, broker, plugin
 framework, physical completion claim or M7 implementation. Positive vendor
 receipt/service/allocation mapping, durable recovery and production behavior
-require later evidence and HUMAN review.
+require later evidence and HUMAN review. The
+[M6 completion audit](M6_COMPLETION_AUDIT.md) classifies those gaps as
+backend-specific, later-gateway or future-evidence work rather than an M6C
+semantic contradiction; an equivalent M6C.3 rerun is not required.
