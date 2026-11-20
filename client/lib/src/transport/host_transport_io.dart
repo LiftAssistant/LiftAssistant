@@ -19,7 +19,7 @@ HostTransport createHostTransport({
   );
 }
 
-final class IoHostTransport implements HostTransport {
+final class IoHostTransport implements HostTransport, DevControlTransport {
   IoHostTransport({
     this.requestTimeout = const Duration(seconds: 8),
     this.streamInactivityTimeout = const Duration(seconds: 40),
@@ -59,9 +59,9 @@ final class IoHostTransport implements HostTransport {
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
       request.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
 
-      final HttpClientResponse response = await request
-          .close()
-          .timeout(requestTimeout);
+      final HttpClientResponse response = await request.close().timeout(
+        requestTimeout,
+      );
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.drain<void>();
@@ -215,50 +215,51 @@ final class IoHostTransport implements HostTransport {
     outputController = StreamController<String>(
       onListen: () {
         resetWatchdog();
-        parsedSubscription = parseSseSnapshotStream(
-          response,
-          onByteActivity: resetWatchdog,
-          maxEventBytes: maxPayloadBytes,
-        ).listen(
-          (String payload) {
-            if (!outputController.isClosed) {
-              outputController.add(payload);
-            }
-          },
-          onError: (Object error, StackTrace stackTrace) {
-            if (closedLocally || outputController.isClosed) {
-              return;
-            }
-            closedLocally = true;
-            watchdog?.cancel();
-            unawaited(parsedSubscription?.cancel());
-            outputController.addError(
-              error is HostTransportException
-                  ? error
-                  : HostStreamDisconnectedException(
-                      'SSE stream interrupted: $error',
+        parsedSubscription =
+            parseSseSnapshotStream(
+              response,
+              onByteActivity: resetWatchdog,
+              maxEventBytes: maxPayloadBytes,
+            ).listen(
+              (String payload) {
+                if (!outputController.isClosed) {
+                  outputController.add(payload);
+                }
+              },
+              onError: (Object error, StackTrace stackTrace) {
+                if (closedLocally || outputController.isClosed) {
+                  return;
+                }
+                closedLocally = true;
+                watchdog?.cancel();
+                unawaited(parsedSubscription?.cancel());
+                outputController.addError(
+                  error is HostTransportException
+                      ? error
+                      : HostStreamDisconnectedException(
+                          'SSE stream interrupted: $error',
+                        ),
+                  stackTrace,
+                );
+                _releaseClient(client, force: true);
+                unawaited(outputController.close());
+              },
+              onDone: () {
+                watchdog?.cancel();
+                _releaseClient(client, force: true);
+                if (!closedLocally && !outputController.isClosed) {
+                  outputController.addError(
+                    const HostStreamDisconnectedException(
+                      'Host closed the SSE stream.',
                     ),
-              stackTrace,
+                  );
+                }
+                if (!outputController.isClosed) {
+                  unawaited(outputController.close());
+                }
+              },
+              cancelOnError: false,
             );
-            _releaseClient(client, force: true);
-            unawaited(outputController.close());
-          },
-          onDone: () {
-            watchdog?.cancel();
-            _releaseClient(client, force: true);
-            if (!closedLocally && !outputController.isClosed) {
-              outputController.addError(
-                const HostStreamDisconnectedException(
-                  'Host closed the SSE stream.',
-                ),
-              );
-            }
-            if (!outputController.isClosed) {
-              unawaited(outputController.close());
-            }
-          },
-          cancelOnError: false,
-        );
       },
       onCancel: closeConnection,
     );
@@ -266,6 +267,146 @@ final class IoHostTransport implements HostTransport {
     return HostSseConnection(
       snapshots: outputController.stream,
       onClose: closeConnection,
+    );
+  }
+
+  Future<ControlHttpResponse> _sendControlRequest(
+    HostEndpoint endpoint, {
+    required String method,
+    required Uri uri,
+    String? jsonBody,
+  }) async {
+    if (_disposed) {
+      throw const HostUnreachableException('Transport has been disposed.');
+    }
+    final int byteLimit = maxPayloadBytes < maxControlResponseBytes
+        ? maxPayloadBytes
+        : maxControlResponseBytes;
+    final HttpClient client = _newClient();
+    try {
+      final HttpClientRequest request = await client
+          .openUrl(method, uri)
+          .timeout(requestTimeout);
+      request.followRedirects = false;
+      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+      request.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
+      if (jsonBody != null) {
+        final List<int> bodyBytes = utf8.encode(jsonBody);
+        request.headers.set(
+          HttpHeaders.contentTypeHeader,
+          'application/json; charset=utf-8',
+        );
+        request.contentLength = bodyBytes.length;
+        request.add(bodyBytes);
+      }
+
+      final HttpClientResponse response = await request.close().timeout(
+        requestTimeout,
+      );
+
+      final int status = response.statusCode;
+      if (status >= 300 && status < 400) {
+        await response.drain<void>();
+        throw HostHttpStatusException(
+          statusCode: status,
+          operation: 'Control $method',
+        );
+      }
+
+      final String contentType =
+          response.headers.value(HttpHeaders.contentTypeHeader) ?? '';
+
+      if (response.contentLength > byteLimit) {
+        await response.drain<void>();
+        throw SnapshotTooLargeException(limitBytes: byteLimit);
+      }
+
+      final BytesBuilder builder = BytesBuilder(copy: false);
+      await (() async {
+        await for (final List<int> chunk in response) {
+          if (builder.length + chunk.length > byteLimit) {
+            throw SnapshotTooLargeException(limitBytes: byteLimit);
+          }
+          builder.add(chunk);
+        }
+      })().timeout(requestTimeout);
+
+      return ControlHttpResponse(
+        statusCode: status,
+        body: utf8.decode(builder.takeBytes()),
+        contentType: contentType,
+      );
+    } on HostTransportException {
+      rethrow;
+    } on TimeoutException {
+      throw HostUnreachableException(
+        'Timed out communicating with control surface at ${endpoint.origin}.',
+      );
+    } on SocketException catch (error) {
+      throw HostUnreachableException(
+        'Cannot reach control surface at ${endpoint.origin}: ${error.message}',
+      );
+    } on HttpException catch (error) {
+      throw HostUnreachableException(
+        'HTTP error communicating with control surface at ${endpoint.origin}: ${error.message}',
+      );
+    } on FormatException catch (error) {
+      throw HostUnreachableException(
+        'Invalid UTF-8 control response from ${endpoint.origin}: ${error.message}',
+      );
+    } finally {
+      _releaseClient(client, force: true);
+    }
+  }
+
+  @override
+  Future<ControlHttpResponse> fetchControlCapabilities(HostEndpoint endpoint) {
+    return _sendControlRequest(
+      endpoint,
+      method: 'GET',
+      uri: endpoint.devControlCapabilitiesUri,
+    );
+  }
+
+  @override
+  Future<ControlHttpResponse> postServeFloorPreview(
+    HostEndpoint endpoint,
+    String jsonBody,
+  ) {
+    return _sendControlRequest(
+      endpoint,
+      method: 'POST',
+      uri: endpoint.devControlServeFloorPreviewUri,
+      jsonBody: jsonBody,
+    );
+  }
+
+  @override
+  Future<ControlHttpResponse> postServeFloorSubmit(
+    HostEndpoint endpoint,
+    String jsonBody,
+  ) {
+    return _sendControlRequest(
+      endpoint,
+      method: 'POST',
+      uri: endpoint.devControlServeFloorSubmitUri,
+      jsonBody: jsonBody,
+    );
+  }
+
+  @override
+  Future<ControlHttpResponse> fetchSubmissionStatus(
+    HostEndpoint endpoint,
+    String submissionKey, {
+    String? expectedInstanceId,
+  }) {
+    return _sendControlRequest(
+      endpoint,
+      method: 'GET',
+      uri: endpoint.devControlSubmissionUri(
+        submissionKey,
+        expectedInstanceId: expectedInstanceId,
+      ),
     );
   }
 

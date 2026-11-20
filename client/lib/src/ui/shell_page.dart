@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../api/control_model.dart';
 import '../api/host_url.dart';
 import '../api/read_model.dart';
 import '../state/client_controller.dart';
@@ -10,6 +13,7 @@ import 'widgets/car_card.dart';
 import 'widgets/diagnostic_panel.dart';
 import 'widgets/host_connection_dialog.dart';
 import 'widgets/semantic_badge.dart';
+import 'widgets/serve_floor_workflow.dart';
 import 'widgets/source_card.dart';
 import 'widgets/system_status_strip.dart';
 
@@ -68,6 +72,39 @@ class _ClientShellPageState extends State<ClientShellPage> {
     );
   }
 
+  void _openServeFloorWorkflow(String carId, {bool startInStatusView = false}) {
+    unawaited(
+      showServeFloorWorkflowModal(
+        context: context,
+        controller: widget.controller,
+        carId: carId,
+        startInStatusView: startInStatusView,
+      ),
+    );
+  }
+
+  CarControlPresentation? _controlPresentationForCar(
+    ClientState state,
+    String carId,
+  ) {
+    final ControlSurfaceCapabilities? surface = state.controlCapabilities;
+    if (surface == null || surface is ControlSurfaceAbsent) {
+      return null;
+    }
+    final CarServeFloorCapability? carCap = switch (surface) {
+      ControlSurfaceAvailable() => surface.capabilityForCar(carId),
+      _ => null,
+    };
+    final TrackedServeFloorOperation? tracked =
+        state.trackedOperation?.car == carId ? state.trackedOperation : null;
+    return CarControlPresentation(
+      surface: surface,
+      carCapability: carCap,
+      trackedForCar: tracked,
+      hostLive: state.isSnapshotLive,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -113,6 +150,32 @@ class _ClientShellPageState extends State<ClientShellPage> {
     final (String phaseLabel, Color phaseColor, Color _, bool phaseHollow) =
         describeConnectionPhase(state.phase, palette);
 
+    final (
+      String modeTagLabel,
+      String modeTagTooltip,
+      Color modeTagColor,
+      Color modeTagBorder,
+    ) = switch (state.controlCapabilities) {
+      ControlSurfaceAvailable() => (
+        'dev-sim control',
+        'Development-only Simulator ServeFloor control surface is active; experimental/v0 read API remains read-only.',
+        palette.info,
+        palette.info.withValues(alpha: 0.45),
+      ),
+      ControlSurfaceSupportUnknown(:final reason) => (
+        'control unknown',
+        'Control surface support could not be determined ($reason).',
+        palette.caution,
+        palette.caution.withValues(alpha: 0.45),
+      ),
+      _ => (
+        'read-only',
+        'Strictly read-only experimental/v0 client; zero elevator write controls.',
+        palette.mutedText,
+        palette.border,
+      ),
+    };
+
     return PreferredSize(
       preferredSize: Size.fromHeight(barHeight),
       child: DecoratedBox(
@@ -148,23 +211,24 @@ class _ClientShellPageState extends State<ClientShellPage> {
                         if (showReadOnlyTag) ...<Widget>[
                           const SizedBox(width: 8),
                           Tooltip(
-                            message: 'Strictly read-only experimental/v0 client; zero elevator write controls.',
+                            message: modeTagTooltip,
                             child: Container(
+                              key: const Key('topbar-mode-tag'),
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 6,
                                 vertical: 1.5,
                               ),
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: palette.border),
+                                border: Border.all(color: modeTagBorder),
                               ),
                               child: Text(
-                                'read-only',
+                                modeTagLabel,
                                 style: instrumentMonoStyle(
                                   context,
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.w500,
-                                  color: palette.mutedText,
+                                  color: modeTagColor,
                                 ),
                               ),
                             ),
@@ -489,6 +553,23 @@ class _ClientShellPageState extends State<ClientShellPage> {
 
       final Widget leftStageScroll = CustomScrollView(
         slivers: <Widget>[
+          if (state.trackedOperation != null)
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              sliver: SliverToBoxAdapter(
+                child: TrackedOperationBanner(
+                  operation: state.trackedOperation!,
+                  isHostLive: state.isSnapshotLive,
+                  onInspectDetails: () => _openServeFloorWorkflow(
+                    state.trackedOperation!.car,
+                    startInStatusView: true,
+                  ),
+                  onQueryStatus: () =>
+                      unawaited(widget.controller.queryTrackedSubmission()),
+                  onDismiss: widget.controller.dismissTrackedOperation,
+                ),
+              ),
+            ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
             sliver: SliverToBoxAdapter(
@@ -505,6 +586,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             sliver: _buildCarsSliver(
               context,
+              state,
               snapshot,
               carsView: carsView,
               textScale: textScale,
@@ -692,10 +774,30 @@ class _ClientShellPageState extends State<ClientShellPage> {
                       ),
                     ...switch (_compactSection) {
                       CompactSection.cars => <Widget>[
+                        if (state.trackedOperation != null)
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                            sliver: SliverToBoxAdapter(
+                              child: TrackedOperationBanner(
+                                operation: state.trackedOperation!,
+                                isHostLive: state.isSnapshotLive,
+                                onInspectDetails: () => _openServeFloorWorkflow(
+                                  state.trackedOperation!.car,
+                                  startInStatusView: true,
+                                ),
+                                onQueryStatus: () => unawaited(
+                                  widget.controller.queryTrackedSubmission(),
+                                ),
+                                onDismiss:
+                                    widget.controller.dismissTrackedOperation,
+                              ),
+                            ),
+                          ),
                         SliverPadding(
                           padding: const EdgeInsets.all(12),
                           sliver: _buildCarsSliver(
                             context,
+                            state,
                             snapshot,
                             carsView: carsView,
                             textScale: textScale,
@@ -803,6 +905,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
   }
 
   Widget _buildCarSlotCard(
+    ClientState state,
     OperationalCarSlot slot, {
     bool stretchToRowHeight = false,
     required double cardWidth,
@@ -815,7 +918,12 @@ class _ClientShellPageState extends State<ClientShellPage> {
         car: car,
         stretchToRowHeight: stretchToRowHeight,
         useTabularFooter: allowTabular && cardWidth >= 250,
+        controlPresentation: _controlPresentationForCar(state, car.id),
+        onOpenServeFloor: () => _openServeFloorWorkflow(car.id),
+        onInspectOperation: () =>
+            _openServeFloorWorkflow(car.id, startInStatusView: true),
       ),
+      // Configured-but-unavailable cars MUST NOT expose ServeFloor control.
       UnavailableCarSlot(:final car) => UnavailableOperationalCarCard(
         key: Key('unavailable-car-card-${car.carId}'),
         car: car,
@@ -827,6 +935,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
 
   Widget _buildCarsSliver(
     BuildContext context,
+    ClientState state,
     ReadModelSnapshot snapshot, {
     required ConfiguredOperationalCarsView carsView,
     required double textScale,
@@ -866,6 +975,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
             itemCount: slots.length,
             itemBuilder: (BuildContext context, int index) {
               final Widget card = _buildCarSlotCard(
+                state,
                 slots[index],
                 cardWidth: width,
                 textScale: textScale,
@@ -896,6 +1006,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
               child: SizedBox(
                 width: singleWidth,
                 child: _buildCarSlotCard(
+                  state,
                   slots.first,
                   cardWidth: singleWidth,
                   textScale: textScale,
@@ -934,6 +1045,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                         Expanded(
                           child: (start + col < slots.length)
                               ? _buildCarSlotCard(
+                                  state,
                                   slots[start + col],
                                   stretchToRowHeight: true,
                                   cardWidth: cardWidth,

@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../api/control_model.dart';
 import '../../api/read_model.dart';
 import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
+import 'serve_floor_workflow.dart';
 
 /// A logical car with an explicit `Operational` observation binding in the
 /// current snapshot that has no currently resolved entry in `operational_cars`.
@@ -192,11 +194,17 @@ class OperationalCarCard extends StatelessWidget {
     required this.car,
     this.stretchToRowHeight = false,
     this.useTabularFooter = true,
+    this.controlPresentation,
+    this.onOpenServeFloor,
+    this.onInspectOperation,
   });
 
   final OperationalCar car;
   final bool stretchToRowHeight;
   final bool useTabularFooter;
+  final CarControlPresentation? controlPresentation;
+  final VoidCallback? onOpenServeFloor;
+  final VoidCallback? onInspectOperation;
 
   Color? _leftStripeColor(InstrumentPalette palette) {
     if (car.operatingMode == CarOperatingMode.fireService ||
@@ -290,15 +298,181 @@ class OperationalCarCard extends StatelessWidget {
                 ),
               ),
 
-              // Bottom tabular telemetry strip (aligned columns across cars; overflow-safe at 2.0x scale)
-              _CarTelemetryFooter(
-                motion: car.motion,
-                door: car.door,
-                reportedDestination: car.reportedDestination,
-                useTabularColumns: useTabularFooter,
-              ),
+              // Bottom tabular telemetry strip (and optional dev-sim control bar)
+              if (controlPresentation == null)
+                _CarTelemetryFooter(
+                  motion: car.motion,
+                  door: car.door,
+                  reportedDestination: car.reportedDestination,
+                  useTabularColumns: useTabularFooter,
+                )
+              else
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    _CarTelemetryFooter(
+                      motion: car.motion,
+                      door: car.door,
+                      reportedDestination: car.reportedDestination,
+                      useTabularColumns: useTabularFooter,
+                    ),
+                    _CarControlBar(
+                      carId: car.id,
+                      presentation: controlPresentation!,
+                      onOpenServeFloor: onOpenServeFloor,
+                      onInspectOperation: onInspectOperation,
+                    ),
+                  ],
+                ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CarControlBar extends StatelessWidget {
+  const _CarControlBar({
+    required this.carId,
+    required this.presentation,
+    this.onOpenServeFloor,
+    this.onInspectOperation,
+  });
+
+  final String carId;
+  final CarControlPresentation presentation;
+  final VoidCallback? onOpenServeFloor;
+  final VoidCallback? onInspectOperation;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final ControlSurfaceCapabilities surface = presentation.surface;
+    final CarServeFloorCapability? cap = presentation.carCapability;
+    final tracked = presentation.trackedForCar;
+
+    Widget leadingControl;
+    if (surface is ControlSurfaceSupportUnknown) {
+      leadingControl = Tooltip(
+        message: surface.reason,
+        child: Text(
+          'ServeFloor: support unknown',
+          key: Key('car-control-status-$carId'),
+          style: instrumentMonoStyle(
+            context,
+            fontSize: 11,
+            color: palette.caution,
+          ),
+        ),
+      );
+    } else if (cap == null || cap.support == OperationSupport.unknown) {
+      final String reasonSuffix = cap?.controlPathReason != null
+          ? ' (${cap!.controlPathReason})'
+          : '';
+      leadingControl = Text(
+        'ServeFloor: support unknown$reasonSuffix',
+        key: Key('car-control-status-$carId'),
+        style: instrumentMonoStyle(
+          context,
+          fontSize: 11,
+          color: palette.caution,
+        ),
+      );
+    } else if (cap.support == OperationSupport.unsupported) {
+      final String reasonSuffix = cap.controlPathReason != null
+          ? ' (${cap.controlPathReason})'
+          : '';
+      leadingControl = Text(
+        'ServeFloor: unsupported$reasonSuffix',
+        key: Key('car-control-status-$carId'),
+        style: instrumentMonoStyle(
+          context,
+          fontSize: 11,
+          color: palette.mutedText,
+        ),
+      );
+    } else if (cap.controlPathAvailability ==
+        ControlPathAvailability.unavailable) {
+      final String reasonSuffix = cap.controlPathReason != null
+          ? ' (${cap.controlPathReason})'
+          : '';
+      leadingControl = Text(
+        'ServeFloor: unavailable$reasonSuffix',
+        key: Key('car-control-status-$carId'),
+        style: instrumentMonoStyle(
+          context,
+          fontSize: 11,
+          color: palette.caution,
+        ),
+      );
+    } else {
+      leadingControl = OutlinedButton.icon(
+        key: Key('car-serve-floor-button-$carId'),
+        onPressed: presentation.hostLive ? onOpenServeFloor : null,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 28),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        icon: const Icon(Icons.elevator_outlined, size: 14),
+        label: const Text('Serve floor'),
+      );
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.surface,
+        border: Border(top: BorderSide(color: palette.border)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          alignment: WrapAlignment.spaceBetween,
+          children: <Widget>[
+            leadingControl,
+            if (tracked != null) ...<Widget>[
+              Builder(
+                builder: (BuildContext context) {
+                  final (
+                    String label,
+                    Color fg,
+                    Color bg,
+                    Color dotColor,
+                    bool hollowDot,
+                  ) = describeProjectedOperationStatus(
+                    tracked,
+                    palette,
+                  );
+                  final String intentSuffix =
+                      tracked.projection?.intentId != null
+                      ? ' #${tracked.projection!.intentId}'
+                      : '';
+                  return InkWell(
+                    key: Key('car-operation-status-pill-$carId'),
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: onInspectOperation,
+                    child: SemanticBadge(
+                      label: '$label$intentSuffix',
+                      foreground: fg,
+                      background: bg,
+                      dotColor: dotColor,
+                      hollowDot: hollowDot,
+                      outlined: true,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ],
         ),
       ),
     );
