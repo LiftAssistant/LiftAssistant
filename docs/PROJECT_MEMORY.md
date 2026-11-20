@@ -166,6 +166,11 @@ registry. Bounded terminal history and a consume-and-restore checkpoint keep
 old identities fenced without resending. Vendor lifecycle mapping, durable
 recovery, destination calls and production adapters remain later review work.
 
+M6C.0, M6C.1a and M6C.1b passed HUMAN architecture/quality review. The next
+bounded evidence step is the official KONE Sandbox landing-call validation.
+That authorization does not approve a production KONE adapter, destination-call
+Core semantics, M7, or any change to the accepted dispatch-ownership model.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

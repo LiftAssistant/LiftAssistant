@@ -1,7 +1,9 @@
 # M6C dispatch ownership contract
 
-M6C.0 and M6C.1a passed HUMAN architecture/quality review. The internal,
-reversible M6C.1b lifecycle and recovery proof is authorized.
+M6C.0, M6C.1a and M6C.1b passed HUMAN architecture/quality review. M6C.2 is
+authorized to challenge this internal, reversible lifecycle against official
+KONE Sandbox landing-call evidence without changing the generic model merely
+to make one vendor mapping pass.
 
 This contract records the smallest conclusion supported by the accepted M6B.3
 KONE Sandbox evidence and the targeted prior-art review. It is not a public

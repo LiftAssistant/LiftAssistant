@@ -4,9 +4,10 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6C.1b is IMPLEMENTED and awaiting HUMAN architecture/quality review.**
+**M6C.2 KONE landing-call Sandbox validation is AUTHORIZED and frozen before
+live work.**
 
-M6C.0 and M6C.1a are HUMAN-ACCEPTED. M6C.1b implements the
+M6C.0, M6C.1a and M6C.1b are HUMAN-ACCEPTED. M6C.1b implements the
 [frozen internal lifecycle and recovery contract](M6C_DISPATCH_OWNERSHIP.md#m6c1b-external-dispatch-lifecycle-and-recovery).
 Only proven non-submission permits explicit retry of the same CallId. Correlated
 receipts and serving evidence retain their own meanings. Revoked grants fence
@@ -23,7 +24,14 @@ preventions, with zero active records and 128 retained tombstones of each kind
 at the end. The implementation uses in-memory fixtures and existing crate
 dependencies.
 
-**Terminal:** `M6C.1b COMPLETE — awaiting HUMAN architecture/quality review. No live KONE validation, production adapter, destination-call Core expansion, or M7 work started.`
+The [M6C.2 validation contract](M6C2_KONE_LANDING_VALIDATION.md) freezes an
+official-Sandbox-only, two-normal-call budget before any live landing call. It
+requires live capability/schema discovery, explicit HallCall mapping, actual
+Engine M6C API application, conservative receipt/assignment/service/withdrawal
+interpretation, private sanitized Evidence v0 and a final A--L matrix. No
+production adapter, destination-call Core expansion or M7 work is authorized.
+
+**Current terminal target:** `M6C.2 COMPLETE — awaiting HUMAN architecture/quality review. KONE landing-call Sandbox evidence collected; no production adapter or M7 work started.`
 
 ### M6B.3, M6C.0 and M6C.1a evidence
 
