@@ -1,6 +1,7 @@
 # M6C dispatch ownership contract
 
-Status: M6C.0 semantic freeze for the internal, reversible M6C.1a proof.
+M6C.0 and M6C.1a passed HUMAN architecture/quality review. The internal,
+reversible M6C.1b lifecycle and recovery proof is authorized.
 
 This contract records the smallest conclusion supported by the accepted M6B.3
 KONE Sandbox evidence and the targeted prior-art review. It is not a public
@@ -65,7 +66,7 @@ LiftAssistant authority.
 
 ## Lifecycle separation
 
-M6C.1a reuses the established call lifecycle only through `Assigned` and keeps
+M6C.1a reused the established call lifecycle through `Assigned` and kept
 external delivery state local to the new boundary. It does not reinterpret the
 existing controlled-intent `Receipt`, `WithdrawalOutcome`, or
 `Reconciliation`.
@@ -84,11 +85,50 @@ The following M6B.3 findings remain deferred constraints:
 - destination-call origin/destination, door/landing side and journey semantics
   are not added to Core.
 
+## M6C.1b external dispatch lifecycle and recovery
+
+- A HallCall duplicate reuses its active identity without sending. An explicit
+  retry may send the same request and CallId only after proven `NotSubmitted`,
+  using the current grant, scope and configured controller. `Submitted` and
+  `Indeterminate` are fenced against resend, including after virtual restore.
+- Correlated controller receipts record Accepted, Rejected or Indeterminate
+  independently of delivery. An identical receipt is idempotent. A definitive
+  disposition may resolve Indeterminate. A late Indeterminate cannot erase a
+  definitive disposition, and conflicting definitive receipts are reported.
+  No receipt changes assignment, service or physical state.
+- Assignment requires the configured native mapping. Only the same native
+  assignment is a duplicate. Separate serving evidence must match that
+  assignment and its call, scope and controller. Only then may `Assigned`
+  advance to `Serving`. Non-submitted operations have no eligible remote
+  evidence. Evidence for an already-sent operation remains eligible after
+  command authority is revoked.
+- Physical completion uses the shared call registry's arrival/open-door
+  semantics. The assigned car needs fresh, resolved Operational position and
+  motion at the exact requested floor, stopped, and fresh open-door evidence.
+  A post-serving observation of travel or of a closed door at the target
+  distinguishes current service from an already open, idle snapshot. Evidence
+  from before serving, before observation invalidation or before virtual
+  restore cannot satisfy completion. Vendor terminal states and legacy
+  uncorrelated car-specific feedback carry no external completion authority.
+- Withdrawal rechecks the current grant, scope and controller. Requested
+  and Unsupported keep the operation active and observable. A proven Prevented
+  before serving retires the operation and removes its active call without
+  recording physical completion. A prevention claim after serving conflicts
+  with observed progress. An already recorded withdrawal outcome suppresses
+  repeat commands in this proof.
+- Physical completion and proven prevention remove active external records.
+  A bounded recent tombstone retains identity and terminal outcome. After
+  eviction, delayed evidence can become Unknown and still cannot recreate a
+  call. The existing CallId allocator never rewinds in virtual recovery.
+- Consume-and-restore checkpoints preserve logical work, delivery uncertainty,
+  receipt, assignment, serving and retirement. Restore fences grants and
+  invalidates physical observation evidence. It performs no controller I/O.
+
 ## Current limits
 
-M6C.1a is a deterministic in-memory Engine proof. It has no KONE or other vendor
+M6C is a deterministic in-memory Engine proof. It has no KONE or other vendor
 type, network transport, credential, public write API, production adapter,
 database, broker, plugin framework, simulator claim, physical completion claim,
-or M7 implementation. Serving, completion, cancellation, receipt mapping,
-reconciliation, reconnect and durable recovery require later evidence and HUMAN
-review.
+or M7 implementation. Vendor receipt, service and withdrawal mapping, native
+allocation correlation, live reconnect and durable recovery require later
+evidence and HUMAN review.

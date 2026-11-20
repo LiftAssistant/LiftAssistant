@@ -4,7 +4,7 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6C.0 + M6C.1a are IMPLEMENTED and awaiting HUMAN architecture/quality review.**
+**M6C.0 + M6C.1a are HUMAN-ACCEPTED. M6C.1b lifecycle and recovery is authorized.**
 
 The [M6B.3 live Sandbox run](M6B3_KONE_SANDBOX_VALIDATION.md#executed-live-sandbox-validation) completed the frozen A–K matrix with two bounded normal destination calls. All five official-inventory candidates passed read-only topology/actions audit. The deterministic ranking selected the only nine-lift group; its chosen normal route had three common eligible lifts. Exact group scope was sufficient.
 
