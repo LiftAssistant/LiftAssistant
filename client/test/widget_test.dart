@@ -1070,6 +1070,13 @@ void main() {
               role: BindingRole.operational,
               availability: ObservationAvailability.awaiting,
             ),
+            // Defensive case: Operational binding marked resolved in sources
+            // while absent from operational_cars.
+            SourceObservation(
+              car: 'lift-E',
+              role: BindingRole.operational,
+              availability: ObservationAvailability.resolved,
+            ),
           ],
         ),
         // Defensive duplicate Operational entry for lift-B plus resolved Auxiliary entries
@@ -1106,10 +1113,10 @@ void main() {
     );
 
     expect(view.resolvedCars, equals(const <OperationalCar>[carA]));
-    expect(view.unavailableCars.length, equals(2));
+    expect(view.unavailableCars.length, equals(3));
     expect(
       view.unavailableCars.map((UnavailableOperationalCar c) => c.carId),
-      equals(<String>['lift-B', 'lift-D']),
+      equals(<String>['lift-B', 'lift-D', 'lift-E']),
     );
     expect(view.unavailableCars[0].source, equals('rmf/site-main'));
     expect(
@@ -1121,12 +1128,17 @@ void main() {
       equals(ObservationAvailability.awaiting),
     );
     expect(
+      view.unavailableCars[2].availability,
+      equals(ObservationAvailability.resolved),
+    );
+    expect(
       view.slots.map((OperationalCarSlot s) => s.carId),
-      equals(<String>['lift-A', 'lift-B', 'lift-D']),
+      equals(<String>['lift-A', 'lift-B', 'lift-D', 'lift-E']),
     );
     expect(view.slots[0], isA<ResolvedCarSlot>());
     expect(view.slots[1], isA<UnavailableCarSlot>());
     expect(view.slots[2], isA<UnavailableCarSlot>());
+    expect(view.slots[3], isA<UnavailableCarSlot>());
   });
 
   testWidgets(
@@ -1183,7 +1195,11 @@ void main() {
       }
       ''';
 
-      String partialAvailabilityJson(int revision, String availability) =>
+      String partialAvailabilityJson(
+        int revision,
+        String availability, {
+        String payload = 'active',
+      }) =>
           '''
       {
         "api_version": "experimental/v0",
@@ -1205,7 +1221,7 @@ void main() {
             "source": "rmf/site-main",
             "session": {"state": "active", "session": "session-alpha"},
             "transport": "discovery_observed",
-            "payload": "active",
+            "payload": "$payload",
             "observations": [
               {"car": "lift-A", "role": "operational", "availability": "resolved"},
               {"car": "lift-B", "role": "operational", "availability": "$availability"}
@@ -1220,7 +1236,7 @@ void main() {
       const String recoveredBothJson = '''
       {
         "api_version": "experimental/v0",
-        "revision": 17,
+        "revision": 18,
         "lifecycle": "ready_read_only",
         "readiness": "read_only",
         "operational_cars": [
@@ -1289,6 +1305,14 @@ void main() {
       // Case A: 2 resolved operational cars, 0 unavailable duplicates.
       expect(find.byType(OperationalCarCard), findsNWidgets(2));
       expect(find.byType(UnavailableOperationalCarCard), findsNothing);
+      expect(
+        find.byKey(const Key('operational-car-card-lift-A')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('operational-car-card-lift-B')),
+        findsOneWidget,
+      );
       expect(find.text('2.25'), findsOneWidget);
       expect(find.text('Inspection'), findsOneWidget);
 
@@ -1300,6 +1324,14 @@ void main() {
 
       expect(find.byType(OperationalCarCard), findsOneWidget);
       expect(find.byType(UnavailableOperationalCarCard), findsOneWidget);
+      expect(
+        find.byKey(const Key('operational-car-card-lift-A')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('operational-car-card-lift-B')),
+        findsNothing,
+      );
       expect(
         find.byKey(const Key('unavailable-car-card-lift-B')),
         findsOneWidget,
@@ -1316,13 +1348,24 @@ void main() {
       // Desktop section header distinguishes total configured vs resolved/unavailable.
       expect(find.text('1 resolved · 1 unavailable'), findsOneWidget);
 
-      // Side-by-side resolved + unavailable cards share exact desktop row height.
+      // Side-by-side resolved + unavailable cards share exact desktop row height
+      // and align their trailing header badges flush-right.
       final Rect resolvedRect = tester.getRect(find.byType(OperationalCarCard));
       final Rect unavailableRect = tester.getRect(
         find.byType(UnavailableOperationalCarCard),
       );
       expect(resolvedRect.top, equals(unavailableRect.top));
       expect(resolvedRect.height, equals(unavailableRect.height));
+      final Rect revokedBadgeRect = tester.getRect(
+        find.descendant(
+          of: find.byType(UnavailableOperationalCarCard),
+          matching: find.widgetWithText(SemanticBadge, 'Revoked'),
+        ),
+      );
+      expect(
+        (unavailableRect.right - 12.0 - revokedBadgeRect.right).abs(),
+        lessThan(2.0),
+      );
 
       // Unavailable lift-B shows honest observation-unavailable state + Operational source context only.
       final Finder unavailableCard = find.byType(UnavailableOperationalCarCard);
@@ -1345,7 +1388,7 @@ void main() {
         find.descendant(
           of: unavailableCard,
           matching: find.text(
-            'Configured Operational binding; prior observation revoked.',
+            'Configured Operational binding; observation revoked.',
           ),
         ),
         findsOneWidget,
@@ -1359,6 +1402,13 @@ void main() {
       );
       expect(
         find.descendant(of: unavailableCard, matching: find.text('revoked')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: unavailableCard,
+          matching: find.text('Source payload'),
+        ),
         findsOneWidget,
       );
       // Auxiliary source must NOT leak into the unavailable car card.
@@ -1400,7 +1450,8 @@ void main() {
         findsNWidgets(2),
       );
 
-      // Case D: never-received / partial / unresolved Operational states are shown honestly.
+      // Case D (+ defensive resolved-but-omitted case): never-received / partial / unresolved
+      // Operational states are shown honestly without claiming disconnect.
       for (final (int rev, String wire, String badge, String detail)
           in <(int, String, String, String)>[
             (
@@ -1421,8 +1472,16 @@ void main() {
               'Unresolved',
               'Configured Operational binding; observation unresolved.',
             ),
+            (
+              17,
+              'resolved',
+              'Unavailable',
+              'Configured Operational binding; no current operational state.',
+            ),
           ]) {
-        transport.sseController.add(partialAvailabilityJson(rev, wire));
+        transport.sseController.add(
+          partialAvailabilityJson(rev, wire, payload: 'awaiting'),
+        );
         await tester.pumpAndSettle();
         expect(find.byType(OperationalCarCard), findsOneWidget);
         expect(find.byType(UnavailableOperationalCarCard), findsOneWidget);
@@ -1437,6 +1496,29 @@ void main() {
         expect(find.textContaining('disconnected'), findsNothing);
       }
 
+      // Compact desktop split (940x720) switches UnavailableOperationalCarCard footer
+      // out of cramped 3-column tabular mode to wrapped key/value items, keeps equal
+      // row height with OperationalCarCard, and renders cleanly in daylight theme too.
+      tester.view.physicalSize = const Size(940, 720);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      final UnavailableOperationalCarCard compactUnavailableWidget = tester
+          .widget<UnavailableOperationalCarCard>(unavailableCard);
+      expect(compactUnavailableWidget.useTabularFooter, isFalse);
+      final Rect compactResolvedRect = tester.getRect(
+        find.byType(OperationalCarCard),
+      );
+      final Rect compactUnavailableRect = tester.getRect(unavailableCard);
+      expect(compactResolvedRect.top, equals(compactUnavailableRect.top));
+      expect(compactResolvedRect.height, equals(compactUnavailableRect.height));
+
+      await tester.tap(find.byKey(const Key('topbar-theme-toggle')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      tester.view.physicalSize = const Size(1366, 900);
+      await tester.pumpAndSettle();
+
       // Case E: lift-B recovers -> replaced cleanly by normal OperationalCarCard with no duplicate.
       transport.sseController.add(recoveredBothJson);
       await tester.pumpAndSettle();
@@ -1444,6 +1526,10 @@ void main() {
 
       expect(find.byType(OperationalCarCard), findsNWidgets(2));
       expect(find.byType(UnavailableOperationalCarCard), findsNothing);
+      expect(
+        find.byKey(const Key('operational-car-card-lift-B')),
+        findsOneWidget,
+      );
       expect(find.text('Floor 5'), findsOneWidget);
       expect(find.text('Open'), findsOneWidget);
       expect(find.textContaining('unavailable'), findsNothing);
@@ -1594,6 +1680,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
 
+      // Case F at 320x568 + 2.0x text scaling also renders without overflow.
+      transport.sseController.add(allUnavailableWithAuxJson);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
       // Restore mobile viewport and verify Sources tab still works cleanly.
       tester.platformDispatcher.clearTextScaleFactorTestValue();
       tester.view.physicalSize = const Size(360, 780);
@@ -1602,15 +1693,12 @@ void main() {
       await tester.tap(find.byKey(const Key('compact-tab-sources')));
       await tester.pumpAndSettle();
       expect(find.text('rmf/site-main-east-tower-primary'), findsOneWidget);
+      expect(find.text('aux-only-car'), findsOneWidget);
       await tester.tap(find.byKey(const Key('compact-tab-cars')));
       await tester.pumpAndSettle();
 
       // Case F: all cars unavailable -> single summary panel without duplicate per-car cards,
       // and Auxiliary-only car is NOT listed in Cars.
-      transport.sseController.add(allUnavailableWithAuxJson);
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-
       expect(
         find.byKey(const Key('empty-operational-cars-card')),
         findsOneWidget,
@@ -1645,6 +1733,10 @@ void main() {
 
       expect(find.byType(OperationalCarCard), findsOneWidget);
       expect(find.byType(UnavailableOperationalCarCard), findsNothing);
+      expect(
+        find.byKey(const Key('operational-car-card-lift-Z')),
+        findsOneWidget,
+      );
       expect(
         find.byKey(const Key('empty-operational-cars-card')),
         findsNothing,

@@ -805,18 +805,22 @@ class _ClientShellPageState extends State<ClientShellPage> {
   Widget _buildCarSlotCard(
     OperationalCarSlot slot, {
     bool stretchToRowHeight = false,
-    required bool useTabularFooter,
+    required double cardWidth,
+    required double textScale,
   }) {
+    final bool allowTabular = textScale <= 1.35;
     return switch (slot) {
       ResolvedCarSlot(:final car) => OperationalCarCard(
+        key: Key('operational-car-card-${car.id}'),
         car: car,
         stretchToRowHeight: stretchToRowHeight,
-        useTabularFooter: useTabularFooter,
+        useTabularFooter: allowTabular && cardWidth >= 250,
       ),
       UnavailableCarSlot(:final car) => UnavailableOperationalCarCard(
+        key: Key('unavailable-car-card-${car.carId}'),
         car: car,
         stretchToRowHeight: stretchToRowHeight,
-        useTabularFooter: useTabularFooter,
+        useTabularFooter: allowTabular && cardWidth >= 310,
       ),
     };
   }
@@ -858,13 +862,13 @@ class _ClientShellPageState extends State<ClientShellPage> {
       builder: (BuildContext context, SliverConstraints sliverConstraints) {
         final double width = sliverConstraints.crossAxisExtent;
         if ((slots.length > 1 && width < 520) || textScale > 1.45) {
-          final bool useTabularFooter = width >= 250 && textScale <= 1.35;
           return SliverList.builder(
             itemCount: slots.length,
             itemBuilder: (BuildContext context, int index) {
               final Widget card = _buildCarSlotCard(
                 slots[index],
-                useTabularFooter: useTabularFooter,
+                cardWidth: width,
+                textScale: textScale,
               );
               if (index == 0) {
                 return card;
@@ -886,7 +890,6 @@ class _ClientShellPageState extends State<ClientShellPage> {
             maxTrackWidth: maxTrackWidth,
             alignWithTwoColumnSibling: sourcesUseTwoCols,
           );
-          final bool useTabularFooter = singleWidth >= 250 && textScale <= 1.35;
           return SliverToBoxAdapter(
             child: Align(
               alignment: Alignment.topLeft,
@@ -894,7 +897,8 @@ class _ClientShellPageState extends State<ClientShellPage> {
                 width: singleWidth,
                 child: _buildCarSlotCard(
                   slots.first,
-                  useTabularFooter: useTabularFooter,
+                  cardWidth: singleWidth,
+                  textScale: textScale,
                 ),
               ),
             ),
@@ -911,7 +915,6 @@ class _ClientShellPageState extends State<ClientShellPage> {
             : maxRowWidth;
         final double cardWidth =
             (effectiveRowWidth - spacing * (columns - 1)) / columns;
-        final bool useTabularFooter = cardWidth >= 250 && textScale <= 1.35;
         final int rowCount = (slots.length + columns - 1) ~/ columns;
 
         return SliverList.builder(
@@ -933,7 +936,8 @@ class _ClientShellPageState extends State<ClientShellPage> {
                               ? _buildCarSlotCard(
                                   slots[start + col],
                                   stretchToRowHeight: true,
-                                  useTabularFooter: useTabularFooter,
+                                  cardWidth: cardWidth,
+                                  textScale: textScale,
                                 )
                               : const SizedBox.shrink(),
                         ),

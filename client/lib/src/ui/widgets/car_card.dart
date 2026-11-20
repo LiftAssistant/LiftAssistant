@@ -1007,7 +1007,7 @@ class UnavailableOperationalCarCard extends StatelessWidget {
       ObservationAvailability.unresolved =>
         'Configured Operational binding; observation unresolved.',
       ObservationAvailability.revoked =>
-        'Configured Operational binding; prior observation revoked.',
+        'Configured Operational binding; observation revoked.',
       ObservationAvailability.resolved =>
         'Configured Operational binding; no current operational state.',
     };
@@ -1019,7 +1019,6 @@ class UnavailableOperationalCarCard extends StatelessWidget {
     final Color stripe = _leftStripeColor(palette);
 
     return DecoratedBox(
-      key: Key('unavailable-car-card-${car.carId}'),
       decoration: BoxDecoration(
         color: palette.surface,
         borderRadius: BorderRadius.circular(6),
@@ -1255,6 +1254,10 @@ class _UnavailableCarContextFooter extends StatelessWidget {
 
     final String sourceTooltip =
         'Configured Operational source: ${car.source} (session: $sessionLabel)';
+    final String availabilityTooltip =
+        'Per-car observation availability (${car.availability.wireValue}) reported by ${car.source}.';
+    final String payloadTooltip =
+        'Source-level payload activity for ${car.source}; a source feed can stay active for sibling cars while this car has no usable observation.';
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1270,7 +1273,7 @@ class _UnavailableCarContextFooter extends StatelessWidget {
               child: Row(
                 children: <Widget>[
                   Expanded(
-                    flex: 11,
+                    flex: 10,
                     child: Tooltip(
                       message: sourceTooltip,
                       child: _TabularField(
@@ -1289,13 +1292,16 @@ class _UnavailableCarContextFooter extends StatelessWidget {
                     color: palette.border,
                   ),
                   Expanded(
-                    flex: 7,
-                    child: _TabularField(
-                      label: 'Availability',
-                      value: car.availability.wireValue,
-                      valueColor: availabilityColor,
-                      emphasize: true,
-                      monospaceValue: true,
+                    flex: 8,
+                    child: Tooltip(
+                      message: availabilityTooltip,
+                      child: _TabularField(
+                        label: 'Availability',
+                        value: car.availability.wireValue,
+                        valueColor: availabilityColor,
+                        emphasize: true,
+                        monospaceValue: true,
+                      ),
                     ),
                   ),
                   Container(
@@ -1305,13 +1311,16 @@ class _UnavailableCarContextFooter extends StatelessWidget {
                     color: palette.border,
                   ),
                   Expanded(
-                    flex: 6,
-                    child: _TabularField(
-                      label: 'Payload',
-                      value: car.payload.wireValue,
-                      valueColor: payloadColor,
-                      emphasize: car.payload != PayloadActivity.active,
-                      monospaceValue: true,
+                    flex: 7,
+                    child: Tooltip(
+                      message: payloadTooltip,
+                      child: _TabularField(
+                        label: 'Source payload',
+                        value: car.payload.wireValue,
+                        valueColor: payloadColor,
+                        emphasize: car.payload != PayloadActivity.active,
+                        monospaceValue: true,
+                      ),
                     ),
                   ),
                 ],
@@ -1334,19 +1343,25 @@ class _UnavailableCarContextFooter extends StatelessWidget {
                       monospaceValue: true,
                     ),
                   ),
-                  _SafeInlineKv(
-                    label: 'Availability',
-                    value: car.availability.wireValue,
-                    valueColor: availabilityColor,
-                    emphasize: true,
-                    monospaceValue: true,
+                  Tooltip(
+                    message: availabilityTooltip,
+                    child: _SafeInlineKv(
+                      label: 'Availability',
+                      value: car.availability.wireValue,
+                      valueColor: availabilityColor,
+                      emphasize: true,
+                      monospaceValue: true,
+                    ),
                   ),
-                  _SafeInlineKv(
-                    label: 'Payload',
-                    value: car.payload.wireValue,
-                    valueColor: payloadColor,
-                    emphasize: car.payload != PayloadActivity.active,
-                    monospaceValue: true,
+                  Tooltip(
+                    message: payloadTooltip,
+                    child: _SafeInlineKv(
+                      label: 'Source payload',
+                      value: car.payload.wireValue,
+                      valueColor: payloadColor,
+                      emphasize: car.payload != PayloadActivity.active,
+                      monospaceValue: true,
+                    ),
                   ),
                 ],
               ),
