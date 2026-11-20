@@ -196,14 +196,12 @@ supplied no positive receipt, allocation, Serving, terminal or prevention
 mapping. HUMAN accepted that result without promoting the missing mappings or
 authorizing a production KONE adapter.
 
-The [full M6 completion audit](M6_COMPLETION_AUDIT.md) recommends M6 COMPLETE.
+The [full M6 completion audit](M6_COMPLETION_AUDIT.md) recommended M6 COMPLETE.
 It found and fixed interrupted command-boundary fencing defects, found no
 remaining M6 blocker, and classifies the missing vendor mappings as
 backend-specific/future evidence. M6C.3 is not required without a distinct
-falsifiable hypothesis. M7 remains unapproved; its planning-only entry proposal
-requires a concrete isolated gateway/backend, reuse of existing grants,
-least-privilege process/network boundaries, durable reconciliation and a HIL or
-bench-controller first environment.
+falsifiable hypothesis. HUMAN subsequently accepted that exit and authorized
+the bounded M7.0/M7.1a software/simulation slice below.
 
 Only high-level intents belong here. Raw brake, motor torque, safety-chain bypass, door-lock bypass, or comparable safety primitives remain outside LiftAssistant Core semantics.
 
@@ -211,13 +209,19 @@ Only high-level intents belong here. Raw brake, motor torque, safety-chain bypas
 
 Goal: allow approved high-level LiftAssistant intents to reach validated lower controllers while retaining clear safety and authority boundaries.
 
-M6 exit and M7 entry were HUMAN-approved on 2026-11-20. The current bounded work
-is M7.0 + M7.1a: freeze a production intent-gateway process boundary and prove
-one Open-RMF `ServeFloor` vertical slice against software/simulation only. It
-must use private local ingress, existing Engine authority/reconciliation,
-write-before-side-effect durable uncertainty and restart without automatic
-resend. Public write APIs, real passenger equipment and real controller/CAN/OEM/
-OPC access remain later HUMAN gates.
+M6 exit and M7 entry were HUMAN-approved on 2026-11-20. M7.0 + M7.1a now
+implement the production intent-gateway boundary and one Open-RMF `ServeFloor`
+process/recovery vertical slice against software/simulation only. It uses private
+local ingress, existing Engine authority/reconciliation, write-before-side-effect
+durable uncertainty and restart without automatic resend. The result is awaiting
+HUMAN architecture/quality review. No subsequent M7 slice is READY. Public write
+APIs, real passenger equipment and real controller/CAN/OEM/OPC access remain
+later HUMAN gates.
+
+Evidence-driven candidates after that review include strengthening explicit
+operator recovery for an RMF operation whose correlation is no longer observable,
+production service/filesystem hardening, or a separately authorized HIL/bench
+controller proof. None is implied or authorized by M7.1a completion.
 
 Possible scope after M6 evidence:
 

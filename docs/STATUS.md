@@ -4,9 +4,9 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6 is HUMAN-ACCEPTED and COMPLETE. M7.0 + M7.1a are READY: freeze the
-production intent-gateway boundary and implement the first process-isolated
-Open-RMF simulation/recovery vertical slice.**
+**M6 is HUMAN-ACCEPTED and COMPLETE. M7.0 + M7.1a are IMPLEMENTED and awaiting
+HUMAN architecture/quality review: the production intent-gateway boundary and
+first process-isolated Open-RMF simulation/recovery vertical slice are complete.**
 
 M6C.2 is HUMAN-ACCEPTED with its `PARTIAL_MAPPING` result and negative evidence
 unchanged. The [full implementation-backed audit](M6_COMPLETION_AUDIT.md)
@@ -31,16 +31,44 @@ M7.1a is limited to one explicitly mapped logical car, car-specific
 identity, and the official Hotel simulation as the only external peer. Existing
 Headless HTTP/SSE, CLI and Flutter surfaces remain read-only.
 
+The concrete [`liftassistant-rmf-gateway`](M7_RMF_GATEWAY.md) maps one
+kernel-authenticated local UID to one configured Principal and a fresh
+process-local Engine grant. It supports only one car-specific `ServeFloor`,
+commits one bounded unresolved operation before RMF publication, preserves the
+same `IntentId` across restart and never automatically resends. Configuration,
+state version/revision/permissions, caller, authority, floor, capability,
+backend availability and current Operational evidence all fail closed. A local
+advisory lock prevents overlapping processes at the configured socket.
+
+Deterministic tests cover the required A--E crash analysis, including an
+independent child killed after a possible send and a successor that recovers
+`IntentId(1)`, reconciles through canonical observations and leaves the send log
+at exactly one entry. Withdrawal window E is explicitly unsupported, so this
+slice exposes no withdrawal command. Persistence contains only a version,
+configuration revision, `IntentId` watermark and at most one unresolved record;
+grants, credentials, ROS identities and observation incarnations are not stored.
+
+The official Hotel simulation supplied the external successful path from local
+caller through grant, durable operation and real `/lift_requests` publication to
+correlated `/lift_states`, Engine reconciliation and durable cleanup. A real
+gateway `SIGKILL` after correlated progress restarted `RecoveryRequired`, did
+not republish, recovered the same operation from new canonical observations and
+advanced the next accepted identity to `IntentId(2)`. A deliberately late
+restart retained unresolved work because holder/progress evidence was no longer
+observable; target-floor state alone was not treated as completion. Pausing and
+resuming Hotel also reproduced DDS discovery without a first payload and proved
+bounded subscriber-generation recreation without changing SourceSession. The
+proof used only the official simulator and accessed no real lift, controller,
+CAN/OEM/OPC endpoint, passenger equipment or site network.
+
 Closing local validation passed formatting, locked workspace all-target Clippy,
-166 workspace tests with one expected ignored test, the exact Rust/Cargo 1.85.0
+179 workspace tests with one expected ignored test, the exact Rust/Cargo 1.85.0
 all-target check, all nine TUI scenarios and all four non-live Headless
-scenarios. Core/model/Engine dependency boundaries and bounded histories were
-re-audited. The private M6B.3 and M6C.2 Evidence v0 bundles were retained outside
-Git with verified SHA-256 manifests and 0700/0600 permissions; secret-pattern
-scans passed. No live external validation was re-run in this closure pass.
-Hosted [CI run 44667635143](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44667635143)
-passed Stable format/Clippy/test and Rust 1.85 on the audit implementation and
-documentation commit.
+scenarios. Focused RMF tests include 22 unit and two independent-process tests.
+Model/Core/Engine dependency boundaries, bounded queues/state, private ingress,
+read-only public surfaces and secret patterns were re-audited. A final resource
+review replaced an unbounded historical set of unknown RMF names with one
+process-bounded diagnostic latch. No subsequent M7 slice is READY.
 
 M6C.0, M6C.1a, M6C.1b and M6C.2 are HUMAN-ACCEPTED. M6C.1b implements the
 [frozen internal lifecycle and recovery contract](M6C_DISPATCH_OWNERSHIP.md#m6c1b-external-dispatch-lifecycle-and-recovery).
@@ -85,7 +113,7 @@ protocol messages and zero drops; credential/token scans passed. The focused
 recorded regression preserves Submitted + Indeterminate + Pending, no resume
 resend and Requested withdrawal through actual Engine APIs.
 
-**Current terminal target:** `M6 COMPLETION AUDIT COMPLETE — RECOMMEND_M6_COMPLETE. Awaiting HUMAN milestone-exit and M7-entry decision. No M7 implementation started.`
+**Current terminal target:** `M7.0 + M7.1a COMPLETE — production gateway boundary and first RMF process/recovery vertical slice implemented. Awaiting HUMAN architecture/quality review before HIL/bench-controller progression. No passenger or real-controller write path authorized.`
 
 ### M6B.3, M6C.0 and M6C.1a evidence
 

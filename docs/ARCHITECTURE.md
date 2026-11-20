@@ -346,6 +346,25 @@ is not a receipt. Existing Headless HTTP/SSE, CLI and Flutter interfaces remain
 read-only. This boundary is authorized only for software/simulation/HIL/bench
 progression and grants no passenger or real-controller write authority.
 
+The first concrete process uses a mode-`0600` Unix socket plus kernel peer UID
+for local caller authentication. Configuration maps that UID to one
+`PrincipalId`; Engine creates a fresh process-local grant. A local advisory lock
+prevents overlapping gateway processes at the configured socket. Neither the
+socket, RMF participant, holder session nor durable file is a reusable grant.
+The private file retains one unresolved operation plus the `IntentId` watermark,
+is committed and directory-synchronized before publication, and fails closed on
+corruption, incompatible revision, unsafe permissions or an unreadable state.
+This is bounded single-operation recovery, not a database or exactly-once
+transport.
+
+RMF subscriber generations are transport resources inside one adapter source
+lifetime. A generation that discovers peers but receives no first payload is
+recreated after an explicit source-specific interval without changing
+`ObservationSessionId` or claiming stale payload before data has ever flowed.
+Once data has flowed, silence revokes Operational truth; only a real payload can
+restore it. This keeps transport discovery, current payload activity, source
+incarnation and canonical readiness distinct.
+
 
 ## Target production direction
 

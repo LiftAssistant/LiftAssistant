@@ -196,6 +196,27 @@ against duplicate commands, later correlated evidence can still be applied,
 and no prevention claim is fabricated. This is deterministic in-process
 failure containment, not durable process-crash recovery.
 
+M7.0/M7.1a implement the first durable process recovery boundary for one
+car-specific Open-RMF `ServeFloor` gateway. A kernel-authenticated local UID maps
+explicitly to a configured Principal, while a fresh Engine grant remains
+process-local. Before RMF publication, the gateway durably commits exactly one
+bounded unresolved operation and its `IntentId` watermark. Restart restores the
+same logical operation for canonical-observation reconciliation and never
+automatically republishes it. Corrupt, incompatible or unsafe state fails closed.
+The existing Headless HTTP/SSE, CLI and Flutter surfaces remain read-only.
+
+Official Hotel simulation evidence exercised the independent process path,
+canonical observation-driven completion and a `SIGKILL` restart after correlated
+progress without another publish. A deliberately late restart could no longer
+observe the RMF holder/progress evidence and therefore remained
+`RecoveryRequired`; a target-floor snapshot alone did not authorize guessed
+completion. Live transport also confirmed that current DDS discovery can exist
+without a first payload. The gateway now recreates only that subscriber
+generation after a bounded source-specific wait, without changing the adapter
+source incarnation or treating transport creation as payload health. These are
+software/simulation results, not HIL, passenger, controller, safety, production
+or certification evidence.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

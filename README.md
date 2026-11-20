@@ -11,11 +11,11 @@ LiftAssistant is an early semantic-core and simulation project. **It is not appr
 M1 Interactive Simulator is implemented and human-accepted.
 
 M5 is complete at its read-only milestone boundary and M6's controlled intent
-laboratory is HUMAN-accepted and complete. M7.0 + M7.1a now build one private,
-process-isolated Open-RMF `ServeFloor` gateway for software/simulation validation.
+laboratory is HUMAN-accepted and complete. M7.0 + M7.1a implement one private,
+process-isolated Open-RMF `ServeFloor` gateway for software/simulation review.
 It is not a public write API: Headless HTTP/SSE, CLI and Flutter remain read-only,
 and no passenger elevator, real controller cabinet, CAN/OEM network or OPC
-installation is authorized.
+installation is authorized. The next M7 progression requires HUMAN review.
 
 The current working vertical path is:
 
@@ -104,6 +104,22 @@ cargo run -p liftassistant-tui -- --scenario m6a-write-adapter-profile
 The profile checks the simulated `ServeFloor` and `ParkAt` boundary for controller binding, per-car execution floors, readiness, grant fencing, IntentId idempotency, correlated receipts, canonical observation reconciliation, cancellation, and restart without resend. It includes the deterministic fault matrix and bounded diagnostic replay. Its evidence applies to VirtualController and SimRuntime inside this process. The headless API and its clients continue to expose read-only observations.
 
 M6B.1 additionally challenges that contract with the independently running official Open-RMF Hotel simulation. The simulation-only `liftassistant-rmf` `hotel_intent_probe` example is intentionally not a normal Host command: it refuses to publish outside its fixed gateway-free test network and is absent from the read-only Host, API and clients. The executable validation cases and their evidence limits are recorded in [`docs/M6B1_OPEN_RMF_VALIDATION.md`](docs/M6B1_OPEN_RMF_VALIDATION.md). A Hotel pass is simulator semantic evidence, not real-elevator, hardware, safety, OEM, CAN/CANopen, production or certification evidence.
+
+M7.1a adds the separate `liftassistant-rmf-gateway` binary. It has a local-only,
+kernel-peer-authenticated Unix socket, one explicit logical/native car and floor
+mapping, a fresh Engine grant, a bounded durable unresolved-operation record,
+and no automatic resend after restart. Run it only with a private operator-owned
+configuration:
+
+```bash
+cargo run -p liftassistant-rmf --bin liftassistant-rmf-gateway -- \
+  --config /private/path/rmf-gateway.json
+```
+
+The configuration shape, failure/recovery contract and official Hotel evidence
+are documented in [`docs/M7_RMF_GATEWAY.md`](docs/M7_RMF_GATEWAY.md). This binary
+is an experimental software/simulation gateway, not a passenger-production
+service or a general-purpose command interface.
 
 Inspect bounded diagnostic capture and deterministic incident replay:
 
