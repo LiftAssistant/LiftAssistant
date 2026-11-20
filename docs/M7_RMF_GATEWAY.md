@@ -1,10 +1,10 @@
 # M7 Open-RMF intent gateway
 
 Status: M7.0 + M7.1a are HUMAN-accepted. M7.1b explicit recovery, retirement
-and safe resumption are implemented and deterministically validated; the
-required official-Hotel late-restart rerun remains pending. This is a private,
-experimental process boundary. It is not approved for HIL, passenger equipment,
-a real controller, a public write API, certification, or deployment.
+and safe resumption are complete after deterministic, independent-process and
+official-Hotel late-restart validation. This is a private, experimental process
+boundary. It is not approved for HIL, passenger equipment, a real controller, a
+public write API, certification, or deployment.
 
 ## Boundary
 
@@ -268,15 +268,50 @@ repeated first-payload generation timeouts; unpausing it caused a later
 generation to ingest Lift1 without changing the source lifetime. An unconfigured
 Lift2 continued to be isolated and produced only one diagnostic per process.
 
-A deliberately late M7.1a restart supplied an important negative result: Hotel had
-already cleared the holder and reached the target before the new subscriber
+A deliberately late M7.1a restart supplied an important negative result: Hotel
+had already cleared the holder and reached the target before the new subscriber
 observed progress. A target-floor snapshot alone was insufficient, so the
-gateway correctly retained `RecoveryRequired` indefinitely instead of guessing
-completion or resending. This is an evidence limit, not a successful recovery
-claim. A backend with no replayable correlation may require an explicit future
-recovery decision. M7.1b implements that policy without changing the negative
-result. Its required Hotel recovery/retirement/resumption rerun has not yet been
-performed at this document state.
+gateway retained `RecoveryRequired` instead of guessing completion or
+resending. M7.1b then completed that explicit exit path in the same official
+Hotel environment.
+
+The final M7.1b run admitted `IntentId(1)` for L2, waited until durable delivery
+was correlated and progress was recorded, killed the real gateway, and let
+Hotel reach L2 and clear its holder before starting the successor. Repeated
+complete L2/stopped/empty-holder snapshots left the successor
+`RecoveryRequired`. A separate 14-second `/lift_requests` listener observed no
+old request publication. Recovery inspection rejected a missing Principal and
+the ordinary command Principal; ordinary `ServeFloor` could not bypass the
+gate. Authorized inspection preserved `IntentId(1)`, its correlated delivery,
+recorded progress, current L2 Operational state and empty holder without
+inventing completion.
+
+The recovery operator then durably retired the operation as outcome unknown.
+That created `ResumptionRequired`, recorded remote inactivity as uncertain,
+fenced the old process grant and still rejected ordinary commands. A fresh
+gateway process restarted in `ResumptionRequired`. It rejected the ordinary
+Principal and rejected resumption without explicit residual-uncertainty
+acceptance. With current complete Operational evidence, compatible
+commissioning, available command transport, the local control-domain lease, an
+empty current holder, a fresh process grant and explicit uncertainty acceptance,
+authorized resumption returned `Ready`. The bounded audit retained separate
+retirement and resumption records. The next ordinary command used
+`IntentId(2)` and RMF holder `liftassistant-m7-2`; the live topic captured only
+that new request, and Hotel completed it naturally at L1.
+
+The first M7.1b late-rerun attempt exposed a concrete defect that is preserved
+as negative evidence: a successor could restore persisted progress into Engine
+and let a periodic target-floor snapshot falsely complete the old operation
+after the holder had disappeared. The gateway now restores persisted recovery
+state only after a fresh observation carries the exact old holder. A focused
+regression covers that case, and the final live rerun confirms that absent
+correlation remains an explicit operator decision rather than inferred success.
+
+Closing validation passed formatting, locked workspace all-target Clippy with
+warnings denied, 189 tests with one expected ignored test, the actual
+Rust/Cargo 1.85.0 all-target check, all nine TUI scenarios, all four non-live
+Headless scenarios, resource/dependency/secret/diff audits, and hosted Stable
+plus Rust 1.85 CI on the final code fix.
 
 The proof used only software processes and the official simulator. It accessed
 no passenger elevator, real controller, CAN/CANopen interface, OEM endpoint,
@@ -285,8 +320,8 @@ certification claim.
 
 ## Remaining review boundary
 
-After the M7.1b official-Hotel rerun and completion audit, the hard stop is a
-HUMAN HIL/bench-controller environment decision. Remaining items include:
+M7.1b is complete. The hard stop is now a HUMAN HIL/bench-controller
+environment decision. Remaining items include:
 
 - operational packaging, service supervision, filesystem ownership, and
   deployment hardening;

@@ -11,13 +11,15 @@ LiftAssistant is an early semantic-core and simulation project. **It is not appr
 M1 Interactive Simulator is implemented and human-accepted.
 
 M5 is complete at its read-only milestone boundary and M6's controlled intent
-laboratory is HUMAN-accepted and complete. M7.0 + M7.1a are HUMAN-accepted and
-implement one private, process-isolated Open-RMF `ServeFloor` gateway for
-software/simulation review. M7.1b is the current authorized software/simulation
-slice for explicit recovery, retirement and safe resumption. It is not a public
-write API: Headless HTTP/SSE, CLI and Flutter remain read-only, and no passenger
-elevator, real controller cabinet, CAN/OEM network or OPC installation is
-authorized.
+laboratory is HUMAN-accepted and complete. M7.0 + M7.1a are HUMAN-accepted, and
+M7.1b completes the private, process-isolated Open-RMF `ServeFloor` gateway's
+software/simulation recovery boundary. Outcome-unknown retirement remains
+separate from explicit safe resumption, and the official Hotel proof confirms
+that neither a late target-floor snapshot nor retirement alone restores write
+readiness. The project is stopped for a HUMAN HIL/bench-controller environment
+decision. This is not a public write API: Headless HTTP/SSE, CLI and Flutter
+remain read-only, and no passenger elevator, real controller cabinet, CAN/OEM
+network or OPC installation is authorized.
 
 The current working vertical path is:
 
@@ -118,10 +120,11 @@ cargo run -p liftassistant-rmf --bin liftassistant-rmf-gateway -- \
   --config /private/path/rmf-gateway.json
 ```
 
-The configuration shape, failure/recovery contract and official Hotel evidence
-are documented in [`docs/M7_RMF_GATEWAY.md`](docs/M7_RMF_GATEWAY.md). This binary
-is an experimental software/simulation gateway, not a passenger-production
-service or a general-purpose command interface.
+The configuration shape, failure/recovery contract, explicit private recovery
+operations and completed official Hotel evidence are documented in
+[`docs/M7_RMF_GATEWAY.md`](docs/M7_RMF_GATEWAY.md). This binary is an
+experimental software/simulation gateway, not a passenger-production service
+or a general-purpose command interface.
 
 Inspect bounded diagnostic capture and deterministic incident replay:
 

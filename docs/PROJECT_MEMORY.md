@@ -228,6 +228,22 @@ absence of active local work. Explicitly accepted residual uncertainty remains
 durably labelled uncertainty. HIL, bench controllers, real equipment and
 passenger operation still require another HUMAN decision.
 
+M7.1b completed the official Hotel late-restart closure. A gateway killed after
+correlated progress restarted with the original durable operation while Hotel
+had already reached the target and cleared its holder. The first rerun exposed
+and then fixed a gateway-local defect: persisted progress plus a periodic target
+snapshot could reconstruct a false completion without re-observing the exact
+old holder. Recovery now requires that fresh holder correlation; otherwise the
+operation remains `RecoveryRequired`. The final rerun observed no old request
+resend, rejected unauthorized recovery and normal-command bypass, durably
+retired `IntentId(1)` only as outcome unknown, restarted
+`ResumptionRequired`, required explicit residual-uncertainty acceptance, and
+then published a distinct `IntentId(2)` request that Hotel completed. The two
+bounded audit entries preserve the unknown historical outcome and the separate
+safe-resumption decision. These are software/simulation facts only; HIL,
+cross-host fencing, deployment security, real controllers and passenger
+equipment remain outside the evidence and authorization.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

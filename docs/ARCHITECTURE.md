@@ -380,6 +380,15 @@ Any accepted residual uncertainty is recorded as uncertainty in a bounded audit
 trail. Generic Engine call/receipt meanings and all public read-only interfaces
 remain unchanged.
 
+A restarted gateway may restore persisted receipt/progress into Engine only
+after a fresh observation carries the exact unresolved backend holder. Persisted
+progress plus a periodic target-floor snapshot is not causal evidence that the
+old operation completed. If the holder has already cleared, the gateway remains
+`RecoveryRequired` until the explicit operator path retires the local record as
+outcome unknown. This exact-holder fence was required by the completed official
+Hotel late-restart proof; it is gateway-local correlation policy and does not
+change Engine receipt or reconciliation semantics.
+
 
 ## Target production direction
 

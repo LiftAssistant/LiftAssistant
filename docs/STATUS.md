@@ -5,9 +5,10 @@ Updated: 2026-11-20
 ## Current milestone
 
 **M6 is HUMAN-ACCEPTED and COMPLETE. M7.0 + M7.1a are HUMAN-ACCEPTED and
-COMPLETE. M7.1b is READY: explicit recovery, retirement and safe resumption are
-the final authorized software/simulation closure before a separate HUMAN
-HIL/bench-controller environment decision.**
+COMPLETE. M7.1b is COMPLETE: explicit recovery, outcome-unknown retirement and
+safe resumption passed deterministic, process-crash and official Hotel
+validation. Work is stopped at the separate HUMAN HIL/bench-controller
+environment decision.**
 
 M6C.2 is HUMAN-ACCEPTED with its `PARTIAL_MAPPING` result and negative evidence
 unchanged. The [full implementation-backed audit](M6_COMPLETION_AUDIT.md)
@@ -71,7 +72,9 @@ read-only public surfaces and secret patterns were re-audited. A final resource
 review replaced an unbounded historical set of unknown RMF names with one
 process-bounded diagnostic latch. HUMAN accepted M7.0 + M7.1a, including the
 late-restart negative evidence, without converting target-floor state into
-completion or remote-inactivity proof. M7.1b is the only READY slice.
+completion or remote-inactivity proof. M7.1b has now closed that explicit
+operator recovery path; no later M7/HIL item is READY without another HUMAN
+decision.
 Hosted [CI run 44699464154](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44699464154)
 passed Stable format/Clippy/test and the Rust 1.85 workspace check on the M7
 implementation and documentation commit.
@@ -128,9 +131,9 @@ Operational evidence, command transport, holder/correlation compatibility and
 local activity before write readiness can return. Residual uncertainty may be
 accepted explicitly and durably, but it remains uncertainty.
 
-**Current terminal target:** `M7.1b COMPLETE — explicit recovery, retirement and safe-resumption boundary validated. Awaiting HUMAN HIL/bench-controller environment decision. No real controller or passenger-equipment write path authorized.`
+**Current terminal status:** `M7.1b COMPLETE — explicit recovery, retirement and safe-resumption boundary validated. Awaiting HUMAN HIL/bench-controller environment decision. No real controller or passenger-equipment write path authorized.`
 
-**M7.1b local implementation — IMPLEMENTED; OFFICIAL HOTEL RERUN PENDING.** The
+**M7.1b — COMPLETE; HUMAN HIL/bench environment decision pending.** The
 private gateway now distinguishes an explicit recovery UID/Principal from the
 ordinary caller, exposes private inspection, durably retires an unresolved
 operation only as outcome unknown, enters restart-stable `ResumptionRequired`,
@@ -148,9 +151,45 @@ requires current observed floor compatibility, and a local lock keyed by RMF
 domain plus native lift fences the same control domain across different socket
 paths. Queue overload atomically revokes Operational evidence before command
 admission and recovers only on a fresh compatible payload. Focused validation
-currently passes 29 RMF library tests, one gateway queue test and three
-independent-process tests. The required late-restart official-Hotel proof and
-full workspace/scenario/Rust-1.85/CI closure are not yet claimed.
+passes 30 RMF library tests, one gateway queue test and three
+independent-process tests.
+
+The final official-Hotel rerun killed the real gateway after `IntentId(1)` had
+become correlated and recorded progress, then allowed Hotel to reach L2 and
+clear the holder before starting an independent successor. The successor stayed
+`RecoveryRequired` through repeated L2/stopped/empty-holder snapshots, and an
+independent 14-second `/lift_requests` listener observed no resend. Missing and
+ordinary Principals were rejected; authorized inspection preserved the same
+identity, correlation and progress without claiming completion. Authorized
+retirement recorded outcome unknown and entered `ResumptionRequired`; an
+ordinary command remained blocked, and another process restart preserved that
+gate. Resumption rejected an ordinary Principal and rejected a recovery
+Principal that had not explicitly accepted residual uncertainty. Only current
+complete Operational evidence, compatible commissioning, available transport,
+the local control-domain lease, empty current holder, a fresh command grant and
+explicit uncertainty acceptance restored `Ready`. The next request was
+`IntentId(2)` with RMF holder `liftassistant-m7-2`; Hotel completed it naturally.
+
+The first late-rerun attempt exposed a concrete defect before the successful
+matrix: persisted progress plus a periodic target-floor snapshot could restore
+Engine state and falsely clear the old operation after the backend holder had
+already disappeared. The fix requires the successor to observe the exact old
+holder before restoring persisted progress. A focused regression preserves the
+negative case, and the successful rerun above confirms the gateway now leaves
+that uncertainty for explicit operator handling.
+
+Closing validation passed formatting, locked all-target Clippy with warnings
+denied, 189 workspace tests with one expected ignored test, the actual
+Rust/Cargo 1.85.0 all-target check, all nine TUI scenarios and all four non-live
+Headless scenarios. Resource/dependency/public-surface/secret/diff audits pass.
+Hosted [CI run 44709641539](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44709641539)
+passed Stable and Rust 1.85 on the final code fix; the documentation closeout is
+validated separately before handoff. The official image was pinned at
+`sha256:601a6bb7c04d559fb9ec654d9b7a41650918990e35712036d836f072a6430db5`.
+The rootless Hotel container did not exit on SIGTERM within 10 seconds and was
+therefore killed by Podman during cleanup; the named container, image and test
+temporary directories were removed without pruning or touching unrelated
+resources.
 
 ### M6B.3, M6C.0 and M6C.1a evidence
 

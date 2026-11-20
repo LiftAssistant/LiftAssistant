@@ -216,18 +216,21 @@ private local ingress, existing Engine authority/reconciliation,
 write-before-side-effect durable uncertainty and restart without automatic
 resend, and are HUMAN-accepted.
 
-M7.1b is READY as the final software/simulation closure before another HUMAN
+M7.1b is COMPLETE as the final software/simulation closure before another HUMAN
 decision. It adds explicit operator inspection, outcome-unknown retirement and
 a separate safe-resumption gate with bounded durable audit, current
 control-domain fencing, commissioning checks and fail-closed overload behavior.
-Retirement is neither physical completion nor proof of remote inactivity and
-cannot itself restore write readiness. Public write APIs, HIL/bench access, real
-passenger equipment and real controller/CAN/OEM/OPC access remain later HUMAN
-gates.
+The official Hotel late-restart proof confirmed no false completion, no old
+operation resend, restart-stable `ResumptionRequired` and a monotonic next
+`IntentId`. Retirement is neither physical completion nor proof of remote
+inactivity and cannot itself restore write readiness. Public write APIs,
+HIL/bench access, real passenger equipment and real controller/CAN/OEM/OPC
+access remain later HUMAN gates.
 
-After M7.1b closes, the next possible step is a separately authorized
-HIL/bench-controller environment decision. It is not implied by completing the
-software/simulation recovery boundary.
+The next possible step is a separately authorized HIL/bench-controller
+environment decision. It is not implied by completing the software/simulation
+recovery boundary, and no HIL or real-controller work is READY before that
+decision.
 
 Possible scope after M6 evidence:
 
