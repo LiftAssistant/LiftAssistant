@@ -1301,6 +1301,14 @@ impl<T: RmfCommandTransport> RmfIntentGateway<T> {
         let Some(operation) = self.store.unresolved().cloned() else {
             return;
         };
+        // A restarted process must re-observe the exact backend correlation before
+        // restoring historical progress into Engine. Persisted progress plus a
+        // periodic target-floor snapshot is not causal proof that the old operation
+        // completed. If Hotel has already cleared the holder, the durable record
+        // remains RecoveryRequired for explicit operator handling.
+        if self.latest_holder.as_deref() != Some(operation.rmf_session_id.as_str()) {
+            return;
+        }
         let Some(grant) = &self.grant else {
             return;
         };
@@ -1823,6 +1831,72 @@ mod tests {
         assert_eq!(restarted.transport.sent.len(), 0);
         let next = restarted.handle_command(1000, request(1));
         assert_eq!(next.intent_id, Some(2));
+    }
+
+    #[test]
+    fn late_restart_target_snapshots_without_old_holder_cannot_complete_old_work() {
+        let temp = TempDir::new().unwrap();
+        let config = config(&temp);
+        let mut first = RmfIntentGateway::new(
+            config.clone(),
+            ObservationSessionId::new("process-A"),
+            FakeTransport {
+                available: true,
+                ..FakeTransport::default()
+            },
+        )
+        .unwrap();
+        first
+            .ingest(state(
+                1,
+                "L1",
+                RmfLiftState::MOTION_STOPPED,
+                RmfLiftState::DOOR_CLOSED,
+                "",
+            ))
+            .unwrap();
+        assert!(first.handle_command(1000, request(2)).accepted);
+        let holder = first.unresolved().unwrap().rmf_session_id.clone();
+        first
+            .ingest(state(
+                2,
+                "L1",
+                RmfLiftState::MOTION_UP,
+                RmfLiftState::DOOR_CLOSED,
+                &holder,
+            ))
+            .unwrap();
+        assert!(first.unresolved().unwrap().saw_progress);
+        drop(first);
+
+        let mut restarted = RmfIntentGateway::new(
+            config,
+            ObservationSessionId::new("process-B"),
+            FakeTransport {
+                available: true,
+                ..FakeTransport::default()
+            },
+        )
+        .unwrap();
+        for sequence in 3..=6 {
+            restarted
+                .ingest(state(
+                    sequence,
+                    "L2",
+                    RmfLiftState::MOTION_STOPPED,
+                    RmfLiftState::DOOR_CLOSED,
+                    "",
+                ))
+                .unwrap();
+        }
+        assert_eq!(restarted.readiness(), GatewayReadiness::RecoveryRequired);
+        assert_eq!(restarted.unresolved().unwrap().intent_id, 1);
+        assert!(restarted.engine().intent_record(IntentId::new(1)).is_none());
+        assert_eq!(restarted.transport.sent.len(), 0);
+        assert_eq!(
+            restarted.handle_command(1000, request(1)).code,
+            "recovery_required"
+        );
     }
 
     #[test]
