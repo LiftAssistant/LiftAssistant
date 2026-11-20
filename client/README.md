@@ -1,15 +1,17 @@
 # LiftAssistant Client
 
-Independent read-only Flutter graphical client for **LiftAssistant Host** (`experimental/v0` HTTP snapshot + SSE stream).
+Independent Flutter graphical client for **LiftAssistant Host** (`experimental/v0` HTTP snapshot + SSE stream), with an optional development-only Simulator `ServeFloor` operator workflow when connected to an explicitly opted-in loopback `sim-dev-server`.
 
 ## Architectural boundary
 
-- Communicates **only** with an explicitly enabled `liftassistant-headless` API listener over:
+- Against normal `liftassistant-headless` Hosts, communicates **only** over the strictly read-only boundary:
   - `GET /api/experimental/v0/snapshot`
   - `GET /api/experimental/v0/events` (SSE `event: snapshot`)
-- Links zero LiftAssistant Rust crates (`liftassistant-model`, `liftassistant-core`, `liftassistant-engine`, `liftassistant-rmf`, `liftassistant-headless`) and owns zero elevator truth or dispatch logic.
-- Synchronizes strictly by replacing its read model with complete Host snapshots, accepting Host-local revision sequence resets across Host restarts without persistent cursors or event-log replay.
-- Strictly **read-only**: exposes zero call, target, door, mode, or controller write paths.
+  and exposes zero call, target, door, mode, or controller write controls.
+- When connected to an explicitly opted-in loopback `sim-dev-server` (`cargo run -p liftassistant-headless --example sim-dev-server -- --listen 127.0.0.1:8080 --enable-dev-sim-control`), also consumes the isolated development-only `/api/dev-sim/v0/*` endpoints for Simulator-only `ServeFloor` preview, review, client-correlated submission (`submission_key` -> Engine `IntentId`), and read-only reconnect status projection without automatic resend.
+- Links zero LiftAssistant Rust crates (`liftassistant-model`, `liftassistant-core`, `liftassistant-engine`, `liftassistant-rmf`, `liftassistant-headless`) and owns zero elevator truth, dispatch logic, or second operation lifecycle.
+- Remains backend-agnostic: exposes no mode control, no Setting/Parameter surface, no RMF/LCE/real-hardware write path, and no command affordance on configured-but-unavailable cars.
+- Synchronizes read state strictly by replacing its read model with complete Host snapshots, accepting Host-local revision sequence resets across Host restarts without persistent cursors or event-log replay.
 
 ## Target platforms
 
@@ -19,7 +21,7 @@ Independent read-only Flutter graphical client for **LiftAssistant Host** (`expe
 
 ### Web same-origin note
 
-`liftassistant-headless` intentionally omits wildcard CORS headers on its unauthenticated `experimental/v0` HTTP endpoints. When running in a browser, serve `build/web` from the same origin (for example behind a local/LAN reverse proxy forwarding `/api/experimental/v0/*` to the Host listener) so browser Same-Origin Policy permits snapshot and SSE requests.
+`liftassistant-headless` intentionally omits wildcard CORS headers on its unauthenticated `experimental/v0` HTTP endpoints. When running in a browser, serve `build/web` from the same origin (for example behind a local/LAN reverse proxy forwarding `/api/experimental/v0/*` — and `/api/dev-sim/v0/*` only for local Simulator development — to the Host listener) so browser Same-Origin Policy permits requests.
 
 ### Android loopback note
 
@@ -31,5 +33,5 @@ Independent read-only Flutter graphical client for **LiftAssistant Host** (`expe
 ~~~bash
 cd client
 dart analyze --fatal-infos
-flutter test
+flutter test --concurrency=1
 ~~~

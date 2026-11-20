@@ -155,11 +155,13 @@ schema, generic messaging layer, or commitment to a future frontend technology.
 `experimental/v0` HTTP snapshot plus SSE boundary, targeting Android, Linux, and Web from one
 shared Flutter codebase with platform-specific code limited to native `dart:io` versus browser
 `fetch`/`ReadableStream` streaming. It links no LiftAssistant Rust crate, owns no elevator or
-dispatch truth, replaces its read state from complete snapshots, accepts Host-local revision
-resets across Host restarts without durable cursors or event-log replay, and exposes no write
-capability. Browser Same-Origin Policy on unauthenticated HTTP means Web deployments currently
-use same-origin hosting or reverse proxying rather than relaxing the Host's no-wildcard-CORS
-posture.
+dispatch truth, replaces its read state from complete snapshots, and accepts Host-local revision
+resets across Host restarts without durable cursors or event-log replay. Against normal
+`liftassistant-headless` Hosts it remains strictly read-only; only when connected to an
+explicitly opted-in loopback `sim-dev-server` does it expose the isolated development-only
+Simulator `ServeFloor` workflow (`/api/dev-sim/v0/*`). Browser Same-Origin Policy on
+unauthenticated HTTP means Web deployments currently use same-origin hosting or reverse proxying
+rather than relaxing the Host's no-wildcard-CORS posture.
 
 ## Determinism boundary
 
@@ -389,6 +391,83 @@ outcome unknown. This exact-holder fence was required by the completed official
 Hotel late-restart proof; it is gateway-local correlation policy and does not
 change Engine receipt or reconciliation semantics.
 
+
+## Development-only Simulator Operator Surface (`dev-sim/v0`)
+
+The Operator Surface Foundation slice exercises the first end-to-end Flutter-to-Engine
+`ServeFloor` workflow exclusively against the in-process `VirtualController(SimRuntime)`
+simulator without altering production authority, recovery, or public read-only API contracts:
+
+~~~text
+Flutter client (backend-agnostic UI projection)
+  -> GET  /api/experimental/v0/{snapshot,events}    (strictly read-only, unchanged)
+  -> GET  /api/dev-sim/v0/capabilities              (opt-in loopback dev-sim only)
+  -> POST /api/dev-sim/v0/serve-floor/preview       (advisory, side-effect-free)
+  -> POST /api/dev-sim/v0/serve-floor/submit        (client submission_key -> Engine admission)
+  -> GET  /api/dev-sim/v0/submissions/{key}         (read-only reconnect projection, no resend)
+        |
+        v
+sim-dev-server (liftassistant-headless example; dev-dependency only)
+        |
+        v
+Existing Engine controlled-intent path (PrincipalId, AuthorityGrant, IntentId, receipt, reconciliation)
+        |
+        v
+VirtualController(SimRuntime) -> canonical Operational observations -> Engine reconciliation
+~~~
+
+Key boundary invariants:
+
+- **Isolated Simulator-only control surface:** `sim-dev-server` is a development-only example
+  target in `liftassistant-headless` that reuses `liftassistant-sim` strictly via
+  `[dev-dependencies]` (keeping `liftassistant-headless`'s normal dependency tree free of
+  `liftassistant-sim`). Control routes under `/api/dev-sim/v0/*` are disabled by default, require
+  explicit `--enable-dev-sim-control`, refuse non-loopback bind addresses, enforce 4 KiB request
+  bounds with `deny_unknown_fields`, and cannot reach RMF, LCE, HIL, or real hardware.
+  `/api/experimental/v0/snapshot` and `/api/experimental/v0/events` remain strictly read-only GET.
+- **Single truth owner:** Engine continues to own controlled-intent admission, `PrincipalId` /
+  `AuthorityGrant`, `IntentId`, controller receipts, canonical Operational observations, and
+  physical completion/reconciliation. `sim-dev-server` mints only a process-local development
+  Principal and per-car Engine grant for the Simulator fixture; this is not a production identity
+  or multi-user authorization design.
+- **Submission correlation (`submission_key`) is not a canonical identity:** Before any possible
+  side effect, the Flutter client generates a 128-bit random `submission_key` that stays solely in
+  the `dev-sim/v0` transport/client correlation layer and never enters `liftassistant-model`,
+  `liftassistant-core`, or `liftassistant-engine`. Mapping is
+  `submission_key -> admitted submission -> Engine IntentId`. Same key plus identical immutable
+  `(car, floor)` is idempotent and never allocates a second `IntentId`; same key plus different
+  `(car, floor)` fails closed with HTTP 409 conflict; pre-side-effect rejections remain terminal
+  rejected for that key; a new `submission_key` with the same `(car, floor)` is a fresh user
+  submission evaluated by live Engine admission. The in-memory submission registry is bounded
+  (128 records) and preserves active Engine operations during eviction.
+- **Reconnect and process-restart honesty without automatic resend:** If a submission response is
+  lost after dispatch, Flutter transitions the operation to first-class `Unknown` and never
+  automatically resends. Within the same `control_instance_id` lifetime, reconnect performs
+  read-only `GET /api/dev-sim/v0/submissions/{submission_key}` to project the latest Engine
+  `IntentRecord` facts (`accepted`, `in_progress`, `completed`, `diverged`, `rejected`,
+  `not_found`, or `knowledge_unavailable`). Across a `sim-dev-server` restart, the fresh 128-bit
+  ephemeral `control_instance_id` causes queries carrying `expected_instance_id` to report
+  `knowledge_unavailable` (`control_process_restarted`) rather than claiming the request never
+  happened, and no automatic resend occurs.
+- **Distinct capability dimensions and floor legality:** Read-side capability and advisory preview
+  projections preserve `support`, `control_path_availability` (with explicit reason),
+  `authorization` (honestly reporting `dev_process_local_grant` rather than fabricating
+  multi-user `authorized = true`), and per-request `eligible` / Engine `WriteBlocker`. Preview is
+  strictly advisory and side-effect-free; submit always re-evaluates real Engine admission.
+  Target floor choices come exclusively from Engine `ExecutionCapabilities` (never from full
+  `BuildingTopology`, observation floor lists, or UI guesses). Configured-but-unavailable cars
+  without valid Operational truth cannot preview or submit, and Auxiliary bindings never restore
+  command eligibility.
+- **Scoped command surface (`State + ServeFloor` only):** Flutter remains backend-agnostic with
+  no backend-specific UI branches and no second operation lifecycle state machine. Mode control
+  (`SetMode`, Normal/OOS/FireService/Inspection/Independent/parking) and persistent
+  Setting/Parameter configuration are out of scope — persistent settings have a different
+  lifecycle from one-shot operations and are intentionally omitted.
+- **Real-backend exclusions:** Neither `sim-dev-server` nor Flutter connects to the M7 RMF
+  gateway, exposes RMF over HTTP, alters M7 durability/recovery, writes to LCE (which remains
+  `RECORDED_READONLY_PARTIAL`), or accesses any real controller, CAN/BACnet/OPC bus, HIL rig, or
+  passenger elevator. This boundary is experimental and development-only, not a frozen public
+  schema or production control API.
 
 ## Target production direction
 

@@ -185,7 +185,17 @@ cd client
 flutter run -d linux
 ~~~
 
-The graphical client connects to an explicitly configured `http://host:port`, loads a complete `experimental/v0` snapshot, subscribes to continuous SSE `snapshot` events, recovers across disconnects and Host restarts (including Host-local revision resets), and remains strictly read-only. Because `liftassistant-headless` intentionally omits wildcard CORS headers on unauthenticated HTTP, browser deployments should serve `flutter build web --no-web-resources-cdn` from the same origin (for example behind a local/LAN reverse proxy forwarding `/api/experimental/v0/*`).
+The graphical client connects to an explicitly configured `http://host:port`, loads a complete `experimental/v0` snapshot, subscribes to continuous SSE `snapshot` events, recovers across disconnects and Host restarts (including Host-local revision resets), and remains strictly read-only against normal `liftassistant-headless` Hosts. Because `liftassistant-headless` intentionally omits wildcard CORS headers on unauthenticated HTTP, browser deployments should serve `flutter build web --no-web-resources-cdn` from the same origin (for example behind a local/LAN reverse proxy forwarding `/api/experimental/v0/*`).
+
+For local development only, an isolated Simulator server example can expose the same read-only `experimental/v0` snapshot/SSE endpoints together with an explicitly opted-in, loopback-only Simulator `ServeFloor` workflow (`/api/dev-sim/v0/*`):
+
+~~~bash
+cargo run -p liftassistant-headless --example sim-dev-server -- \
+  --listen 127.0.0.1:8080 \
+  --enable-dev-sim-control
+~~~
+
+Without `--enable-dev-sim-control`, the example serves only read-only `experimental/v0`. When enabled on loopback, `client/` exercises preview, transaction-bound review, client-correlated submission, Engine admission/`IntentId` execution against `VirtualController(SimRuntime)`, canonical observation reconciliation, reconnect status query without automatic resend, and honest process-restart knowledge loss. This example is strictly Simulator-only and development-only: `/api/experimental/v0/*` stays read-only, RMF/LCE/real hardware are unreachable, mode control and settings/parameters are absent, and no public/production control API or real-elevator write path is claimed.
 
 Exercise the live Open-RMF subscription proof against an independently running official Hotel simulation:
 

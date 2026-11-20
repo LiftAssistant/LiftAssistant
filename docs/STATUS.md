@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-11-20
+Updated: 2026-11-21
 
 ## Current milestone
 
@@ -173,6 +173,79 @@ all four non-live Headless scenarios, ten focused LCE tests, normal-dependency
 isolation, bounded-input review, secret scanning and diff/whitespace review.
 The validation uses only checked-in original synthetic fixtures and requires no
 KONE material, hardware, proprietary binary, external service or network peer.
+
+### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
+
+**COMPLETE (Simulator-only development slice).** This vertical slice connects
+existing LiftAssistant canonical observations, Engine controlled-intent
+admission (`PrincipalId`, `AuthorityGrant`, `IntentId`, receipt, reconciliation),
+`VirtualController(SimRuntime)`, and the independent Flutter client into the
+first real executable `ServeFloor` workflow without altering M7 authority or
+recovery, freezing a public control schema, or touching RMF, LCE, HIL, or real
+hardware.
+
+Implemented behavior and invariants:
+
+- **Isolated Simulator-only control surface (`sim-dev-server`):** added as an
+  `[[example]]` target in `liftassistant-headless` consuming `liftassistant-sim`
+  exclusively through `[dev-dependencies]` (keeping `liftassistant-headless`'s
+  normal dependency tree free of `liftassistant-sim` and leaving
+  `crates/liftassistant-headless/src/*` untouched). `/api/experimental/v0/snapshot`
+  and `/api/experimental/v0/events` remain strictly read-only GET (405 on
+  POST/PATCH). `/api/dev-sim/v0/*` (`capabilities`, `serve-floor/preview`,
+  `serve-floor/submit`, `submissions/{submission_key}`) is disabled by default,
+  requires explicit `--enable-dev-sim-control`, refuses non-loopback bind
+  addresses, enforces 4 KiB request bounds and `deny_unknown_fields`, and
+  returns `Cache-Control: no-store` with no wildcard CORS.
+- **Single truth owner:** `liftassistant-engine` gained only side-effect-free
+  read-only inspection (`PrincipalId::as_str`, `Engine::controlled_controller`,
+  `Engine::active_intent`, and `Engine::preview_write_readiness`, which
+  `Engine::write_readiness` delegates to). Engine remains the sole owner of
+  controlled-intent admission, `IntentId`, receipt, reconciliation, and
+  canonical Operational observations; `sim-dev-server` uses only a process-local
+  development Principal (`dev-sim-operator`) and per-car Engine grants.
+- **Submission correlation (`submission_key`) separate from `IntentId`:**
+  Flutter mints a 128-bit random `submission_key` before any possible side
+  effect. It stays outside `liftassistant-model`, `liftassistant-core`, and
+  `liftassistant-engine`, mapping `submission_key -> admitted submission ->
+  Engine IntentId`. Same key + identical `(car, floor)` is idempotent without
+  creating a second `IntentId`; same key + different `(car, floor)` returns HTTP
+  409 conflict; pre-side-effect rejections remain terminal rejected for that
+  key; a fresh key + same `(car, floor)` is a new user submission evaluated by
+  live Engine admission. Server memory is bounded (128 submission records) while
+  preserving active Engine operations during eviction.
+- **Reconnect and process-restart honesty without automatic resend:** transport
+  or response loss after submit enters first-class `Unknown` (`response_lost`)
+  with zero automatic resend. Within the same ephemeral `control_instance_id`
+  lifetime, reconnect queries read-only
+  `GET /api/dev-sim/v0/submissions/{submission_key}` to project latest Engine
+  `IntentRecord` facts (`accepted`, `in_progress`, `completed`, `diverged`,
+  `rejected`, `not_found`, `knowledge_unavailable`). Across a `sim-dev-server`
+  restart, the mismatched `expected_instance_id` returns `knowledge_unavailable`
+  (`control_process_restarted`) rather than claiming the request never happened,
+  and never automatically resends.
+- **Backend-agnostic Flutter Operator workflow (`State + ServeFloor` only):**
+  keeps `support`, `control_path_availability`, `authorization` (honestly
+  `dev_process_local_grant`, never fabricated multi-user `authorized = true`),
+  and advisory `eligible` / `WriteBlocker` distinct; populates target floors
+  exclusively from Engine `ExecutionCapabilities`; enforces floor select ->
+  advisory server preview -> transaction-bound review -> submit -> projected
+  operation status; disables controls on configured-but-unavailable cars
+  (preserving the A–H matrix and Auxiliary non-eligibility); omits control UI on
+  normal read-only Hosts; and includes zero backend-specific Flutter switches,
+  mode controls, or Setting/Parameter surfaces.
+
+Validation: `cargo fmt --all -- --check`, warning-free locked workspace
+all-target Clippy, 209 Rust workspace tests passing with 1 expected ignored test
+(including 43 `liftassistant-engine` tests and 9 `sim-dev-server` unit/HTTP
+tests), exact Rust/Cargo 1.85.0 locked all-target check, TUI/Headless scenarios
+(`m2-call-lifecycle`, `m6a-write-adapter-profile`,
+`headless-read-only-lifecycle`, `headless-experimental-read-model`), live
+`liftassistant-cli snapshot` and HTTP 405/404/loopback proofs, `dart format`,
+`dart analyze --fatal-infos` (0 issues), all 40 Flutter tests passing (including
+real multi-process `sim-dev-server` + TCP fault-injected response-loss proxy +
+process-restart proof and narrow `320x568` + `2.0x` text scaling), and
+`flutter build web --no-web-resources-cdn` (including Wasm dry run).
 
 **M7.1b — COMPLETE; HUMAN HIL/bench environment decision pending.** The
 private gateway now distinguishes an explicit recovery UID/Principal from the
