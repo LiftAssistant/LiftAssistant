@@ -191,9 +191,12 @@ observation-based completion, withdrawal, bounded retirement and virtual
 restore. M6C.2 requires separate HUMAN review of the generic lifecycle proof
 and authorization for live adapter evidence. M6C.1b subsequently passed that
 review. M6C.2 is now the authorized bounded official KONE Sandbox landing-call
-validation; it does not authorize a production KONE adapter, destination-call
-Core semantics, generic semantic redesign or M7. Vendor mappings and durable
-recovery remain later HUMAN gates.
+validation. The run completed with `PARTIAL_MAPPING`: delivery and uncertainty
+fit M6C, while the bounded stream supplied no positive receipt, allocation,
+Serving, terminal or prevention mapping. M6C.2 now awaits HUMAN review. It does
+not authorize a production KONE adapter, destination-call Core semantics,
+generic semantic redesign, M6C.3 or M7. Vendor mappings and durable recovery
+remain later HUMAN gates.
 
 Only high-level intents belong here. Raw brake, motor torque, safety-chain bypass, door-lock bypass, or comparable safety primitives remain outside LiftAssistant Core semantics.
 

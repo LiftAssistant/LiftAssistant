@@ -4,8 +4,8 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6C.2 KONE landing-call Sandbox validation is AUTHORIZED and frozen before
-live work.**
+**M6C.2 KONE landing-call Sandbox validation is COMPLETE and awaiting HUMAN
+architecture/quality review.**
 
 M6C.0, M6C.1a and M6C.1b are HUMAN-ACCEPTED. M6C.1b implements the
 [frozen internal lifecycle and recovery contract](M6C_DISPATCH_OWNERSHIP.md#m6c1b-external-dispatch-lifecycle-and-recovery).
@@ -24,12 +24,31 @@ preventions, with zero active records and 128 retained tombstones of each kind
 at the end. The implementation uses in-memory fixtures and existing crate
 dependencies.
 
-The [M6C.2 validation contract](M6C2_KONE_LANDING_VALIDATION.md) freezes an
-official-Sandbox-only, two-normal-call budget before any live landing call. It
-requires live capability/schema discovery, explicit HallCall mapping, actual
-Engine M6C API application, conservative receipt/assignment/service/withdrawal
-interpretation, private sanitized Evidence v0 and a final A--L matrix. No
-production adapter, destination-call Core expansion or M7 work is authorized.
+The [M6C.2 validation contract and executed matrix](M6C2_KONE_LANDING_VALIDATION.md#executed-official-sandbox-validation)
+completed its official-Sandbox-only two-normal-call budget. All five current
+inventory candidates exposed direct enabled LandingCall UP/DOWN actions. The
+same nine-lift logical fixture class won deterministic ranking; configured
+floor/side plus the live action descriptors mapped one landing to HallCall
+`2F UP` and `2F DOWN` without guessed resource identities.
+
+Both requests were reserved by the real M6C Engine sink before WebSocket send,
+then recorded Submitted. Both native responses returned correlated
+`success: true` plus a call session, but no explicit controller-acceptance
+disposition, so receipt remained Indeterminate (`NO_RECEIPT_MAPPING`). Call A
+was not resubmitted across controlled session resume. No correlated call-state,
+allocation, Serving or terminal event arrived in the 8 + 90 second Call A
+windows. Independent monitoring retained 22 position and 40 door messages,
+including one uncorrelated door cycle, but supplied no authority to invent a
+`CarId` or physical completion. Call B delete was sent once; no correlated
+acknowledgement arrived in 20 seconds and no terminal event arrived in the
+following 30 seconds, so withdrawal correctly remained Requested.
+
+The terminal A--L matrix is PASS for A/B/C/H/I/J/K/L and PARTIAL for D/E/F/G.
+Overall result is `PARTIAL_MAPPING`, not a generic semantic mismatch. Private
+Evidence v0 remains outside Git with seven files, 52 causal events, 88 sanitized
+protocol messages and zero drops; credential/token scans passed. The focused
+recorded regression preserves Submitted + Indeterminate + Pending, no resume
+resend and Requested withdrawal through actual Engine APIs.
 
 **Current terminal target:** `M6C.2 COMPLETE — awaiting HUMAN architecture/quality review. KONE landing-call Sandbox evidence collected; no production adapter or M7 work started.`
 

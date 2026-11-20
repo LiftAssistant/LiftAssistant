@@ -171,6 +171,17 @@ bounded evidence step is the official KONE Sandbox landing-call validation.
 That authorization does not approve a production KONE adapter, destination-call
 Core semantics, M7, or any change to the accepted dispatch-ownership model.
 
+M6C.2 completed its two-call official KONE Sandbox landing-call budget with a
+`PARTIAL_MAPPING` result. Current live actions provided explicit UP/DOWN landing
+descriptors, and both sends produced correlated `success: true`/session
+responses. Those responses did not carry an explicit controller-acceptance
+disposition. The bounded subscriptions supplied no allocation, Serving or
+terminal call state, and delete supplied no correlated acknowledgement.
+LiftAssistant therefore retained Submitted delivery with Indeterminate receipt,
+Pending calls and Requested withdrawal. Independent position/door changes were
+not assigned to a logical car. This validated conservative uncertainty handling
+without changing generic M6C semantics or approving a production KONE mapping.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

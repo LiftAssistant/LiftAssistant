@@ -574,6 +574,72 @@ fn virtual_recovery_keeps_call_identity_delivery_progress_and_command_fences() {
 }
 
 #[test]
+fn recorded_landing_call_partial_mapping_keeps_remote_uncertainty_pending() {
+    let mut engine = engine();
+    let (scope, grant, mut sink) = configured_external(&mut engine);
+    sink.delivery = ExternalDispatchDelivery::Submitted;
+
+    let up = submit(&mut engine, call(), &scope, &grant, &mut sink);
+    let up_context = context(up, &scope);
+    assert_eq!(
+        engine.receive_external_receipt(&up_context, ExternalDispatchDisposition::Indeterminate),
+        Ok(ExternalReceiptResult::Recorded)
+    );
+    assert!(matches!(
+        engine.submit_external_call(call(), &scope, &grant, &mut sink),
+        Ok(ExternalDispatchSubmission::Duplicate {
+            request,
+            delivery: ExternalDispatchDelivery::Submitted,
+        }) if request.call == up
+    ));
+    assert_eq!(sink.requests.len(), 1, "resume must not resubmit Call A");
+
+    let down = submit(
+        &mut engine,
+        HallCall {
+            direction: Direction::Down,
+            ..call()
+        },
+        &scope,
+        &grant,
+        &mut sink,
+    );
+    assert_eq!(
+        engine.receive_external_receipt(
+            &context(down, &scope),
+            ExternalDispatchDisposition::Indeterminate
+        ),
+        Ok(ExternalReceiptResult::Recorded)
+    );
+    sink.withdrawal = WithdrawalOutcome::Requested;
+    assert_eq!(
+        engine.withdraw_external_call(down, &scope, &grant, &mut sink),
+        Ok(WithdrawalOutcome::Requested)
+    );
+
+    for id in [up, down] {
+        assert_eq!(engine.calls().get(id).unwrap().state, CallState::Pending);
+        assert_eq!(engine.external_dispatch_terminal(id), None);
+        let record = engine.external_dispatch_record(id).unwrap();
+        assert_eq!(record.delivery, ExternalDispatchDelivery::Submitted);
+        assert_eq!(
+            record.receipt,
+            Some(ExternalDispatchDisposition::Indeterminate)
+        );
+    }
+    assert_eq!(
+        engine.external_dispatch_record(up).unwrap().withdrawal,
+        None
+    );
+    assert_eq!(
+        engine.external_dispatch_record(down).unwrap().withdrawal,
+        Some(WithdrawalOutcome::Requested)
+    );
+    assert_eq!(sink.requests.len(), 2);
+    assert_eq!(sink.withdrawals, vec![down]);
+}
+
+#[test]
 fn completed_and_prevented_history_stay_bounded_and_evicted_ids_stay_fenced() {
     let mut engine = engine();
     let (scope, grant, mut sink) = configured_external(&mut engine);

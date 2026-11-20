@@ -134,9 +134,15 @@ The following M6B.3 findings remain deferred constraints:
 
 ## Current limits
 
-M6C is a deterministic in-memory Engine proof. It has no KONE or other vendor
-type, network transport, credential, public write API, production adapter,
-database, broker, plugin framework, simulator claim, physical completion claim,
-or M7 implementation. Vendor receipt, service and withdrawal mapping, native
-allocation correlation, live reconnect and durable recovery require later
-evidence and HUMAN review.
+M6C is a deterministic in-memory Engine proof. The bounded M6C.2 official KONE
+Sandbox run applied live landing-call delivery, uncertain receipt and requested
+withdrawal through that proof, while current call-state subscriptions supplied
+no allocation, Serving or terminal event. The model correctly retained Pending
+work and did not invent identity, prevention or completion. This is partial
+vendor evidence, not a production mapping.
+
+M6C still has no KONE or other vendor type, product network transport,
+credential, public write API, production adapter, database, broker, plugin
+framework, physical completion claim or M7 implementation. Positive vendor
+receipt/service/allocation mapping, durable recovery and production behavior
+require later evidence and HUMAN review.
