@@ -148,6 +148,7 @@ String describeOperationTruthCaption(TrackedServeFloorOperation operation) {
       return switch (reason) {
         'response_lost' => 'Submission response was lost after dispatch. The server may have accepted the request. No automatic resend will occur; query status after reconnecting.',
         'control_process_restarted' => 'Prior submission knowledge unavailable: the development control process restarted and ephemeral state is not persisted. No automatic resend occurred.',
+        'control_surface_unavailable' => 'Prior submission knowledge unavailable: the connected Host does not expose the development control surface (HTTP 404). No automatic resend occurred.',
         'delivery_or_receipt_indeterminate' => 'Delivery or controller receipt is indeterminate in Engine; awaiting canonical observation evidence. No automatic resend.',
         'engine_history_evicted' || 'submission_evicted_or_unknown' => 'Prior submission knowledge is no longer retained in bounded server memory. No automatic resend.',
         _ => 'Current submission knowledge is unavailable. Treated as Unknown without automatic resend.',
@@ -535,10 +536,25 @@ class _ServeFloorWorkflowBodyState extends State<_ServeFloorWorkflowBody> {
   }
 
   Future<void> _submitTransaction() async {
+    final ClientState state = widget.controller.state;
     final int? floor = _selectedFloor;
     final String? key = _draftSubmissionKey;
     final ServeFloorPreview? preview = _preview;
-    if (floor == null || key == null || preview == null || !preview.eligible) {
+    final ControlSurfaceCapabilities? surface = state.controlCapabilities;
+    final CarServeFloorCapability? cap = switch (surface) {
+      ControlSurfaceAvailable() => surface.capabilityForCar(widget.carId),
+      _ => null,
+    };
+    if (!state.isSnapshotLive ||
+        _previewLoading ||
+        floor == null ||
+        key == null ||
+        preview == null ||
+        !preview.eligible ||
+        cap == null ||
+        cap.support != OperationSupport.supported ||
+        cap.controlPathAvailability != ControlPathAvailability.available ||
+        !cap.executableFloors.contains(floor)) {
       return;
     }
     setState(() {
@@ -571,7 +587,10 @@ class _ServeFloorWorkflowBodyState extends State<_ServeFloorWorkflowBody> {
               (OperationalCar? c) => c?.id == widget.carId,
               orElse: () => null,
             );
-        final TrackedServeFloorOperation? tracked = state.trackedOperation;
+        final TrackedServeFloorOperation? tracked =
+            state.trackedOperation?.car == widget.carId
+            ? state.trackedOperation
+            : null;
 
         return Column(
           key: const Key('serve-floor-workflow-modal'),
@@ -616,7 +635,7 @@ class _ServeFloorWorkflowBodyState extends State<_ServeFloorWorkflowBody> {
             const SizedBox(height: 8),
 
             if (_inStatusView && tracked != null)
-              _buildStatusView(context, state, tracked, liveCar)
+              _buildStatusView(context, state, surface, cap, tracked, liveCar)
             else
               _buildPrepareAndReviewView(context, state, surface, cap, liveCar),
           ],
@@ -698,8 +717,10 @@ class _ServeFloorWorkflowBodyState extends State<_ServeFloorWorkflowBody> {
 
     final bool canSubmit =
         state.isSnapshotLive &&
+        canPreviewFloors &&
         !_previewLoading &&
         _selectedFloor != null &&
+        cap.executableFloors.contains(_selectedFloor) &&
         _draftSubmissionKey != null &&
         _preview != null &&
         _preview!.eligible;
@@ -962,6 +983,8 @@ class _ServeFloorWorkflowBodyState extends State<_ServeFloorWorkflowBody> {
   Widget _buildStatusView(
     BuildContext context,
     ClientState state,
+    ControlSurfaceCapabilities? surface,
+    CarServeFloorCapability? cap,
     TrackedServeFloorOperation operation,
     OperationalCar? liveCar,
   ) {
@@ -977,6 +1000,14 @@ class _ServeFloorWorkflowBodyState extends State<_ServeFloorWorkflowBody> {
       palette,
     );
     final ProjectedSubmission? proj = operation.projection;
+    final bool canStartNewAttempt =
+        liveCar != null &&
+        !operation.submitInFlight &&
+        surface is ControlSurfaceAvailable &&
+        cap != null &&
+        cap.support == OperationSupport.supported &&
+        cap.controlPathAvailability == ControlPathAvailability.available &&
+        cap.executableFloors.isNotEmpty;
 
     return Column(
       key: const Key('serve-floor-status-panel'),
@@ -1085,11 +1116,18 @@ class _ServeFloorWorkflowBodyState extends State<_ServeFloorWorkflowBody> {
                 if (liveCar != null) ...<Widget>[
                   const SizedBox(height: 3),
                   _KvLine(
-                    label: 'Live car location',
+                    label: state.isSnapshotLive
+                        ? 'Live car location'
+                        : 'Retained location',
                     value: switch (liveCar.location) {
-                      FloorLocation(:final floor) => 'Floor $floor',
+                      FloorLocation(:final floor) =>
+                        state.isSnapshotLive
+                            ? 'Floor $floor'
+                            : 'Floor $floor (not live)',
                       ContinuousLocation(:final floorPosition) =>
-                        '${floorPosition.toStringAsFixed(2)}F',
+                        state.isSnapshotLive
+                            ? '${floorPosition.toStringAsFixed(2)}F'
+                            : '${floorPosition.toStringAsFixed(2)}F (not live)',
                     },
                     monospace: true,
                   ),
@@ -1123,7 +1161,7 @@ class _ServeFloorWorkflowBodyState extends State<_ServeFloorWorkflowBody> {
                 operation.queryInFlight ? 'Querying...' : 'Query status',
               ),
             ),
-            if (liveCar != null && !operation.submitInFlight)
+            if (canStartNewAttempt)
               OutlinedButton(
                 key: const Key('modal-new-attempt-button'),
                 onPressed: _startNewAttempt,

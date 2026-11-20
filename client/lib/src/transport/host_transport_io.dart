@@ -306,7 +306,6 @@ final class IoHostTransport implements HostTransport, DevControlTransport {
 
       final int status = response.statusCode;
       if (status >= 300 && status < 400) {
-        await response.drain<void>();
         throw HostHttpStatusException(
           statusCode: status,
           operation: 'Control $method',
@@ -317,7 +316,6 @@ final class IoHostTransport implements HostTransport, DevControlTransport {
           response.headers.value(HttpHeaders.contentTypeHeader) ?? '';
 
       if (response.contentLength > byteLimit) {
-        await response.drain<void>();
         throw SnapshotTooLargeException(limitBytes: byteLimit);
       }
 

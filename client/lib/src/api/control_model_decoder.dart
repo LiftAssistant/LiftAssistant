@@ -96,6 +96,7 @@ final class DevControlV0Decoder {
 
   static ServeFloorPreview decodePreviewJson(String rawJson) {
     final Map<String, Object?> root = _decodeVersionedRoot(rawJson);
+    final String operation = _requireExplicitServeFloorOperation(root, 'root');
     final String? observedModeRaw = _optionalNullableString(
       root,
       'observed_operating_mode',
@@ -110,7 +111,7 @@ final class DevControlV0Decoder {
         'root',
       ),
       advisory: _requireBool(root, 'advisory', 'root'),
-      operation: _requireNonEmptyString(root, 'operation', 'root'),
+      operation: operation,
       car: _requireNonEmptyString(root, 'car', 'root'),
       floor: _requireFloorI16(root, 'floor', 'root'),
       support: _parseSupport(_requireString(root, 'support', 'root')),
@@ -148,6 +149,7 @@ final class DevControlV0Decoder {
 
   static ProjectedSubmission decodeSubmissionJson(String rawJson) {
     final Map<String, Object?> root = _decodeVersionedRoot(rawJson);
+    final String operation = _requireExplicitServeFloorOperation(root, 'root');
     return ProjectedSubmission(
       controlApiVersion: devControlApiVersion,
       developmentOnly: _requireBool(root, 'development_only', 'root'),
@@ -162,7 +164,7 @@ final class DevControlV0Decoder {
         'root',
       ),
       submissionKey: _requireNonEmptyString(root, 'submission_key', 'root'),
-      operation: _requireNonEmptyString(root, 'operation', 'root'),
+      operation: operation,
       car: _optionalNullableString(root, 'car', 'root'),
       floor: _optionalNullableFloorI16(root, 'floor', 'root'),
       status: _parseProjectedStatus(_requireString(root, 'status', 'root')),
@@ -216,6 +218,19 @@ final class DevControlV0Decoder {
       throw UnsupportedControlApiVersionException(apiVersion);
     }
     return root;
+  }
+
+  static String _requireExplicitServeFloorOperation(
+    Map<String, Object?> map,
+    String path,
+  ) {
+    final String operation = _requireNonEmptyString(map, 'operation', path);
+    if (operation != 'serve_floor') {
+      throw MalformedControlPayloadException(
+        'Unsupported operation "$operation" at $path.operation (expected "serve_floor").',
+      );
+    }
+    return operation;
   }
 
   static CarServeFloorCapability _parseCarCapability(Object? raw, String path) {

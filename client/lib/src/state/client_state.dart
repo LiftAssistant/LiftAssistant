@@ -92,6 +92,7 @@ final class TrackedServeFloorOperation {
     this.submitInFlight = false,
     this.queryInFlight = false,
     this.responseLost = false,
+    this.localKnowledgeReason,
     this.conflictMessage,
     this.validationErrorMessage,
     this.projection,
@@ -106,6 +107,7 @@ final class TrackedServeFloorOperation {
   final bool submitInFlight;
   final bool queryInFlight;
   final bool responseLost;
+  final String? localKnowledgeReason;
   final String? conflictMessage;
   final String? validationErrorMessage;
   final ProjectedSubmission? projection;
@@ -128,7 +130,7 @@ final class TrackedServeFloorOperation {
   }
 
   ProjectedOperationStatus get effectiveStatus {
-    if (isProcessRestarted) {
+    if (localKnowledgeReason != null || isProcessRestarted) {
       return ProjectedOperationStatus.knowledgeUnavailable;
     }
     final ProjectedSubmission? current = projection;
@@ -139,6 +141,9 @@ final class TrackedServeFloorOperation {
   }
 
   String? get effectiveKnowledgeReason {
+    if (localKnowledgeReason != null) {
+      return localKnowledgeReason;
+    }
     if (isProcessRestarted) {
       return 'control_process_restarted';
     }
@@ -152,10 +157,12 @@ final class TrackedServeFloorOperation {
     return null;
   }
 
-  bool get shouldAutoQueryOnLiveUpdate {
+  /// Whether a live SSE update warrants a read-only GET submission query once
+  /// no query is already in flight. Never triggers resend of POST.
+  bool get needsAutoQueryIfIdle {
     if (!submissionAttempted ||
         submitInFlight ||
-        queryInFlight ||
+        localKnowledgeReason != null ||
         conflictMessage != null ||
         validationErrorMessage != null ||
         isProcessRestarted) {
@@ -171,11 +178,16 @@ final class TrackedServeFloorOperation {
             current.knowledgeReason == 'delivery_or_receipt_indeterminate');
   }
 
+  bool get shouldAutoQueryOnLiveUpdate =>
+      !queryInFlight && needsAutoQueryIfIdle;
+
   TrackedServeFloorOperation copyWith({
     bool? submissionAttempted,
     bool? submitInFlight,
     bool? queryInFlight,
     bool? responseLost,
+    String? localKnowledgeReason,
+    bool clearLocalKnowledgeReason = false,
     String? conflictMessage,
     String? expectedControlInstanceId,
     bool clearConflictMessage = false,
@@ -196,6 +208,9 @@ final class TrackedServeFloorOperation {
       submitInFlight: submitInFlight ?? this.submitInFlight,
       queryInFlight: queryInFlight ?? this.queryInFlight,
       responseLost: responseLost ?? this.responseLost,
+      localKnowledgeReason: clearLocalKnowledgeReason
+          ? null
+          : (localKnowledgeReason ?? this.localKnowledgeReason),
       conflictMessage: clearConflictMessage
           ? null
           : (conflictMessage ?? this.conflictMessage),

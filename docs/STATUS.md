@@ -221,9 +221,11 @@ Implemented behavior and invariants:
   `GET /api/dev-sim/v0/submissions/{submission_key}` to project latest Engine
   `IntentRecord` facts (`accepted`, `in_progress`, `completed`, `diverged`,
   `rejected`, `not_found`, `knowledge_unavailable`). Across a `sim-dev-server`
-  restart, the mismatched `expected_instance_id` returns `knowledge_unavailable`
-  (`control_process_restarted`) rather than claiming the request never happened,
-  and never automatically resends.
+  restart, a mismatched `expected_instance_id` returns `knowledge_unavailable`
+  (`control_process_restarted`) — and restarting without `--enable-dev-sim-control`
+  (HTTP 404) transitions tracked state to `knowledge_unavailable`
+  (`control_surface_unavailable`) — rather than claiming the request never
+  happened or retaining stale active badges, and never automatically resends.
 - **Backend-agnostic Flutter Operator workflow (`State + ServeFloor` only):**
   keeps `support`, `control_path_availability`, `authorization` (honestly
   `dev_process_local_grant`, never fabricated multi-user `authorized = true`),
@@ -236,15 +238,17 @@ Implemented behavior and invariants:
   mode controls, or Setting/Parameter surfaces.
 
 Validation: `cargo fmt --all -- --check`, warning-free locked workspace
-all-target Clippy, 209 Rust workspace tests passing with 1 expected ignored test
-(including 43 `liftassistant-engine` tests and 9 `sim-dev-server` unit/HTTP
-tests), exact Rust/Cargo 1.85.0 locked all-target check, TUI/Headless scenarios
+all-target Clippy, 210 Rust workspace tests passing with 1 expected ignored test
+(including 43 `liftassistant-engine` tests and 10 `sim-dev-server` unit/HTTP
+tests including barrier-synchronized concurrent duplicate/conflict submits),
+exact Rust/Cargo 1.85.0 locked all-target check, TUI/Headless scenarios
 (`m2-call-lifecycle`, `m6a-write-adapter-profile`,
 `headless-read-only-lifecycle`, `headless-experimental-read-model`), live
 `liftassistant-cli snapshot` and HTTP 405/404/loopback proofs, `dart format`,
-`dart analyze --fatal-infos` (0 issues), all 40 Flutter tests passing (including
+`dart analyze --fatal-infos` (0 issues), all 47 Flutter tests passing (including
 real multi-process `sim-dev-server` + TCP fault-injected response-loss proxy +
-process-restart proof and narrow `320x568` + `2.0x` text scaling), and
+process-restart and read-only 404 restart proofs, in-flight SSE query coalescing,
+oversized response abort, and narrow `320x568` + `2.0x` text scaling), and
 `flutter build web --no-web-resources-cdn` (including Wasm dry run).
 
 **M7.1b — COMPLETE; HUMAN HIL/bench environment decision pending.** The

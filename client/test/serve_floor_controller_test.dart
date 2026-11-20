@@ -434,4 +434,384 @@ void main() {
     await controller.connectToUrl('http://127.0.0.1:9090');
     expect(controller.state.trackedOperation, isNull);
   });
+
+  test('direct POST /submit after server restart between preview and submit binds new instance ID and tracks to Completed', () async {
+    final _FakeControlHostTransport transport = _FakeControlHostTransport();
+    String serverInstance = 'inst-preview-1';
+    String status = 'accepted';
+    String reconciliation = 'pending';
+    bool sawProgress = false;
+
+    transport.onCapabilities = (_) async => ControlHttpResponse(
+      statusCode: 200,
+      body: _capabilitiesJson(serverInstance),
+      contentType: 'application/json',
+    );
+    transport.onSubmit = (_, String body) async {
+      final Map<String, Object?> decoded =
+          jsonDecode(body) as Map<String, Object?>;
+      // Server restarted between preview (inst-preview-1) and submit (inst-submit-2).
+      serverInstance = 'inst-submit-2';
+      return ControlHttpResponse(
+        statusCode: 200,
+        body: _submissionJson(
+          instanceId: serverInstance,
+          key: decoded['submission_key']! as String,
+          status: status,
+          intentId: 1,
+          receipt: 'awaiting',
+          reconciliation: reconciliation,
+          sawProgress: sawProgress,
+          active: true,
+        ),
+        contentType: 'application/json',
+      );
+    };
+    transport.onQuery = (_, String key, String? expectedInstance) async {
+      expect(expectedInstance, 'inst-submit-2');
+      return ControlHttpResponse(
+        statusCode: 200,
+        body: _submissionJson(
+          instanceId: serverInstance,
+          key: key,
+          status: status,
+          intentId: 1,
+          receipt: 'accepted',
+          reconciliation: reconciliation,
+          sawProgress: sawProgress,
+          active: status != 'completed',
+        ),
+        contentType: 'application/json',
+      );
+    };
+
+    final ClientController controller = ClientController(transport: transport);
+    addTearDown(controller.dispose);
+
+    await controller.connectToUrl('http://127.0.0.1:8080');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    // Submit passing stale preview instance ID 'inst-preview-1'.
+    await controller.submitServeFloor(
+      submissionKey: 'sub-restarted-before-submit',
+      car: 'A',
+      floor: 6,
+      expectedControlInstanceId: 'inst-preview-1',
+    );
+
+    expect(
+      controller.state.trackedOperation?.expectedControlInstanceId,
+      'inst-submit-2',
+    );
+    expect(controller.state.trackedOperation?.isProcessRestarted, isFalse);
+    expect(
+      controller.state.trackedOperation?.effectiveStatus,
+      ProjectedOperationStatus.accepted,
+    );
+
+    // Next SSE snapshot advances cleanly to Completed on inst-submit-2.
+    status = 'completed';
+    reconciliation = 'satisfied';
+    sawProgress = true;
+    transport.sseController.add(_snapshotJson(2, carAFloor: 6));
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    expect(transport.submitCalls, 1);
+    expect(
+      controller.state.trackedOperation?.effectiveStatus,
+      ProjectedOperationStatus.completed,
+    );
+  });
+
+  test('coalesces final SSE snapshot arriving while queryTrackedSubmission is in flight so UI reaches Completed', () async {
+    final _FakeControlHostTransport transport = _FakeControlHostTransport();
+    final Completer<ControlHttpResponse> firstQueryCompleter =
+        Completer<ControlHttpResponse>();
+
+    transport.onSubmit = (_, String body) async {
+      final Map<String, Object?> decoded =
+          jsonDecode(body) as Map<String, Object?>;
+      return ControlHttpResponse(
+        statusCode: 200,
+        body: _submissionJson(
+          instanceId: 'inst-alpha-0001',
+          key: decoded['submission_key']! as String,
+          status: 'accepted',
+          intentId: 1,
+          receipt: 'awaiting',
+          reconciliation: 'pending',
+          active: true,
+        ),
+        contentType: 'application/json',
+      );
+    };
+
+    int queryIndex = 0;
+    transport.onQuery = (_, String key, String? _) {
+      queryIndex++;
+      if (queryIndex == 1) {
+        return firstQueryCompleter.future;
+      }
+      return Future<ControlHttpResponse>.value(
+        ControlHttpResponse(
+          statusCode: 200,
+          body: _submissionJson(
+            instanceId: 'inst-alpha-0001',
+            key: key,
+            status: 'completed',
+            intentId: 1,
+            receipt: 'accepted',
+            reconciliation: 'satisfied',
+            sawProgress: true,
+            active: false,
+          ),
+          contentType: 'application/json',
+        ),
+      );
+    };
+
+    final ClientController controller = ClientController(transport: transport);
+    addTearDown(controller.dispose);
+
+    await controller.connectToUrl('http://127.0.0.1:8080');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    await controller.submitServeFloor(
+      submissionKey: 'sub-coalesce-0001',
+      car: 'A',
+      floor: 6,
+    );
+
+    // Tick N-1 SSE triggers first GET query (held in flight).
+    transport.sseController.add(_snapshotJson(2, carAFloor: 5, moving: true));
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(transport.queryCalls, 1);
+    expect(controller.state.trackedOperation?.queryInFlight, isTrue);
+
+    // Final Tick N SSE (arrival + door open) arrives WHILE first GET is still in flight!
+    transport.sseController.add(_snapshotJson(3, carAFloor: 6));
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(transport.queryCalls, 1);
+
+    // First GET resolves with stale 'in_progress' from Tick N-1.
+    firstQueryCompleter.complete(
+      ControlHttpResponse(
+        statusCode: 200,
+        body: _submissionJson(
+          instanceId: 'inst-alpha-0001',
+          key: 'sub-coalesce-0001',
+          status: 'in_progress',
+          intentId: 1,
+          receipt: 'accepted',
+          reconciliation: 'pending',
+          sawProgress: true,
+          active: true,
+        ),
+        contentType: 'application/json',
+      ),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    // Controller must have fired ONE coalesced follow-up GET (zero extra POSTs) -> Completed!
+    expect(transport.submitCalls, 1);
+    expect(transport.queryCalls, 2);
+    expect(
+      controller.state.trackedOperation?.effectiveStatus,
+      ProjectedOperationStatus.completed,
+    );
+    expect(
+      controller.state.trackedOperation?.projection?.reconciliation,
+      'satisfied',
+    );
+  });
+
+  test('Host restart without control surface (HTTP 404) transitions active operation to Unknown without resend or 404 SSE spam', () async {
+    final _FakeControlHostTransport transport = _FakeControlHostTransport();
+    bool controlEnabled = true;
+
+    transport.onCapabilities = (_) async {
+      if (!controlEnabled) {
+        return const ControlHttpResponse(
+          statusCode: 404,
+          body: '',
+          contentType: 'text/plain',
+        );
+      }
+      return ControlHttpResponse(
+        statusCode: 200,
+        body: _capabilitiesJson('inst-before-ro'),
+        contentType: 'application/json',
+      );
+    };
+    transport.onSubmit = (_, String body) async {
+      if (!controlEnabled) {
+        return const ControlHttpResponse(
+          statusCode: 404,
+          body: '',
+          contentType: 'text/plain',
+        );
+      }
+      final Map<String, Object?> decoded =
+          jsonDecode(body) as Map<String, Object?>;
+      return ControlHttpResponse(
+        statusCode: 200,
+        body: _submissionJson(
+          instanceId: 'inst-before-ro',
+          key: decoded['submission_key']! as String,
+          status: 'accepted',
+          intentId: 1,
+          receipt: 'awaiting',
+          reconciliation: 'pending',
+          active: true,
+        ),
+        contentType: 'application/json',
+      );
+    };
+    transport.onQuery = (_, String key, String? _) async {
+      if (!controlEnabled) {
+        return const ControlHttpResponse(
+          statusCode: 404,
+          body: '',
+          contentType: 'text/plain',
+        );
+      }
+      return ControlHttpResponse(
+        statusCode: 200,
+        body: _submissionJson(
+          instanceId: 'inst-before-ro',
+          key: key,
+          status: 'accepted',
+          intentId: 1,
+          receipt: 'awaiting',
+          reconciliation: 'pending',
+          active: true,
+        ),
+        contentType: 'application/json',
+      );
+    };
+
+    final ClientController controller = ClientController(
+      transport: transport,
+      retryBackoff: (_) => const Duration(milliseconds: 20),
+    );
+    addTearDown(controller.dispose);
+
+    await controller.connectToUrl('http://127.0.0.1:8080');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    await controller.submitServeFloor(
+      submissionKey: 'sub-to-readonly-01',
+      car: 'A',
+      floor: 6,
+    );
+    expect(
+      controller.state.trackedOperation?.effectiveStatus,
+      ProjectedOperationStatus.accepted,
+    );
+
+    // Host restarts WITHOUT --enable-dev-sim-control (read-only mode -> 404).
+    controlEnabled = false;
+    transport.snapshotBody = _snapshotJson(1);
+    transport.sseController.addError(
+      const HostStreamDisconnectedException('restarted read-only'),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(transport.submitCalls, 1, reason: 'MUST NOT resend POST');
+    expect(controller.state.controlCapabilities, const ControlSurfaceAbsent());
+    expect(
+      controller.state.trackedOperation?.effectiveStatus,
+      ProjectedOperationStatus.knowledgeUnavailable,
+    );
+    expect(
+      controller.state.trackedOperation?.effectiveKnowledgeReason,
+      'control_surface_unavailable',
+    );
+    expect(controller.state.trackedOperation?.projection, isNull);
+
+    // Subsequent SSE updates must NOT spam 404 GET /submissions/{key}!
+    final int queriesBeforeMoreSse = transport.queryCalls;
+    transport.sseController.add(_snapshotJson(2));
+    transport.sseController.add(_snapshotJson(3));
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(transport.queryCalls, queriesBeforeMoreSse);
+
+    // Direct POST /submit receiving 404 also enters control_surface_unavailable without SSE spam.
+    await controller.submitServeFloor(
+      submissionKey: 'sub-direct-404-01',
+      car: 'A',
+      floor: 6,
+    );
+    expect(
+      controller.state.trackedOperation?.effectiveStatus,
+      ProjectedOperationStatus.knowledgeUnavailable,
+    );
+    expect(
+      controller.state.trackedOperation?.effectiveKnowledgeReason,
+      'control_surface_unavailable',
+    );
+    expect(
+      controller.state.trackedOperation?.shouldAutoQueryOnLiveUpdate,
+      isFalse,
+    );
+  });
+
+  test('fails closed on mismatched submission_key or floor in submit/query responses without corrupting state', () async {
+    final _FakeControlHostTransport transport = _FakeControlHostTransport();
+    transport.onSubmit = (_, _) async => ControlHttpResponse(
+      statusCode: 200,
+      body: _submissionJson(
+        instanceId: 'inst-alpha-0001',
+        key: 'sub-WRONG-key-9999',
+        status: 'completed',
+        intentId: 99,
+        receipt: 'accepted',
+        reconciliation: 'satisfied',
+      ),
+      contentType: 'application/json',
+    );
+    transport.onQuery = (_, String key, String? _) async => ControlHttpResponse(
+      statusCode: 200,
+      body: _submissionJson(
+        instanceId: 'inst-alpha-0001',
+        key: key,
+        status: 'completed',
+        intentId: 99,
+        receipt: 'accepted',
+        reconciliation: 'satisfied',
+      ).replaceFirst('"floor": 6', '"floor": 2'),
+      contentType: 'application/json',
+    );
+
+    final ClientController controller = ClientController(transport: transport);
+    addTearDown(controller.dispose);
+
+    await controller.connectToUrl('http://127.0.0.1:8080');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+
+    await controller.submitServeFloor(
+      submissionKey: 'sub-expected-key-1',
+      car: 'A',
+      floor: 6,
+    );
+    expect(transport.submitCalls, 1);
+    expect(controller.state.trackedOperation?.projection, isNull);
+    expect(controller.state.trackedOperation?.responseLost, isTrue);
+    expect(
+      controller.state.trackedOperation?.lastQueryError,
+      contains('mismatched submission_key'),
+    );
+
+    // Query returning mismatched floor must not overwrite tracked state with fake Completed.
+    await controller.queryTrackedSubmission();
+    expect(controller.state.trackedOperation?.projection, isNull);
+    expect(
+      controller.state.trackedOperation?.effectiveStatus,
+      ProjectedOperationStatus.knowledgeUnavailable,
+    );
+    expect(
+      controller.state.trackedOperation?.lastQueryError,
+      contains('mismatched floor'),
+    );
+  });
 }

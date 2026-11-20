@@ -188,5 +188,53 @@ void main() {
       () => DevControlV0Decoder.decodeSubmissionJson('{not json'),
       throwsA(isA<MalformedControlPayloadException>()),
     );
+    expect(
+      () => DevControlV0Decoder.decodePreviewJson('''
+        {
+          "control_api_version": "dev-sim/v0",
+          "development_only": true,
+          "control_instance_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "advisory": true,
+          "operation": "set_mode",
+          "car": "A",
+          "floor": 4,
+          "support": "supported",
+          "control_path_availability": "available",
+          "control_path_reason": null,
+          "authorization": "dev_process_local_grant",
+          "eligible": true,
+          "blocker": null,
+          "observed_car_available": true,
+          "observed_floor_reference": 3,
+          "observed_operating_mode": "normal"
+        }
+        '''),
+      throwsA(isA<MalformedControlPayloadException>()),
+    );
+    expect(
+      () => DevControlV0Decoder.decodeSubmissionJson('''
+        {
+          "control_api_version": "dev-sim/v0",
+          "development_only": true,
+          "control_instance_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "ephemeral_process_memory": true,
+          "submission_key": "sub-test-0001",
+          "operation": "park_at",
+          "car": "A",
+          "floor": 5,
+          "status": "accepted",
+          "duplicate_submission": false,
+          "intent_id": 1,
+          "receipt": "accepted",
+          "reconciliation": "pending",
+          "diverged_floor": null,
+          "saw_progress": false,
+          "is_active_in_engine": true,
+          "blocker": null,
+          "knowledge_reason": null
+        }
+        '''),
+      throwsA(isA<MalformedControlPayloadException>()),
+    );
   });
 }

@@ -73,6 +73,7 @@ class ClientController extends ChangeNotifier {
   Timer? _retryTimer;
   HostSseConnection? _activeSse;
   StreamSubscription<String>? _sseSubscription;
+  String? _pendingRequerySubmissionKey;
   bool _disposed = false;
 
   ClientState get state => _state;
@@ -113,6 +114,9 @@ class ClientController extends ChangeNotifier {
     }
 
     final bool switchingHost = _state.endpoint != parsedEndpoint;
+    if (switchingHost) {
+      _pendingRequerySubmissionKey = null;
+    }
     await _cancelActiveOperations();
     final int opId = ++_operationId;
 
@@ -158,6 +162,7 @@ class ClientController extends ChangeNotifier {
 
   /// Stops active synchronization and closes any open SSE stream.
   Future<void> disconnect() async {
+    _pendingRequerySubmissionKey = null;
     await _cancelActiveOperations();
     _operationId++;
     _setState(
@@ -358,11 +363,16 @@ class ClientController extends ChangeNotifier {
       ),
     );
 
+    final TrackedServeFloorOperation? tracked = _state.trackedOperation;
     if (phase == ConnectionPhase.live &&
         _controlTransport != null &&
-        _state.trackedOperation != null &&
-        _state.trackedOperation!.shouldAutoQueryOnLiveUpdate) {
-      unawaited(queryTrackedSubmission());
+        tracked != null) {
+      if (tracked.shouldAutoQueryOnLiveUpdate) {
+        unawaited(queryTrackedSubmission());
+      } else if ((tracked.queryInFlight && tracked.needsAutoQueryIfIdle) ||
+          tracked.submitInFlight) {
+        _pendingRequerySubmissionKey = tracked.submissionKey;
+      }
     }
   }
 
@@ -683,6 +693,7 @@ class ClientController extends ChangeNotifier {
         };
 
     final int opId = _operationId;
+    _pendingRequerySubmissionKey = null;
     final TrackedServeFloorOperation pending = TrackedServeFloorOperation(
       submissionKey: submissionKey,
       car: car,
@@ -704,6 +715,9 @@ class ClientController extends ChangeNotifier {
     try {
       response = await control.postServeFloorSubmit(endpoint, body);
     } catch (error) {
+      if (_pendingRequerySubmissionKey == submissionKey) {
+        _pendingRequerySubmissionKey = null;
+      }
       if (_disposed ||
           _state.endpoint != endpoint ||
           _state.trackedOperation?.submissionKey != submissionKey) {
@@ -726,10 +740,16 @@ class ClientController extends ChangeNotifier {
     if (_disposed ||
         _state.endpoint != endpoint ||
         _state.trackedOperation?.submissionKey != submissionKey) {
+      if (_pendingRequerySubmissionKey == submissionKey) {
+        _pendingRequerySubmissionKey = null;
+      }
       return;
     }
 
     if (response.statusCode == 409) {
+      if (_pendingRequerySubmissionKey == submissionKey) {
+        _pendingRequerySubmissionKey = null;
+      }
       String message =
           'Submission key "$submissionKey" conflicts with an existing immutable request.';
       if (response.contentType.toLowerCase().startsWith('application/json')) {
@@ -747,6 +767,7 @@ class ClientController extends ChangeNotifier {
           trackedOperation: _state.trackedOperation!.copyWith(
             submitInFlight: false,
             responseLost: false,
+            clearLocalKnowledgeReason: true,
             conflictMessage: message,
             clearLastQueryError: true,
           ),
@@ -756,6 +777,9 @@ class ClientController extends ChangeNotifier {
     }
 
     if (response.statusCode == 400 || response.statusCode == 422) {
+      if (_pendingRequerySubmissionKey == submissionKey) {
+        _pendingRequerySubmissionKey = null;
+      }
       String message =
           'Submission rejected by schema validation (HTTP ${response.statusCode}).';
       if (response.contentType.toLowerCase().startsWith('application/json')) {
@@ -773,6 +797,7 @@ class ClientController extends ChangeNotifier {
           trackedOperation: _state.trackedOperation!.copyWith(
             submitInFlight: false,
             responseLost: false,
+            clearLocalKnowledgeReason: true,
             validationErrorMessage: message,
             clearLastQueryError: true,
           ),
@@ -781,7 +806,31 @@ class ClientController extends ChangeNotifier {
       return;
     }
 
+    if (response.statusCode == 404) {
+      if (_pendingRequerySubmissionKey == submissionKey) {
+        _pendingRequerySubmissionKey = null;
+      }
+      _setState(
+        _state.copyWith(
+          trackedOperation: _state.trackedOperation!.copyWith(
+            submitInFlight: false,
+            responseLost: false,
+            clearProjection: true,
+            localKnowledgeReason: 'control_surface_unavailable',
+            lastQueryError: 'Control surface is unavailable on the connected Host (HTTP 404). No automatic resend occurred.',
+          ),
+        ),
+      );
+      if (opId == _operationId) {
+        unawaited(_refreshCapabilitiesInternal(opId, endpoint));
+      }
+      return;
+    }
+
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      if (_pendingRequerySubmissionKey == submissionKey) {
+        _pendingRequerySubmissionKey = null;
+      }
       // 5xx or ambiguous server error after dispatch: treat as uncertain response loss, never resend.
       _setState(
         _state.copyWith(
@@ -797,6 +846,9 @@ class ClientController extends ChangeNotifier {
     }
 
     if (!response.contentType.toLowerCase().startsWith('application/json')) {
+      if (_pendingRequerySubmissionKey == submissionKey) {
+        _pendingRequerySubmissionKey = null;
+      }
       _setState(
         _state.copyWith(
           trackedOperation: _state.trackedOperation!.copyWith(
@@ -813,14 +865,22 @@ class ClientController extends ChangeNotifier {
     try {
       final ProjectedSubmission projected =
           DevControlV0Decoder.decodeSubmissionJson(response.body);
+      _verifyProjectedSubmissionMatches(
+        projected,
+        expectedKey: submissionKey,
+        expectedCar: car,
+        expectedFloor: floor,
+      );
+      // A direct HTTP 200 response from POST /submit establishes which control
+      // process instance actually handled this submission_key (even if the
+      // server restarted between advisory preview and submit).
       _setState(
         _state.copyWith(
           trackedOperation: _state.trackedOperation!.copyWith(
-            expectedControlInstanceId:
-                _state.trackedOperation!.expectedControlInstanceId ??
-                projected.controlInstanceId,
+            expectedControlInstanceId: projected.controlInstanceId,
             submitInFlight: false,
             responseLost: false,
+            clearLocalKnowledgeReason: true,
             projection: projected,
             clearConflictMessage: true,
             clearValidationErrorMessage: true,
@@ -831,7 +891,18 @@ class ClientController extends ChangeNotifier {
       if (opId == _operationId) {
         unawaited(_refreshCapabilitiesInternal(opId, endpoint));
       }
+      if (_pendingRequerySubmissionKey == submissionKey) {
+        _pendingRequerySubmissionKey = null;
+        if (_state.phase == ConnectionPhase.live &&
+            _state.trackedOperation?.submissionKey == submissionKey &&
+            _state.trackedOperation!.shouldAutoQueryOnLiveUpdate) {
+          unawaited(queryTrackedSubmission());
+        }
+      }
     } on ControlDecodeException catch (error) {
+      if (_pendingRequerySubmissionKey == submissionKey) {
+        _pendingRequerySubmissionKey = null;
+      }
       _setState(
         _state.copyWith(
           trackedOperation: _state.trackedOperation!.copyWith(
@@ -840,6 +911,29 @@ class ClientController extends ChangeNotifier {
             lastQueryError: error.message,
           ),
         ),
+      );
+    }
+  }
+
+  static void _verifyProjectedSubmissionMatches(
+    ProjectedSubmission projected, {
+    required String expectedKey,
+    required String expectedCar,
+    required int expectedFloor,
+  }) {
+    if (projected.submissionKey != expectedKey) {
+      throw MalformedControlPayloadException(
+        'Server returned mismatched submission_key "${projected.submissionKey}" (expected "$expectedKey").',
+      );
+    }
+    if (projected.car != null && projected.car != expectedCar) {
+      throw MalformedControlPayloadException(
+        'Server returned mismatched car "${projected.car}" (expected "$expectedCar").',
+      );
+    }
+    if (projected.floor != null && projected.floor != expectedFloor) {
+      throw MalformedControlPayloadException(
+        'Server returned mismatched floor "${projected.floor}" (expected "$expectedFloor").',
       );
     }
   }
@@ -861,8 +955,13 @@ class ClientController extends ChangeNotifier {
     }
 
     final String key = tracked.submissionKey;
+    final String trackedCar = tracked.car;
+    final int trackedFloor = tracked.floor;
     final String? expectedInstanceId = tracked.expectedControlInstanceId;
     final int opId = _operationId;
+    if (_pendingRequerySubmissionKey == key) {
+      _pendingRequerySubmissionKey = null;
+    }
     _setState(
       _state.copyWith(
         trackedOperation: tracked.copyWith(
@@ -880,6 +979,9 @@ class ClientController extends ChangeNotifier {
         expectedInstanceId: expectedInstanceId,
       );
     } catch (error) {
+      if (_pendingRequerySubmissionKey == key) {
+        _pendingRequerySubmissionKey = null;
+      }
       if (_disposed ||
           _state.endpoint != endpoint ||
           _state.trackedOperation?.submissionKey != key) {
@@ -899,24 +1001,40 @@ class ClientController extends ChangeNotifier {
     if (_disposed ||
         _state.endpoint != endpoint ||
         _state.trackedOperation?.submissionKey != key) {
+      if (_pendingRequerySubmissionKey == key) {
+        _pendingRequerySubmissionKey = null;
+      }
       return;
     }
 
     if (response.statusCode == 404) {
+      if (_pendingRequerySubmissionKey == key) {
+        _pendingRequerySubmissionKey = null;
+      }
       _setState(
         _state.copyWith(
           trackedOperation: _state.trackedOperation!.copyWith(
             queryInFlight: false,
+            responseLost: false,
+            clearProjection: true,
+            localKnowledgeReason: 'control_surface_unavailable',
             lastQueryError: 'Control surface is unavailable on the connected Host (HTTP 404). Prior submission knowledge unavailable.',
           ),
         ),
       );
+      if (opId == _operationId &&
+          _state.controlCapabilities is! ControlSurfaceAbsent) {
+        unawaited(_refreshCapabilitiesInternal(opId, endpoint));
+      }
       return;
     }
 
     if (response.statusCode < 200 ||
         response.statusCode >= 300 ||
         !response.contentType.toLowerCase().startsWith('application/json')) {
+      if (_pendingRequerySubmissionKey == key) {
+        _pendingRequerySubmissionKey = null;
+      }
       _setState(
         _state.copyWith(
           trackedOperation: _state.trackedOperation!.copyWith(
@@ -932,6 +1050,12 @@ class ClientController extends ChangeNotifier {
     try {
       ProjectedSubmission projected = DevControlV0Decoder.decodeSubmissionJson(
         response.body,
+      );
+      _verifyProjectedSubmissionMatches(
+        projected,
+        expectedKey: key,
+        expectedCar: trackedCar,
+        expectedFloor: trackedFloor,
       );
       if (expectedInstanceId != null &&
           expectedInstanceId.isNotEmpty &&
@@ -958,15 +1082,29 @@ class ClientController extends ChangeNotifier {
           trackedOperation: _state.trackedOperation!.copyWith(
             queryInFlight: false,
             responseLost: false,
+            clearLocalKnowledgeReason: true,
             projection: projected,
             clearLastQueryError: true,
           ),
         ),
       );
-      if (opId == _operationId && previousStatus != projected.status) {
+      if (opId == _operationId &&
+          (previousStatus != projected.status ||
+              _state.controlCapabilities is! ControlSurfaceAvailable)) {
         unawaited(_refreshCapabilitiesInternal(opId, endpoint));
       }
+      if (_pendingRequerySubmissionKey == key) {
+        _pendingRequerySubmissionKey = null;
+        if (_state.phase == ConnectionPhase.live &&
+            _state.trackedOperation?.submissionKey == key &&
+            _state.trackedOperation!.shouldAutoQueryOnLiveUpdate) {
+          unawaited(queryTrackedSubmission());
+        }
+      }
     } on ControlDecodeException catch (error) {
+      if (_pendingRequerySubmissionKey == key) {
+        _pendingRequerySubmissionKey = null;
+      }
       _setState(
         _state.copyWith(
           trackedOperation: _state.trackedOperation!.copyWith(
@@ -979,6 +1117,7 @@ class ClientController extends ChangeNotifier {
   }
 
   void dismissTrackedOperation() {
+    _pendingRequerySubmissionKey = null;
     if (_state.trackedOperation == null) {
       return;
     }
@@ -988,6 +1127,7 @@ class ClientController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _pendingRequerySubmissionKey = null;
     _operationId++;
     _retryTimer?.cancel();
     _retryTimer = null;

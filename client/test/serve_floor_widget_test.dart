@@ -158,6 +158,7 @@ final class _WidgetControlTransport
   int queryCalls = 0;
   final List<String> submittedKeys = <String>[];
 
+  Future<ControlHttpResponse> Function()? onCapabilities;
   Future<ControlHttpResponse> Function(String body)? onPreview;
   Future<ControlHttpResponse> Function(String body)? onSubmit;
   Future<ControlHttpResponse> Function(String key, String? expectedInstance)?
@@ -188,6 +189,9 @@ final class _WidgetControlTransport
   Future<ControlHttpResponse> fetchControlCapabilities(
     HostEndpoint endpoint,
   ) async {
+    if (onCapabilities != null) {
+      return onCapabilities!();
+    }
     return ControlHttpResponse(
       statusCode: 200,
       body: capabilitiesJson,
@@ -618,6 +622,115 @@ void main() {
       expect(transport.submitCalls, 2);
       expect(find.text('Completed'), findsWidgets);
       expect(find.text('IntentId #10'), findsWidgets);
+    },
+  );
+
+  testWidgets(
+    'labels offline car location as retained (not live) and hides New attempt after Host restarts read-only (404)',
+    (WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1280, 900);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final _WidgetControlTransport transport = _WidgetControlTransport();
+      bool controlEnabled = true;
+
+      transport.onCapabilities = () async => controlEnabled
+          ? ControlHttpResponse(
+              statusCode: 200,
+              body: transport.capabilitiesJson,
+              contentType: 'application/json',
+            )
+          : const ControlHttpResponse(
+              statusCode: 404,
+              body: '',
+              contentType: 'text/plain',
+            );
+      transport.onSubmit = (String rawBody) async {
+        final Map<String, Object?> req =
+            jsonDecode(rawBody) as Map<String, Object?>;
+        return ControlHttpResponse(
+          statusCode: 200,
+          body: jsonEncode(<String, Object?>{
+            'control_api_version': 'dev-sim/v0',
+            'development_only': true,
+            'control_instance_id': '11111111111111111111111111111111',
+            'ephemeral_process_memory': true,
+            'submission_key': req['submission_key'],
+            'operation': 'serve_floor',
+            'car': req['car'],
+            'floor': req['floor'],
+            'status': 'accepted',
+            'duplicate_submission': false,
+            'intent_id': 1,
+            'receipt': 'awaiting',
+            'reconciliation': 'pending',
+            'diverged_floor': null,
+            'saw_progress': false,
+            'is_active_in_engine': true,
+            'blocker': null,
+            'knowledge_reason': null,
+          }),
+          contentType: 'application/json',
+        );
+      };
+      transport.onQuery = (String _, String? _) async =>
+          const ControlHttpResponse(
+            statusCode: 404,
+            body: '',
+            contentType: 'text/plain',
+          );
+
+      final ClientController controller = ClientController(
+        transport: transport,
+        retryBackoff: (_) => const Duration(milliseconds: 50),
+        submissionKeyGenerator: () => 'sub-offline-label-01',
+      );
+      addTearDown(() {
+        controller.dispose();
+        transport.dispose();
+      });
+
+      await tester.pumpWidget(
+        LiftAssistantClientApp(
+          controller: controller,
+          initialHostUrl: 'http://127.0.0.1:8080',
+          autoConnect: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('car-serve-floor-button-A')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('serve-floor-choice-6')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('serve-floor-submit-button')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Live car location'), findsOneWidget);
+      expect(find.byKey(const Key('modal-new-attempt-button')), findsOneWidget);
+
+      // Disconnect Host while modal status view stays open -> location MUST NOT be called "Live"!
+      await tester.runAsync(() => controller.disconnect());
+      await tester.pumpAndSettle();
+      expect(find.text('Live car location'), findsNothing);
+      expect(find.text('Retained location'), findsOneWidget);
+      expect(find.text('3.00F (not live)'), findsOneWidget);
+
+      // Reconnect to Host that restarted without control surface (HTTP 404) ->
+      // honest Unknown (control_surface_unavailable), New attempt hidden, zero resends!
+      controlEnabled = false;
+      await tester.runAsync(() async {
+        await controller.reconnectNow();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      });
+      await tester.pumpAndSettle();
+
+      expect(transport.submitCalls, 1);
+      expect(find.text('Unknown'), findsWidgets);
+      expect(find.text('control_surface_unavailable'), findsOneWidget);
+      expect(find.byKey(const Key('modal-new-attempt-button')), findsNothing);
     },
   );
 }

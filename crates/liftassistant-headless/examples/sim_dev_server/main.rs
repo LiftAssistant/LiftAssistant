@@ -1121,4 +1121,89 @@ mod tests {
         assert_eq!(evicted.intent_id, Some(1));
         assert_eq!(evicted.knowledge_reason, Some("engine_history_evicted"));
     }
+
+    #[test]
+    fn concurrent_http_submits_serialize_idempotency_and_conflicts_without_double_intent() {
+        let sim = SimDevControl::default_simulator().expect("default sim");
+        let server = TestServer::start(sim, true, None);
+        let address = server.address;
+
+        // Warm up listener before launching barrier-synchronized threads.
+        let (caps_status, _, _) = get_json(address, DEV_CAPABILITIES_PATH);
+        assert_eq!(caps_status, 200);
+
+        // Reject unknown query parameters and mutation on GET-only control routes.
+        let (bad_query_status, _, bad_query_json) = get_json(
+            address,
+            "/api/dev-sim/v0/submissions/sub-valid-0001?unknown_param=1",
+        );
+        assert_eq!(bad_query_status, 400);
+        assert_eq!(bad_query_json["error_code"], "invalid_query");
+
+        let (post_caps_status, _, _) = raw_http(
+            address,
+            &format!(
+                "POST {DEV_CAPABILITIES_PATH} HTTP/1.1\r\nHost: {address}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            ),
+        );
+        assert_eq!(post_caps_status, 405);
+
+        let barrier = Arc::new(std::sync::Barrier::new(12));
+        let mut handles = Vec::with_capacity(12);
+        for idx in 0..12_usize {
+            let barrier = Arc::clone(&barrier);
+            let floor: i16 = if idx < 8 { 6 } else { 7 };
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                let (status, _, body) = post_json(
+                    address,
+                    DEV_SERVE_FLOOR_SUBMIT_PATH,
+                    &json!({
+                        "submission_key": "sub-race-0001",
+                        "operation": "serve_floor",
+                        "car": "A",
+                        "floor": floor,
+                    }),
+                );
+                (floor, status, body)
+            }));
+        }
+
+        let results: Vec<(i16, u16, Value)> = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("client thread completes"))
+            .collect();
+
+        // Exactly ONE side effect / IntentId must have been created in Engine & Simulator!
+        assert_eq!(server.sim.lock().unwrap().controller_submissions(), 1);
+
+        let originals: Vec<&(i16, u16, Value)> = results
+            .iter()
+            .filter(|(_, status, body)| *status == 200 && body["duplicate_submission"] == false)
+            .collect();
+        assert_eq!(originals.len(), 1, "exactly one non-duplicate winner");
+        let winning_floor = originals[0].0;
+        assert_eq!(originals[0].2["intent_id"], 1);
+        assert_eq!(originals[0].2["status"], "accepted");
+
+        for (floor, status, body) in &results {
+            if *floor == winning_floor {
+                assert_eq!(*status, 200);
+                assert_eq!(body["intent_id"], 1);
+                assert_eq!(body["floor"], winning_floor);
+            } else {
+                assert_eq!(*status, 409);
+                assert_eq!(body["error_code"], "submission_key_conflict");
+            }
+        }
+
+        let expected_dups = if winning_floor == 6 { 7 } else { 3 };
+        let duplicate_count = results
+            .iter()
+            .filter(|(_, status, body)| *status == 200 && body["duplicate_submission"] == true)
+            .count();
+        assert_eq!(duplicate_count, expected_dups);
+
+        server.stop();
+    }
 }

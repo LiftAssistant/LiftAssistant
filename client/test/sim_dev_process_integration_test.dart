@@ -8,9 +8,11 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liftassistant_client/src/api/control_model.dart';
+import 'package:liftassistant_client/src/api/host_url.dart';
 import 'package:liftassistant_client/src/api/read_model.dart';
 import 'package:liftassistant_client/src/state/client_controller.dart';
 import 'package:liftassistant_client/src/state/client_state.dart';
+import 'package:liftassistant_client/src/transport/host_transport.dart';
 import 'package:liftassistant_client/src/transport/host_transport_io.dart';
 
 String _resolveSimDevServerPath() {
@@ -439,5 +441,154 @@ void main() {
 
     await controller.disconnect();
     await stopServer();
+  });
+
+  test('real sim-dev-server restart without --enable-dev-sim-control transitions active operation to control_surface_unavailable without resend', () async {
+    final String serverBin = _resolveSimDevServerPath();
+    final int port = await _allocateFreeLoopbackPort();
+    final _ResponseLossProxy proxy = await _ResponseLossProxy.start(port);
+    addTearDown(proxy.close);
+
+    Process? activeProcess;
+    Future<void> stopServer() async {
+      final Process? proc = activeProcess;
+      activeProcess = null;
+      if (proc != null) {
+        proc.kill(ProcessSignal.sigterm);
+        await proc.exitCode.timeout(
+          const Duration(seconds: 4),
+          onTimeout: () {
+            proc.kill(ProcessSignal.sigkill);
+            return -1;
+          },
+        );
+      }
+    }
+
+    addTearDown(stopServer);
+
+    Future<void> startServer({required bool enableControl}) async {
+      final List<String> args = <String>[
+        '--listen',
+        '127.0.0.1:$port',
+        if (enableControl) '--enable-dev-sim-control',
+        '--tick-ms',
+        '500',
+      ];
+      activeProcess = await Process.start(serverBin, args);
+      unawaited(activeProcess!.stdout.drain<void>());
+      unawaited(activeProcess!.stderr.drain<void>());
+    }
+
+    await startServer(enableControl: true);
+
+    final IoHostTransport transport = IoHostTransport(
+      requestTimeout: const Duration(seconds: 3),
+    );
+    final ClientController controller = ClientController(
+      transport: transport,
+      retryBackoff: (_) => const Duration(milliseconds: 80),
+    );
+    addTearDown(() {
+      controller.dispose();
+      transport.dispose();
+    });
+
+    expect(
+      await controller.connectToUrl('http://127.0.0.1:${proxy.port}'),
+      isTrue,
+    );
+    await _waitUntil(
+      () =>
+          controller.state.phase == ConnectionPhase.live &&
+          controller.state.controlCapabilities is ControlSurfaceAvailable,
+      describeFailure: () => 'connect to control-enabled sim-dev-server',
+    );
+
+    final String key = controller.mintSubmissionKey();
+    await controller.submitServeFloor(submissionKey: key, car: 'A', floor: 8);
+    expect(proxy.submitPostCount, 1);
+    expect(
+      controller.state.trackedOperation?.effectiveStatus,
+      ProjectedOperationStatus.accepted,
+    );
+
+    // Restart sim-dev-server in read-only mode (WITHOUT --enable-dev-sim-control -> HTTP 404).
+    await stopServer();
+    await _waitUntil(
+      () => controller.state.phase == ConnectionPhase.reconnecting,
+      describeFailure: () => 'detect server stop',
+    );
+    await startServer(enableControl: false);
+
+    await _waitUntil(
+      () =>
+          controller.state.phase == ConnectionPhase.live &&
+          controller.state.controlCapabilities is ControlSurfaceAbsent &&
+          controller.state.trackedOperation?.effectiveStatus ==
+              ProjectedOperationStatus.knowledgeUnavailable &&
+          controller.state.trackedOperation?.effectiveKnowledgeReason ==
+              'control_surface_unavailable',
+      describeFailure: () =>
+          'transition to control_surface_unavailable (status=${controller.state.trackedOperation?.effectiveStatus}, reason=${controller.state.trackedOperation?.effectiveKnowledgeReason})',
+    );
+
+    expect(
+      proxy.submitPostCount,
+      1,
+      reason: 'Restart to read-only Host MUST NOT resend POST',
+    );
+    expect(controller.state.trackedOperation?.projection, isNull);
+
+    await controller.disconnect();
+    await stopServer();
+  });
+
+  test('IoHostTransport immediately aborts oversized Content-Length control response without hanging on stalled body', () async {
+    final ServerSocket rawServer = await ServerSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    addTearDown(rawServer.close);
+
+    final List<Socket> accepted = <Socket>[];
+    addTearDown(() {
+      for (final Socket s in accepted) {
+        s.destroy();
+      }
+    });
+
+    rawServer.listen((Socket client) {
+      accepted.add(client);
+      client.listen((_) {
+        // Send headers claiming 10 MiB body (> 256 KiB cap) and intentionally stall!
+        client.write(
+          'HTTP/1.1 200 OK\r\n'
+          'Content-Type: application/json\r\n'
+          'Content-Length: 10485760\r\n'
+          '\r\n',
+        );
+      }, onError: (_) {});
+    });
+
+    final IoHostTransport transport = IoHostTransport(
+      requestTimeout: const Duration(seconds: 5),
+    );
+    addTearDown(transport.dispose);
+
+    final Stopwatch sw = Stopwatch()..start();
+    await expectLater(
+      transport.fetchControlCapabilities(
+        HostEndpoint.parse('http://127.0.0.1:${rawServer.port}'),
+      ),
+      throwsA(isA<SnapshotTooLargeException>()),
+    );
+    sw.stop();
+    expect(
+      sw.elapsed,
+      lessThan(const Duration(seconds: 2)),
+      reason:
+          'Must abort immediately without waiting for timeout or draining body',
+    );
   });
 }
