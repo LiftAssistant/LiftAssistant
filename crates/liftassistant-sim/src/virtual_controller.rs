@@ -118,6 +118,14 @@ impl VirtualController {
         self.connected = connected;
     }
 
+    pub fn set_mode(
+        &mut self,
+        car: &CarId,
+        mode: liftassistant_model::OperatingMode,
+    ) -> Result<(), liftassistant_runtime::RuntimeError> {
+        self.world.set_mode(car, mode)
+    }
+
     /// Replace the endpoint, losing its notification queue and volatile fault
     /// settings. The accepted jobs, receipt lookup, and world survive this fixture.
     pub fn restart(mut self) -> Self {

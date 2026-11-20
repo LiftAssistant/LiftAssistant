@@ -21,3 +21,8 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 
 [dev-dependencies]
 liftassistant-sim = { path = "../liftassistant-sim" }
+
+[[example]]
+name = "sim-dev-server"
+path = "examples/sim_dev_server/main.rs"
+test = true

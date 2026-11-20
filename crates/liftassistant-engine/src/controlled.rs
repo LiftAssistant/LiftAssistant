@@ -20,6 +20,10 @@ impl PrincipalId {
     pub fn new(value: impl Into<String>) -> Self {
         Self(value.into())
     }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -329,6 +333,14 @@ impl Engine {
         self.controlled.record(id)
     }
 
+    pub fn controlled_controller(&self, car: &CarId) -> Option<&ControllerId> {
+        self.controlled.controllers.get(car)
+    }
+
+    pub fn active_intent(&self, car: &CarId) -> Option<&IntentRecord> {
+        self.controlled.active.get(car)
+    }
+
     /// Issue an identity and retain its original meaning in the caller's opaque request.
     /// A retry can therefore be checked even after the outcome leaves recent history.
     pub fn issue_controlled_intent(
@@ -445,15 +457,16 @@ impl Engine {
         Ok(())
     }
 
-    /// Per-car readiness for this operation. Admission separately checks request identity.
-    pub fn write_readiness(
+    /// Advisory per-car readiness check without issuing an IntentId or mutating Engine state.
+    pub fn preview_write_readiness(
         &self,
-        request: &IntentRequest,
+        intent: &Intent,
+        call: Option<CallId>,
         grant: &AuthorityGrant,
         controller: &ControllerId,
         controller_available: bool,
     ) -> Result<(), WriteBlocker> {
-        let car = request.intent.car();
+        let car = intent.car();
         let expected = self
             .controlled
             .controllers
@@ -475,22 +488,22 @@ impl Engine {
         let caps = self
             .execution_capabilities(car)
             .ok_or(WriteBlocker::CapabilitiesUnavailable)?;
-        let supported = match &request.intent {
+        let supported = match intent {
             Intent::ServeFloor { .. } => caps.serve_floor,
             Intent::ParkAt { .. } => caps.park,
         };
         if !supported {
             return Err(WriteBlocker::OperationUnsupported);
         }
-        let floor = request.intent.floor();
+        let floor = intent.floor();
         if !self.topology.contains(floor) || !caps.supports_floor(floor) {
             return Err(WriteBlocker::UnsupportedFloor);
         }
         if let Some(active) = self.controlled.active.get(car) {
             return Err(WriteBlocker::ActiveIntent(active.request.id));
         }
-        if let Some(id) = request.call {
-            let valid = matches!(&request.intent, Intent::ServeFloor { .. })
+        if let Some(id) = call {
+            let valid = matches!(intent, Intent::ServeFloor { .. })
                 && !self.external_dispatch.owns(id)
                 && self.calls.get(id).is_some_and(|call| {
                     call.state == CallState::Pending && call.call.floor == floor
@@ -515,6 +528,23 @@ impl Engine {
             return Err(WriteBlocker::Busy);
         }
         Ok(())
+    }
+
+    /// Per-car readiness for this operation. Admission separately checks request identity.
+    pub fn write_readiness(
+        &self,
+        request: &IntentRequest,
+        grant: &AuthorityGrant,
+        controller: &ControllerId,
+        controller_available: bool,
+    ) -> Result<(), WriteBlocker> {
+        self.preview_write_readiness(
+            &request.intent,
+            request.call,
+            grant,
+            controller,
+            controller_available,
+        )
     }
 
     /// Register a hall call for the controlled composition. Dispatch is driven by an
@@ -1459,5 +1489,88 @@ mod tests {
             engine.recover_controlled_intent(uncertain, &grant),
             Err(ControlledRecoveryError::ObservationUnavailable)
         );
+    }
+
+    #[test]
+    fn preview_write_readiness_is_side_effect_free_and_preserves_intent_id_sequence() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let car = CarId::new("A");
+        let controller = ControllerId::new("virtual");
+        engine
+            .bind_controlled_car(car.clone(), controller.clone())
+            .unwrap();
+        assert_eq!(engine.controlled_controller(&car), Some(&controller));
+        assert!(engine.active_intent(&car).is_none());
+        let grant = engine
+            .grant_authority(&car, PrincipalId::new("dev-preview"))
+            .unwrap();
+        assert_eq!(grant.principal().as_str(), "dev-preview");
+        let source = ObservationSourceId::new("physical");
+        engine
+            .bind_observation(
+                source.clone(),
+                car.clone(),
+                crate::ObservationBindingRole::Operational,
+            )
+            .unwrap();
+        engine
+            .begin_source_session(source, ObservationSessionId::new("test-incarnation"))
+            .unwrap();
+        engine.set_execution_capabilities(
+            car.clone(),
+            ExecutionCapabilities::new(true, false, (1..=6).map(Floor::new)),
+        );
+        observe(&mut engine, &CarState::new("A", Floor::new(1)), 1);
+
+        let before = engine.clone();
+        assert_eq!(
+            engine.preview_write_readiness(
+                &Intent::ServeFloor {
+                    car: car.clone(),
+                    floor: Floor::new(5),
+                },
+                None,
+                &grant,
+                &controller,
+                true,
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            engine.preview_write_readiness(
+                &Intent::ServeFloor {
+                    car: car.clone(),
+                    floor: Floor::new(7),
+                },
+                None,
+                &grant,
+                &controller,
+                true,
+            ),
+            Err(WriteBlocker::UnsupportedFloor)
+        );
+        assert_eq!(
+            engine.preview_write_readiness(
+                &Intent::ServeFloor {
+                    car: car.clone(),
+                    floor: Floor::new(5),
+                },
+                None,
+                &grant,
+                &controller,
+                false,
+            ),
+            Err(WriteBlocker::ControllerUnavailable)
+        );
+        assert_eq!(engine, before);
+
+        let first_issued = engine.issue_controlled_intent(
+            Intent::ServeFloor {
+                car,
+                floor: Floor::new(5),
+            },
+            None,
+        );
+        assert_eq!(first_issued.id(), IntentId::new(1));
     }
 }
