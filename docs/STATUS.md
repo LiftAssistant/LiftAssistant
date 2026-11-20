@@ -133,6 +133,47 @@ accepted explicitly and durably, but it remains uncertainty.
 
 **Current terminal status:** `M7.1b COMPLETE — explicit recovery, retirement and safe-resumption boundary validated. Awaiting HUMAN HIL/bench-controller environment decision. No real controller or passenger-equipment write path authorized.`
 
+### LCE-R0 — Recorded Read-only Compatibility Probe
+
+**COMPLETE — `RECORDED_READONLY_PARTIAL`; awaiting HUMAN review.** This is an
+independent research slice and does not reopen M7 or make any HIL/serial item
+READY.
+
+The [focused evidence matrix](LCE_RECORDED_READONLY_COMPATIBILITY.md) separates
+KONE-origin interface/lock evidence, current independent commercial monitoring
+evidence, weaker historical terminal-table semantics and community anecdotes.
+The sources support a conservative recorded subset of `STA`, `CMD`, `MDE` and
+`GRP` without changing canonical semantics. They do not establish a production
+parser across LCE software generations, raw framing, lifecycle/freshness,
+hardware access, or write safety.
+
+The new model-only `liftassistant-lce` crate parses bounded original-synthetic
+row/column fixtures and maps only justified evidence through the existing
+`CarObservationUpdate` and Engine binding/session path. Level requires stopped,
+door-zone and at-level evidence; advance position remains context; motion needs
+consistent speed/direction; exact simple door states map while composite values
+remain unknown; only normal/fire/out-of-service MDE modes have strong canonical
+equivalents; CMD/GRP destinations are reported observations; native group/lift
+identities require explicit configuration. `CAL` calls, fault IDs and `N` nodes
+do not become canonical calls, equipment faults, modes or car identities.
+
+Focused regressions cover stationary/moving/ambiguous evidence, supported and
+source-specific/unknown modes, known/unknown/unmapped destinations, configured
+and unconfigured group rows, malformed/truncated/bounded input, incremental
+assembly, explicit unknown replacement, omitted-field preservation, unbound
+rejection and session fencing. No serial dependency, terminal emulator,
+command generator, LCEUIO/unlock logic, hardware fixture, real KONE endpoint,
+controller/elevator access, write surface, M7 authority change or public schema
+was added.
+
+Closing validation passes formatting, locked warning-free workspace/all-target
+Clippy, 199 workspace tests with one expected ignored test, the exact
+Rust/Cargo 1.85.0 locked all-target workspace check, all nine TUI scenarios,
+all four non-live Headless scenarios, ten focused LCE tests, normal-dependency
+isolation, bounded-input review, secret scanning and diff/whitespace review.
+The validation uses only checked-in original synthetic fixtures and requires no
+KONE material, hardware, proprietary binary, external service or network peer.
+
 **M7.1b — COMPLETE; HUMAN HIL/bench environment decision pending.** The
 private gateway now distinguishes an explicit recovery UID/Principal from the
 ordinary caller, exposes private inspection, durably retires an unresolved

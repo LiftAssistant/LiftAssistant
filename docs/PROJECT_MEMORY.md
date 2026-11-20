@@ -244,6 +244,27 @@ safe-resumption decision. These are software/simulation facts only; HIL,
 cross-host fencing, deployment security, real controllers and passenger
 equipment remain outside the evidence and authorization.
 
+## LCE legacy recorded compatibility boundary
+
+LCE-R0 found enough public evidence for a conservative experimental recorded
+read-only subset, but not for serial, hardware or production compatibility.
+KONE-origin LCEUIO material establishes the diagnostic-interface and lock
+boundary but not runtime table grammar. Current ELFIN/EDNL monitoring products
+corroborate useful read-side data without exposing that grammar. Historical
+terminal instructions weakly establish `STA`, `CMD`, `CAL`, `GRP`, `MDE` and
+`N` meanings while also exposing active operations; read documentation never
+grants write authority.
+
+The durable semantic boundary is that LCE level, advance-position and
+destination fields are distinct; speed/direction must agree; controller calls,
+faults, groups and nodes do not become LiftAssistant calls, fault diagnoses or
+logical cars; and all native lift/floor relationships require explicit
+configuration. The internal `liftassistant-lce` parser uses only original
+synthetic recorded tables and existing canonical observation types. Its result
+is `RECORDED_READONLY_PARTIAL`. M7.1b's HIL/bench-controller HUMAN gate remains
+unchanged, and no serial, unlock, controller, passenger-equipment, write or
+production authority follows from this research.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

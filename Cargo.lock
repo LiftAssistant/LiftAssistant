@@ -1293,6 +1293,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "liftassistant-lce"
+version = "0.1.0"
+dependencies = [
+ "liftassistant-engine",
+ "liftassistant-model",
+]
+
+[[package]]
 name = "liftassistant-model"
 version = "0.1.0"
 

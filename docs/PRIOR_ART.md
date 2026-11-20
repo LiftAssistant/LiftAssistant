@@ -342,6 +342,36 @@ Source repositories:
 - https://github.com/quikbot/open-rmf-adapters-quiksync
 - https://github.com/chart-sg/lift_kone_opccontroller
 
+## LCE legacy recorded/read-only compatibility
+
+Reviewed 2026-11-20 for the independent LCE-R0 research slice. The KONE-origin
+*LCEUIO Dongle User Manual* (EDMS 884634en.A.2, first issue 2006) establishes
+the LCECPU/LOPCB diagnostic-interface and lock boundary and places LCETERM
+behind that boundary; it does not establish terminal table grammar. Current
+ELFIN eleon S1 installation material and EDNL Sense documentation independently
+show commercial monitoring over KONE LCE diagnostic/RS232 paths. ELFIN's MQTT
+Consumer API 4.0.0 exposes normalized floor, movement, door, status and error
+information, but that normalization is interoperability evidence rather than a
+description of the LCE wire format.
+
+The weaker-provenance historical *LCE Terminal Using Instructions* documents
+read families `STA`, `CMD`, `CAL`, `GRP`, `MDE`, and `N`. It also documents
+active call, memory and parameter operations, so availability of read tables
+does not imply write authority. The durable mapping lessons are narrow:
+
+- level, advance-position and destination fields have distinct meanings;
+- speed and direction must agree before motion is known;
+- controller calls and fault identifiers are context, not LiftAssistant calls,
+  equipment diagnosis or operating mode;
+- group lift and node identifiers require explicit logical-car binding;
+- commercial normalized output cannot fill gaps in historical table semantics.
+
+The focused evidence matrix, source URLs and exact implementation limits are in
+[`LCE_RECORDED_READONLY_COMPATIBILITY.md`](LCE_RECORDED_READONLY_COMPATIBILITY.md).
+The result is `RECORDED_READONLY_PARTIAL`: an original-synthetic recorded parser
+is justified, while serial transport, raw capture compatibility, hardware and
+production claims are not.
+
 
 ## M4 semantic-boundary audit findings — reported/current/desired state
 
