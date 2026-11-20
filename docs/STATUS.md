@@ -4,8 +4,9 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6 completion audit is COMPLETE and recommends M6 COMPLETE. Awaiting HUMAN
-milestone-exit and M7-entry decision.**
+**M6 is HUMAN-ACCEPTED and COMPLETE. M7.0 + M7.1a are READY: freeze the
+production intent-gateway boundary and implement the first process-isolated
+Open-RMF simulation/recovery vertical slice.**
 
 M6C.2 is HUMAN-ACCEPTED with its `PARTIAL_MAPPING` result and negative evidence
 unchanged. The [full implementation-backed audit](M6_COMPLETION_AUDIT.md)
@@ -14,10 +15,21 @@ and controlled/external withdrawal fencing. M6C.3 is not required: another
 equivalent KONE run would not test a distinct generic hypothesis. Missing
 positive vendor lifecycle mappings remain backend-specific/future evidence.
 
-The audit recommends `RECOMMEND_M6_COMPLETE`; it does not make the HUMAN
-milestone decision. M7 is not READY and no M7 implementation, production write
-route, real-equipment work or passenger operation has started. The planning-only
-M7 proposal remains subject to a separate HUMAN architecture/environment gate.
+The HUMAN milestone decision accepted the audit on 2026-11-20. It preserves
+M6B.3 `SEMANTIC_MISMATCH`, M6C.2 `PARTIAL_MAPPING`, the private Evidence v0
+retention boundary and every backend-specific/future-evidence limitation.
+M6C.3 is not required without a new falsifiable hypothesis. M7 authorization is
+limited to software, simulation, HIL and bench-oriented work; no passenger
+operation, real controller/CAN/OEM/OPC access or public write API is authorized.
+
+M7.0 keeps Engine as the owner of Principal/grant, `IntentId`, receipt,
+reconciliation, canonical observation authority and physical completion. The
+RMF gateway process owns only its backend transport/session, native correlation,
+deadlines, reconnect, readiness and bounded durable unresolved-operation state.
+M7.1a is limited to one explicitly mapped logical car, car-specific
+`ServeFloor`, a local private Unix-domain ingress authenticated by OS peer
+identity, and the official Hotel simulation as the only external peer. Existing
+Headless HTTP/SSE, CLI and Flutter surfaces remain read-only.
 
 Closing local validation passed formatting, locked workspace all-target Clippy,
 166 workspace tests with one expected ignored test, the exact Rust/Cargo 1.85.0

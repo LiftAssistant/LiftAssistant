@@ -6,12 +6,16 @@ The long-term goal is to make elevator controllers, protocols, capabilities, pol
 
 LiftAssistant is an early semantic-core and simulation project. **It is not approved for controlling passenger elevators or any safety-critical equipment.**
 
-## M5 — Production read-only platform
+## Current milestone — M7 software/simulation gateway
 
 M1 Interactive Simulator is implemented and human-accepted.
 
-M5 is complete at its read-only milestone boundary. Live validation of a second source
-family remains pending. The project is at a HUMAN checkpoint before write-model work.
+M5 is complete at its read-only milestone boundary and M6's controlled intent
+laboratory is HUMAN-accepted and complete. M7.0 + M7.1a now build one private,
+process-isolated Open-RMF `ServeFloor` gateway for software/simulation validation.
+It is not a public write API: Headless HTTP/SSE, CLI and Flutter remain read-only,
+and no passenger elevator, real controller cabinet, CAN/OEM network or OPC
+installation is authorized.
 
 The current working vertical path is:
 

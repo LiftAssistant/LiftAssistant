@@ -211,9 +211,13 @@ Only high-level intents belong here. Raw brake, motor torque, safety-chain bypas
 
 Goal: allow approved high-level LiftAssistant intents to reach validated lower controllers while retaining clear safety and authority boundaries.
 
-Entry is awaiting a HUMAN milestone-exit and architecture/environment decision.
-No M7 implementation is READY merely because M6 has an engineering completion
-recommendation.
+M6 exit and M7 entry were HUMAN-approved on 2026-11-20. The current bounded work
+is M7.0 + M7.1a: freeze a production intent-gateway process boundary and prove
+one Open-RMF `ServeFloor` vertical slice against software/simulation only. It
+must use private local ingress, existing Engine authority/reconciliation,
+write-before-side-effect durable uncertainty and restart without automatic
+resend. Public write APIs, real passenger equipment and real controller/CAN/OEM/
+OPC access remain later HUMAN gates.
 
 Possible scope after M6 evidence:
 

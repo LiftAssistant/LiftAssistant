@@ -310,6 +310,42 @@ LiftAssistant must never rely on its own availability for a real elevator to rem
 
 Changing the safety/authority model is a HUMAN-REVIEW boundary.
 
+## M7 production intent gateway boundary
+
+The first production-shaped write path is an Open-RMF-specific gateway process,
+not a generic adapter framework and not a public control service:
+
+~~~text
+local OS peer identity
+        -> configured PrincipalId -> fresh AuthorityGrant
+        -> Engine IntentId / admission / reconciliation
+        -> private RMF gateway transport + durable unresolved record
+        -> /lift_requests
+
+/lift_states
+        -> existing RMF mapper -> canonical Operational observations
+        -> Engine receipt correlation and physical reconciliation
+~~~
+
+Engine continues to own authority, intent and operation identity, receipt
+meaning, canonical observations and physical completion. The gateway owns RMF
+transport/session mechanics, configured logical/native mapping, backend-local
+correlation, wall-clock supervision, reconnect/readiness and a bounded private
+restart record. A durable unresolved record is committed before a potentially
+side-effecting publish. Restart never creates a replacement operation and never
+automatically resends; it restores the same operation for observation-driven
+reconciliation or remains explicitly recovery-required.
+
+Command transport and observation subscription have independent lifecycles.
+Loss of the command channel degrades write readiness without stopping state
+ingestion; stale Operational observations block admission and completion without
+inventing an Auxiliary failover. The first capability is exactly one configured
+car-specific `ServeFloor`; RMF session correlation is backend-local and is not a
+Principal, grant, `IntentId`, or observation source session. ROS publish success
+is not a receipt. Existing Headless HTTP/SSE, CLI and Flutter interfaces remain
+read-only. This boundary is authorized only for software/simulation/HIL/bench
+progression and grants no passenger or real-controller write authority.
+
 
 ## Target production direction
 

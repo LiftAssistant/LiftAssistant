@@ -322,6 +322,26 @@ Useful idea: semantic groups progress through explicit maturity/stability levels
 
 Additional production patterns such as diagnostic registries, integration quality profiles, process sandboxing, update rollback and sanitized diagnostic bundles should be researched only when their implementation milestone becomes READY.
 
+## M7 RMF gateway implementation review
+
+M7.0 reviewed the 2026-11-20 current source of five concrete elevator integrations before freezing the first process boundary. These projects are implementation prior art, not normative authorities:
+
+- Open-RMF `lift_adapter_template` (`ca5445ad14a7b38fa6f7333bcee0bb586406baba`) owns one lift API, accepts only requests for its configured lift, rejects unsupported floors, polls state independently, and reports the granted RMF session through `LiftState`. Its template deliberately leaves controller connectivity and command semantics to the integrator; it has no durable operation record and its synchronous API calls can share the ROS executor path.
+- KABAM/CHART `lift_kone_adapter` (`9bc3a87a01eea66c606e0a256e1cd8a8c60bc596`) owns KONE token renewal, topology discovery, WebSocket state monitoring and request IDs. It demonstrates that one adapter can own shared building/group transport for several cars. It also logs credential material and uses wall-clock/reconnect loops without a durable command identity, so its credential handling, retry constants and outcome claims are explicit anti-patterns for LiftAssistant.
+- Octa `lci-rmf-adapter` (`a91b2ada76e98d763809621e5b5ca2638369edf7`) separates MQTT receive activity, availability and command contexts, uses locks/conditions and monotonic elapsed time, and keeps state publication alive through a dedicated receiving path. Its device-specific availability/session behavior is not evidence for LiftAssistant authority, receipt or retry semantics.
+- QuikSync `open-rmf-adapters-quiksync` (`e4d797c500664526ae51858156ce757f124c3680`) has one process manage multiple lifts, separates background WebSocket state pumps from request routing, reads secrets from a file, refreshes tokens, bounds reconnect/backoff, and supplies an explicit execution ID to a server that documents idempotent deduplication. LiftAssistant reuses the separation and explicit-correlation lessons, but does not copy its HTTP API, Auth0/session-manager authorization or retries because plain RMF topic publication provides no equivalent deduplication proof.
+- CHART `lift_kone_opccontroller` (`158b5925544e1d9f7270c1fceb552aad1d65e1f8`) keeps configured per-lift floors and uses OPC acknowledgement/state reads after writes, with command work moved to per-request threads while periodic state polling continues. Its blocking tag sequences, process-local busy/session flags and lack of crash recovery are not sufficient production operation ownership.
+
+The compatible common denominator is narrow: the gateway owns backend transport, credentials, reconnect, native correlation and backend readiness; observation ingestion continues independently of command-channel work; unsupported mappings fail explicitly; and retries are allowed only when that backend proves idempotency or non-submission. Transport identity and credentials do not grant LiftAssistant authority. M7 therefore keeps Principal/grant, `IntentId`, receipt, canonical observations and physical reconciliation in Engine, records unresolved work durably before an RMF publish, and never automatically resends it after restart. A ROS publish remains local delivery evidence, not a controller receipt or physical completion.
+
+Source repositories:
+
+- https://github.com/open-rmf/lift_adapter_template
+- https://github.com/KABAM-Robotics/lift_kone_adapter
+- https://github.com/octarobotics/lci-rmf-adapter
+- https://github.com/quikbot/open-rmf-adapters-quiksync
+- https://github.com/chart-sg/lift_kone_opccontroller
+
 
 ## M4 semantic-boundary audit findings — reported/current/desired state
 
