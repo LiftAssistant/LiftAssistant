@@ -154,9 +154,17 @@ capability-oriented dispatch-ownership axis. External-owned work begins as an
 existing `HallCall`/`CallId`, stays `Pending` after submission, uses an explicit
 revocable dispatch-scope grant independent of any car, and reaches
 `Assigned(CarId)` only after explicit native-to-logical mapping. Vendor
-credentials and identities confer no LiftAssistant authority. Receipt,
-serving/completion, cancellation, reconciliation, session recovery,
-destination-call semantics and production adapters remain later review work.
+credentials and identities confer no LiftAssistant authority.
+
+M6C.1b distinguishes proven non-submission, uncertain or successful local
+delivery, correlated controller receipt, assignment, service, withdrawal and
+physical completion. Only an authorized explicit retry may resend a proven
+unsent request. Authority revocation fences commands and preserves evidence
+for work already sent. Proven prevention retires unstarted work. Serving
+completes through canonical Operational observations and the shared call
+registry. Bounded terminal history and a consume-and-restore checkpoint keep
+old identities fenced without resending. Vendor lifecycle mapping, durable
+recovery, destination calls and production adapters remain later review work.
 
 ## License
 

@@ -186,9 +186,11 @@ M6C.0 freezes [dispatch ownership](M6C_DISPATCH_OWNERSHIP.md) as an internal,
 independent semantic axis. M6C.1a proves only the deterministic external-owned
 path from an existing hall call through car-free submission, explicit
 dispatch-scope authority and mapped late assignment to `Assigned(CarId)`.
-M6C.1b and later work must separately review serving/completion, receipts,
-cancellation, reconciliation, reconnect/recovery, destination-call semantics
-and live adapter evidence. M7 remains a later HUMAN gate.
+M6C.1b adds explicit retry, correlated receipt and service progress,
+observation-based completion, withdrawal, bounded retirement and virtual
+restore. M6C.2 requires separate HUMAN review of the generic lifecycle proof
+and authorization for live adapter evidence. Vendor mappings, durable recovery,
+destination-call semantics and M7 remain later HUMAN gates.
 
 Only high-level intents belong here. Raw brake, motor torque, safety-chain bypass, door-lock bypass, or comparable safety primitives remain outside LiftAssistant Core semantics.
 

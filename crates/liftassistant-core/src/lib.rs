@@ -117,8 +117,17 @@ impl CallRegistry {
 
     pub fn note_arrival(&mut self, car: &CarId, floor: Floor) -> Option<CallId> {
         let id = self.serving_call(car, floor)?;
+        self.note_call_arrival(id, car, floor).then_some(id)
+    }
+
+    pub fn note_call_arrival(&mut self, id: CallId, car: &CarId, floor: Floor) -> bool {
+        if !self.calls.get(&id).is_some_and(|record| {
+            record.call.floor == floor && record.state == CallState::Serving(car.clone())
+        }) {
+            return false;
+        }
         self.arrived.insert(id);
-        Some(id)
+        true
     }
 
     pub fn complete_open_call(&mut self, car: &CarId) -> Option<CallId> {
@@ -127,7 +136,11 @@ impl CallRegistry {
                 |record| matches!(&record.state, CallState::Serving(assigned) if assigned == car),
             )
         })?;
-        self.complete(id, car).then_some(id)
+        self.complete_arrived_call(id, car).then_some(id)
+    }
+
+    pub fn complete_arrived_call(&mut self, id: CallId, car: &CarId) -> bool {
+        self.arrived.contains(&id) && self.complete(id, car)
     }
 
     pub fn occupied_cars(&self) -> BTreeSet<CarId> {
@@ -159,6 +172,17 @@ impl CallRegistry {
             return false;
         }
         record.state = CallState::Serving(car.clone());
+        true
+    }
+
+    /// Remove work whose execution was prevented before service began.
+    pub fn remove_unstarted(&mut self, id: CallId) -> bool {
+        if !self.calls.get(&id).is_some_and(|record| {
+            matches!(record.state, CallState::Pending | CallState::Assigned(_))
+        }) {
+            return false;
+        }
+        self.calls.remove(&id);
         true
     }
 

@@ -1,10 +1,15 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use liftassistant_core::{CallRegistration, HallCallRejection, validate_hall_call};
-use liftassistant_model::{CallId, CallState, CarId, HallCall};
-use liftassistant_runtime::ControllerId;
+use liftassistant_model::{
+    CallId, CallRecord, CallState, CarId, CarLocation, CarState, DoorState, HallCall, MotionState,
+    ObservationProvenance,
+};
+use liftassistant_runtime::{AssembledCarObservation, ControllerId, WithdrawalOutcome};
 
-use crate::{Engine, PrincipalId};
+use crate::{Engine, EngineEvent, PrincipalId};
+
+const RECENT_EXTERNAL_TERMINALS: usize = 128;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ExternalDispatchScopeId(String);
@@ -81,6 +86,7 @@ pub enum ExternalDispatchAuthorityError {
 /// Delivery at the external-dispatch boundary, not assignment or physical outcome.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExternalDispatchDelivery {
+    /// The sink can establish that the request did not reach the external boundary.
     NotSubmitted,
     Submitted,
     Indeterminate,
@@ -98,6 +104,10 @@ pub trait ExternalDispatchSink {
     fn controller_id(&self) -> &ControllerId;
 
     fn submit(&mut self, request: &ExternalDispatchRequest) -> ExternalDispatchDelivery;
+
+    fn withdraw(&mut self, _request: &ExternalDispatchRequest) -> WithdrawalOutcome {
+        WithdrawalOutcome::Unsupported
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -146,7 +156,7 @@ pub enum ExternalAssignmentResult {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ExternalAssignmentRejection {
+pub enum ExternalEvidenceRejection {
     UnknownCall(CallId),
     NotExternallyOwned(CallId),
     WrongScope {
@@ -165,8 +175,66 @@ pub enum ExternalAssignmentRejection {
         call: CallId,
         existing: CarId,
         attempted: CarId,
+        existing_native: NativeAssignmentId,
+        attempted_native: NativeAssignmentId,
     },
     InactiveCall(CallId),
+    NeverSubmitted(CallId),
+    NotAssigned(CallId),
+    WrongAssignment {
+        expected: NativeAssignmentId,
+        received: NativeAssignmentId,
+    },
+}
+
+pub type ExternalAssignmentRejection = ExternalEvidenceRejection;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExternalDispatchDisposition {
+    Accepted,
+    Rejected,
+    Indeterminate,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExternalCallContext {
+    pub call: CallId,
+    pub scope: ExternalDispatchScopeId,
+    pub controller: ControllerId,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExternalReceiptResult {
+    Recorded,
+    Duplicate,
+    Stale,
+    Inconsistent {
+        retained: ExternalDispatchDisposition,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExternalServingResult {
+    Started,
+    Duplicate,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExternalCommandRejection {
+    InactiveCall,
+    WrongScope,
+    WrongController,
+    AuthorityFenced,
+    RetryUnsafe,
+    NeverSubmitted,
+    AlreadyWithdrawn,
+    InconsistentPrevention,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExternalDispatchTerminal {
+    Completed,
+    Prevented,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -175,6 +243,17 @@ pub struct ExternalDispatchRecord {
     pub controller: ControllerId,
     pub authority: ExternalDispatchAuthorityGrant,
     pub delivery: ExternalDispatchDelivery,
+    pub receipt: Option<ExternalDispatchDisposition>,
+    pub withdrawal: Option<WithdrawalOutcome>,
+    native_assignment: Option<NativeAssignmentId>,
+    service_observation: ServiceObservation,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct ServiceObservation {
+    baseline: Option<ObservationProvenance>,
+    saw_travel: bool,
+    saw_closed_at_target: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -183,6 +262,10 @@ pub(crate) struct ExternalDispatches {
     grants: BTreeMap<ExternalDispatchScopeId, ExternalDispatchAuthorityGrant>,
     mappings: BTreeMap<(ExternalDispatchScopeId, NativeAssignmentId), CarId>,
     active: BTreeMap<CallId, ExternalDispatchRecord>,
+    // Keep separate capacity so prevented calls cannot evict ownership while
+    // the shared registry still retains a completed external CallId.
+    completed: VecDeque<(CallId, ExternalDispatchScopeId)>,
+    prevented: VecDeque<(CallId, ExternalDispatchScopeId)>,
     last_grant: u64,
 }
 
@@ -193,6 +276,39 @@ impl ExternalDispatches {
 
     fn record(&self, call: CallId) -> Option<&ExternalDispatchRecord> {
         self.active.get(&call)
+    }
+
+    fn retired(
+        &self,
+        call: CallId,
+    ) -> Option<(&ExternalDispatchScopeId, ExternalDispatchTerminal)> {
+        if let Some((_, scope)) = self.completed.iter().find(|(id, _)| *id == call) {
+            Some((scope, ExternalDispatchTerminal::Completed))
+        } else {
+            self.prevented
+                .iter()
+                .find(|(id, _)| *id == call)
+                .map(|(_, scope)| (scope, ExternalDispatchTerminal::Prevented))
+        }
+    }
+
+    fn retire(&mut self, call: CallId, terminal: ExternalDispatchTerminal) {
+        let record = self
+            .active
+            .remove(&call)
+            .expect("retiring active external work");
+        let history = match terminal {
+            ExternalDispatchTerminal::Completed => &mut self.completed,
+            ExternalDispatchTerminal::Prevented => &mut self.prevented,
+        };
+        if history.len() == RECENT_EXTERNAL_TERMINALS {
+            history.pop_front();
+        }
+        history.push_back((call, record.request.scope));
+    }
+
+    pub(crate) fn fence_grants(&mut self) {
+        self.grants.clear();
     }
 
     fn check_grant(
@@ -285,15 +401,27 @@ impl Engine {
     }
 
     pub fn dispatch_ownership(&self, call: CallId) -> Option<DispatchOwnership> {
-        self.calls.get(call)?;
-        Some(match self.external_dispatch.record(call) {
-            Some(record) => DispatchOwnership::ExternalController(record.request.scope.clone()),
-            None => DispatchOwnership::LiftAssistant,
-        })
+        if let Some(record) = self.external_dispatch.record(call) {
+            return Some(DispatchOwnership::ExternalController(
+                record.request.scope.clone(),
+            ));
+        }
+        if let Some((scope, _)) = self.external_dispatch.retired(call) {
+            return Some(DispatchOwnership::ExternalController(scope.clone()));
+        }
+        self.calls
+            .get(call)
+            .map(|_| DispatchOwnership::LiftAssistant)
     }
 
     pub fn external_dispatch_record(&self, call: CallId) -> Option<&ExternalDispatchRecord> {
         self.external_dispatch.record(call)
+    }
+
+    pub fn external_dispatch_terminal(&self, call: CallId) -> Option<ExternalDispatchTerminal> {
+        self.external_dispatch
+            .retired(call)
+            .map(|(_, terminal)| terminal)
     }
 
     pub fn submit_external_call(
@@ -327,16 +455,20 @@ impl Engine {
                     service: call,
                     scope: scope.clone(),
                 };
-                let delivery = sink.submit(&request);
                 self.external_dispatch.active.insert(
                     id,
                     ExternalDispatchRecord {
                         request: request.clone(),
                         controller: expected_controller,
                         authority: grant.clone(),
-                        delivery,
+                        delivery: ExternalDispatchDelivery::Indeterminate,
+                        receipt: None,
+                        withdrawal: None,
+                        native_assignment: None,
+                        service_observation: ServiceObservation::default(),
                     },
                 );
+                let delivery = self.send_external_request(id, grant, sink);
                 Ok(ExternalDispatchSubmission::Created { request, delivery })
             }
             CallRegistration::Duplicate(id) => {
@@ -360,54 +492,48 @@ impl Engine {
         }
     }
 
+    fn send_external_request(
+        &mut self,
+        call: CallId,
+        grant: &ExternalDispatchAuthorityGrant,
+        sink: &mut impl ExternalDispatchSink,
+    ) -> ExternalDispatchDelivery {
+        let record = self
+            .external_dispatch
+            .active
+            .get_mut(&call)
+            .expect("reserved external request");
+        // If the sink unwinds after possible transmission, ownership remains
+        // external and a caller that catches the unwind cannot retry the send.
+        record.delivery = ExternalDispatchDelivery::Indeterminate;
+        record.authority = grant.clone();
+        record.delivery = sink.submit(&record.request);
+        record.delivery
+    }
+
     pub fn receive_external_assignment(
         &mut self,
         evidence: ExternalAssignmentEvidence,
     ) -> ExternalAssignmentResult {
-        let Some(record) = self.external_dispatch.record(evidence.call) else {
-            return ExternalAssignmentResult::Rejected(
-                if self.calls.get(evidence.call).is_some() {
-                    ExternalAssignmentRejection::NotExternallyOwned(evidence.call)
-                } else {
-                    ExternalAssignmentRejection::UnknownCall(evidence.call)
-                },
-            );
+        let context = ExternalCallContext {
+            call: evidence.call,
+            scope: evidence.scope,
+            controller: evidence.controller,
         };
-        if record.request.scope != evidence.scope {
-            return ExternalAssignmentResult::Rejected(ExternalAssignmentRejection::WrongScope {
-                expected: record.request.scope.clone(),
-                received: evidence.scope,
-            });
-        }
-        if record.controller != evidence.controller {
-            return ExternalAssignmentResult::Rejected(
-                ExternalAssignmentRejection::WrongController {
-                    expected: record.controller.clone(),
-                    received: evidence.controller,
-                },
-            );
-        }
-
-        let Some(call) = self.calls.get(evidence.call) else {
-            return ExternalAssignmentResult::Rejected(ExternalAssignmentRejection::InactiveCall(
-                evidence.call,
-            ));
+        let (record, call) = match self.external_evidence(&context) {
+            Ok(pair) => pair,
+            Err(error) => return ExternalAssignmentResult::Rejected(error),
         };
-        if matches!(call.state, CallState::Serving(_) | CallState::Completed) {
-            return ExternalAssignmentResult::Rejected(ExternalAssignmentRejection::InactiveCall(
-                evidence.call,
-            ));
-        }
 
         let Some(car) = self
             .external_dispatch
             .mappings
-            .get(&(evidence.scope.clone(), evidence.native_assignment.clone()))
+            .get(&(context.scope.clone(), evidence.native_assignment.clone()))
             .cloned()
         else {
             return ExternalAssignmentResult::Rejected(
                 ExternalAssignmentRejection::UnmappedNativeAssignment {
-                    scope: evidence.scope,
+                    scope: context.scope,
                     native: evidence.native_assignment,
                 },
             );
@@ -416,28 +542,312 @@ impl Engine {
         match &call.state {
             CallState::Pending => {
                 assert!(self.calls.assign(evidence.call, car.clone()));
+                self.external_dispatch
+                    .active
+                    .get_mut(&evidence.call)
+                    .expect("active assignment")
+                    .native_assignment = Some(evidence.native_assignment);
                 ExternalAssignmentResult::Assigned {
                     call: evidence.call,
                     car,
                 }
             }
-            CallState::Assigned(existing) if existing == &car => {
+            CallState::Assigned(_) | CallState::Serving(_)
+                if record.native_assignment.as_ref() == Some(&evidence.native_assignment) =>
+            {
                 ExternalAssignmentResult::Duplicate {
                     call: evidence.call,
                     car,
                 }
             }
-            CallState::Assigned(existing) => ExternalAssignmentResult::Rejected(
-                ExternalAssignmentRejection::ConflictingAssignment {
-                    call: evidence.call,
-                    existing: existing.clone(),
-                    attempted: car,
-                },
-            ),
-            CallState::Serving(_) | CallState::Completed => unreachable!("checked above"),
+            CallState::Assigned(existing) | CallState::Serving(existing) => {
+                ExternalAssignmentResult::Rejected(
+                    ExternalAssignmentRejection::ConflictingAssignment {
+                        call: evidence.call,
+                        existing: existing.clone(),
+                        attempted: car,
+                        existing_native: record
+                            .native_assignment
+                            .clone()
+                            .expect("mapped assignment"),
+                        attempted_native: evidence.native_assignment,
+                    },
+                )
+            }
+            CallState::Completed => unreachable!("evidence requires an active call"),
+        }
+    }
+
+    fn external_evidence(
+        &self,
+        context: &ExternalCallContext,
+    ) -> Result<(&ExternalDispatchRecord, &CallRecord), ExternalEvidenceRejection> {
+        let id = context.call;
+        let call = self.calls.get(id);
+        let Some(record) = self.external_dispatch.record(id) else {
+            return Err(if self.external_dispatch.retired(id).is_some() {
+                ExternalEvidenceRejection::InactiveCall(id)
+            } else if call.is_some() {
+                ExternalEvidenceRejection::NotExternallyOwned(id)
+            } else {
+                ExternalEvidenceRejection::UnknownCall(id)
+            });
+        };
+        let call = call
+            .filter(|call| call.state.is_active())
+            .ok_or(ExternalEvidenceRejection::InactiveCall(id))?;
+        if record.request.scope != context.scope {
+            return Err(ExternalEvidenceRejection::WrongScope {
+                expected: record.request.scope.clone(),
+                received: context.scope.clone(),
+            });
+        }
+        if record.controller != context.controller {
+            return Err(ExternalEvidenceRejection::WrongController {
+                expected: record.controller.clone(),
+                received: context.controller.clone(),
+            });
+        }
+        if record.delivery == ExternalDispatchDelivery::NotSubmitted {
+            return Err(ExternalEvidenceRejection::NeverSubmitted(id));
+        }
+        Ok((record, call))
+    }
+
+    fn external_command(
+        &self,
+        call: CallId,
+        scope: &ExternalDispatchScopeId,
+        grant: &ExternalDispatchAuthorityGrant,
+        controller: &ControllerId,
+    ) -> Result<(&ExternalDispatchRecord, &CallRecord), ExternalCommandRejection> {
+        let record = self
+            .external_dispatch
+            .record(call)
+            .ok_or(ExternalCommandRejection::InactiveCall)?;
+        let state = self
+            .calls
+            .get(call)
+            .filter(|call| call.state.is_active())
+            .ok_or(ExternalCommandRejection::InactiveCall)?;
+        if &record.request.scope != scope {
+            return Err(ExternalCommandRejection::WrongScope);
+        }
+        self.external_dispatch
+            .check_grant(scope, grant)
+            .map_err(|_| ExternalCommandRejection::AuthorityFenced)?;
+        if &record.controller != controller
+            || self.external_dispatch.controllers.get(scope) != Some(controller)
+        {
+            return Err(ExternalCommandRejection::WrongController);
+        }
+        Ok((record, state))
+    }
+
+    pub fn retry_external_call(
+        &mut self,
+        call: CallId,
+        scope: &ExternalDispatchScopeId,
+        grant: &ExternalDispatchAuthorityGrant,
+        sink: &mut impl ExternalDispatchSink,
+    ) -> Result<ExternalDispatchDelivery, ExternalCommandRejection> {
+        let (record, state) = self.external_command(call, scope, grant, sink.controller_id())?;
+        if record.delivery != ExternalDispatchDelivery::NotSubmitted
+            || state.state != CallState::Pending
+        {
+            return Err(ExternalCommandRejection::RetryUnsafe);
+        }
+        Ok(self.send_external_request(call, grant, sink))
+    }
+
+    pub fn receive_external_receipt(
+        &mut self,
+        context: &ExternalCallContext,
+        disposition: ExternalDispatchDisposition,
+    ) -> Result<ExternalReceiptResult, ExternalEvidenceRejection> {
+        let (record, _) = self.external_evidence(context)?;
+        use ExternalDispatchDisposition::Indeterminate;
+        match record.receipt {
+            Some(prior) if prior == disposition => Ok(ExternalReceiptResult::Duplicate),
+            None | Some(Indeterminate) => {
+                self.external_dispatch
+                    .active
+                    .get_mut(&context.call)
+                    .expect("active receipt")
+                    .receipt = Some(disposition);
+                Ok(ExternalReceiptResult::Recorded)
+            }
+            Some(_) if disposition == Indeterminate => Ok(ExternalReceiptResult::Stale),
+            Some(retained) => Ok(ExternalReceiptResult::Inconsistent { retained }),
+        }
+    }
+
+    pub fn receive_external_serving(
+        &mut self,
+        context: &ExternalCallContext,
+        native: &NativeAssignmentId,
+    ) -> Result<ExternalServingResult, ExternalEvidenceRejection> {
+        let (record, call) = self.external_evidence(context)?;
+        let expected = record
+            .native_assignment
+            .as_ref()
+            .ok_or(ExternalEvidenceRejection::NotAssigned(context.call))?;
+        if expected != native {
+            return Err(ExternalEvidenceRejection::WrongAssignment {
+                expected: expected.clone(),
+                received: native.clone(),
+            });
+        }
+        let car = match &call.state {
+            CallState::Assigned(car) => car.clone(),
+            CallState::Serving(_) => return Ok(ExternalServingResult::Duplicate),
+            _ => return Err(ExternalEvidenceRejection::NotAssigned(context.call)),
+        };
+        let baseline = self
+            .operational_observation_source(&car)
+            .and_then(|source| self.evidence(source, &car))
+            .map(|evidence| evidence.latest_provenance.clone());
+        assert!(self.calls.mark_serving(context.call, &car));
+        self.external_dispatch
+            .active
+            .get_mut(&context.call)
+            .expect("active service")
+            .service_observation
+            .baseline = baseline;
+        self.diagnostics
+            .record_engine_events(&[EngineEvent::CallStateChanged {
+                id: context.call,
+                state: CallState::Serving(car),
+            }]);
+        Ok(ExternalServingResult::Started)
+    }
+
+    pub fn withdraw_external_call(
+        &mut self,
+        call: CallId,
+        scope: &ExternalDispatchScopeId,
+        grant: &ExternalDispatchAuthorityGrant,
+        sink: &mut impl ExternalDispatchSink,
+    ) -> Result<WithdrawalOutcome, ExternalCommandRejection> {
+        let (record, state) = self.external_command(call, scope, grant, sink.controller_id())?;
+        if record.delivery == ExternalDispatchDelivery::NotSubmitted {
+            return Err(ExternalCommandRejection::NeverSubmitted);
+        }
+        if record.withdrawal.is_some() {
+            return Err(ExternalCommandRejection::AlreadyWithdrawn);
+        }
+        let outcome = sink.withdraw(&record.request);
+        if outcome == WithdrawalOutcome::Prevented {
+            if matches!(state.state, CallState::Serving(_)) {
+                return Err(ExternalCommandRejection::InconsistentPrevention);
+            }
+            assert!(self.calls.remove_unstarted(call));
+            self.external_dispatch
+                .retire(call, ExternalDispatchTerminal::Prevented);
+        } else {
+            self.external_dispatch
+                .active
+                .get_mut(&call)
+                .expect("active withdrawal")
+                .withdrawal = Some(outcome);
+        }
+        Ok(outcome)
+    }
+
+    pub(crate) fn reset_external_service_observation(
+        &mut self,
+        car: &CarId,
+        baseline: Option<&ObservationProvenance>,
+    ) {
+        if self.external_dispatch.active.is_empty() {
+            return;
+        }
+        for call in self.calls.active_calls() {
+            if matches!(&call.state, CallState::Serving(assigned) if assigned == car) {
+                if let Some(record) = self.external_dispatch.active.get_mut(&call.id) {
+                    record.service_observation = ServiceObservation {
+                        baseline: baseline.cloned(),
+                        ..ServiceObservation::default()
+                    };
+                }
+            }
+        }
+    }
+
+    pub(crate) fn observe_external_service(
+        &mut self,
+        state: &CarState,
+        evidence: &AssembledCarObservation,
+    ) {
+        if self.external_dispatch.active.is_empty() {
+            return;
+        }
+        let floor = state.location.floor_reference();
+        let at_floor = match state.location {
+            CarLocation::Floor(_) => true,
+            CarLocation::Continuous(position) => {
+                position.floor_position == f64::from(floor.index())
+            }
+        };
+        let stopped = state.motion == MotionState::Stopped;
+        let mut candidates = 0;
+        let mut ready = None;
+        for call in self.calls.active_calls() {
+            if !matches!(&call.state, CallState::Serving(car) if car == &state.id) {
+                continue;
+            }
+            let at_target = at_floor && stopped && floor == call.call.floor;
+            candidates += usize::from(at_target);
+            let Some(record) = self.external_dispatch.active.get_mut(&call.id) else {
+                continue;
+            };
+            let progress = &mut record.service_observation;
+            let newer = |provenance: &ObservationProvenance| {
+                progress.baseline.as_ref().is_none_or(|baseline| {
+                    provenance.source == baseline.source
+                        && (provenance.session != baseline.session
+                            || provenance.sequence > baseline.sequence)
+                })
+            };
+            let (Some(position), Some(motion)) = (&evidence.position, &evidence.motion) else {
+                continue;
+            };
+            if !newer(&position.provenance) || !newer(&motion.provenance) {
+                continue;
+            }
+            let fresh_door = evidence.door.as_ref().is_some_and(|sample| {
+                newer(&sample.provenance)
+                    && sample.provenance.sequence >= position.provenance.sequence
+                    && sample.provenance.sequence >= motion.provenance.sequence
+            });
+            progress.saw_travel |= !stopped || !at_floor || floor != call.call.floor;
+            if at_target && fresh_door {
+                progress.saw_closed_at_target |= state.door == DoorState::Closed;
+                if state.door == DoorState::Open
+                    && (progress.saw_travel || progress.saw_closed_at_target)
+                {
+                    ready = Some(call.id);
+                }
+            }
+        }
+        // A car/floor observation cannot distinguish two serving calls at the same landing.
+        if let Some(id) = ready.filter(|_| candidates == 1) {
+            assert!(self.calls.note_call_arrival(id, &state.id, floor));
+            assert!(self.calls.complete_arrived_call(id, &state.id));
+            self.external_dispatch
+                .retire(id, ExternalDispatchTerminal::Completed);
+            self.diagnostics
+                .record_engine_events(&[EngineEvent::CallStateChanged {
+                    id,
+                    state: CallState::Completed,
+                }]);
         }
     }
 }
+
+#[cfg(test)]
+#[path = "external_dispatch/lifecycle_tests.rs"]
+mod lifecycle_tests;
 
 #[cfg(test)]
 mod tests {
@@ -449,10 +859,13 @@ mod tests {
     use super::*;
     use crate::{AuthorityGrant, EngineEvent};
 
-    struct RecordingExternalSink {
-        controller: ControllerId,
-        delivery: ExternalDispatchDelivery,
-        requests: Vec<ExternalDispatchRequest>,
+    pub(super) struct RecordingExternalSink {
+        pub(super) controller: ControllerId,
+        pub(super) delivery: ExternalDispatchDelivery,
+        pub(super) requests: Vec<ExternalDispatchRequest>,
+        pub(super) withdrawal: WithdrawalOutcome,
+        pub(super) withdrawals: Vec<CallId>,
+        pub(super) interrupt_submission: bool,
     }
 
     impl RecordingExternalSink {
@@ -461,6 +874,9 @@ mod tests {
                 controller: ControllerId::new(controller),
                 delivery: ExternalDispatchDelivery::Submitted,
                 requests: Vec::new(),
+                withdrawal: WithdrawalOutcome::Unsupported,
+                withdrawals: Vec::new(),
+                interrupt_submission: false,
             }
         }
     }
@@ -472,12 +888,18 @@ mod tests {
 
         fn submit(&mut self, request: &ExternalDispatchRequest) -> ExternalDispatchDelivery {
             self.requests.push(request.clone());
+            assert!(!self.interrupt_submission, "interrupted external send");
             self.delivery
+        }
+
+        fn withdraw(&mut self, request: &ExternalDispatchRequest) -> WithdrawalOutcome {
+            self.withdrawals.push(request.call);
+            self.withdrawal
         }
     }
 
     #[derive(Default)]
-    struct RecordingIntentSink(Vec<Intent>);
+    pub(super) struct RecordingIntentSink(pub(super) Vec<Intent>);
 
     impl IntentSink for RecordingIntentSink {
         fn submit_intent(&mut self, intent: Intent) -> Result<(), RuntimeError> {
@@ -486,18 +908,18 @@ mod tests {
         }
     }
 
-    fn engine() -> Engine {
+    pub(super) fn engine() -> Engine {
         Engine::new(BuildingTopology::reference_eight_floor())
     }
 
-    fn call() -> HallCall {
+    pub(super) fn call() -> HallCall {
         HallCall {
             floor: Floor::new(3),
             direction: Direction::Up,
         }
     }
 
-    fn configured_external(
+    pub(super) fn configured_external(
         engine: &mut Engine,
     ) -> (
         ExternalDispatchScopeId,
@@ -528,7 +950,7 @@ mod tests {
         (scope, grant, RecordingExternalSink::new("controller-X"))
     }
 
-    fn submitted_call(
+    pub(super) fn submitted_call(
         engine: &mut Engine,
     ) -> (
         CallId,
@@ -546,7 +968,7 @@ mod tests {
         (request.call, scope, grant, sink)
     }
 
-    fn assignment(
+    pub(super) fn assignment(
         call: CallId,
         scope: &ExternalDispatchScopeId,
         native: &str,
@@ -663,6 +1085,8 @@ mod tests {
                     call: id,
                     existing: CarId::new("B"),
                     attempted: CarId::new("A"),
+                    existing_native: NativeAssignmentId::new("native-deck-B"),
+                    attempted_native: NativeAssignmentId::new("native-deck-A"),
                 }
             )
         );

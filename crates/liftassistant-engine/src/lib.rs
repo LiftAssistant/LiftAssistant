@@ -17,10 +17,13 @@ pub use diagnostics::{
 };
 pub use external_dispatch::{
     DispatchOwnership, ExternalAssignmentEvidence, ExternalAssignmentRejection,
-    ExternalAssignmentResult, ExternalDispatchAuthorityError, ExternalDispatchAuthorityGrant,
+    ExternalAssignmentResult, ExternalCallContext, ExternalCommandRejection,
+    ExternalDispatchAuthorityError, ExternalDispatchAuthorityGrant,
     ExternalDispatchAuthorityGrantId, ExternalDispatchConfigurationError, ExternalDispatchDelivery,
-    ExternalDispatchRecord, ExternalDispatchRequest, ExternalDispatchScopeId, ExternalDispatchSink,
-    ExternalDispatchSubmission, ExternalDispatchSubmissionError, NativeAssignmentId,
+    ExternalDispatchDisposition, ExternalDispatchRecord, ExternalDispatchRequest,
+    ExternalDispatchScopeId, ExternalDispatchSink, ExternalDispatchSubmission,
+    ExternalDispatchSubmissionError, ExternalDispatchTerminal, ExternalEvidenceRejection,
+    ExternalReceiptResult, ExternalServingResult, NativeAssignmentId,
 };
 pub use liftassistant_runtime::ControllerId;
 
@@ -328,6 +331,7 @@ impl Engine {
 
         for car in &invalidated_cars {
             if self.operational_authorities.get(car) == Some(&source) {
+                self.reset_external_service_observation(car, None);
                 self.note_controlled_readiness_loss(car, WriteBlocker::ObservationUnavailable);
             }
         }
@@ -370,6 +374,7 @@ impl Engine {
         let invalidated_cars = invalidated_cars.into_iter().collect::<Vec<_>>();
         for car in &invalidated_cars {
             if self.operational_authorities.get(car) == Some(&source) {
+                self.reset_external_service_observation(car, None);
                 self.note_controlled_readiness_loss(car, WriteBlocker::ObservationUnavailable);
             }
         }
@@ -404,6 +409,9 @@ impl Engine {
         self.observations
             .invalidate_car_evidence(source, session, car);
         self.source_states.remove(&(source.clone(), car.clone()));
+        if role == ObservationBindingRole::Operational {
+            self.reset_external_service_observation(car, None);
+        }
         if role == ObservationBindingRole::Operational
             && self.operational_states.remove(car).is_some()
         {
@@ -498,6 +506,12 @@ impl Engine {
         };
         let Some(snapshot) = assembled.snapshot() else {
             self.source_states.remove(&key);
+            if role == ObservationBindingRole::Operational {
+                self.reset_external_service_observation(
+                    &assembled.car,
+                    Some(&assembled.latest_provenance),
+                );
+            }
             if role == ObservationBindingRole::Operational
                 && self.operational_states.remove(&assembled.car).is_some()
             {
@@ -527,10 +541,17 @@ impl Engine {
                         );
                     }
                     self.reconcile_controlled(state, &assembled);
+                    self.observe_external_service(state, &assembled);
                 }
             }
             CarStateResolution::Unresolved { car, .. } => {
                 self.source_states.remove(&key);
+                if role == ObservationBindingRole::Operational {
+                    self.reset_external_service_observation(
+                        car,
+                        Some(&assembled.latest_provenance),
+                    );
+                }
                 if role == ObservationBindingRole::Operational
                     && self.operational_states.remove(car).is_some()
                 {
@@ -599,10 +620,12 @@ impl Engine {
             events.push(EngineEvent::Runtime(runtime_event.clone()));
             match &runtime_event {
                 RuntimeEvent::IntentAccepted(Intent::ServeFloor { car, floor }) => {
-                    if let Some(id) = self.calls.assigned_call(car, *floor) {
-                        if self.external_dispatch.owns(id) {
-                            continue;
-                        }
+                    let assigned = self.calls.active_calls().find(|call| {
+                        !self.external_dispatch.owns(call.id)
+                            && call.call.floor == *floor
+                            && matches!(&call.state, CallState::Assigned(assigned) if assigned == car)
+                    }).map(|call| call.id);
+                    if let Some(id) = assigned {
                         assert!(self.calls.mark_serving(id, car));
                         events.push(EngineEvent::CallStateChanged {
                             id,
@@ -615,7 +638,14 @@ impl Engine {
                     self.ingest_observation_update(update.clone());
                 }
                 RuntimeEvent::Arrived { car, floor } => {
-                    self.calls.note_arrival(car, *floor);
+                    let serving = self.calls.active_calls().find(|call| {
+                        !self.external_dispatch.owns(call.id)
+                            && call.call.floor == *floor
+                            && matches!(&call.state, CallState::Serving(assigned) if assigned == car)
+                    }).map(|call| call.id);
+                    if let Some(id) = serving {
+                        assert!(self.calls.note_call_arrival(id, car, *floor));
+                    }
                 }
                 RuntimeEvent::DoorStateChanged {
                     car,

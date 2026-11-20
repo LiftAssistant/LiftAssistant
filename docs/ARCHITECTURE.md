@@ -29,10 +29,19 @@ mapping. Unknown mappings, wrong controller/scope, conflicting reassignment and
 terminal/retired calls return typed non-mutating results; identical assignment is
 idempotent.
 
-This boundary is internal and reversible. It adds no vendor type to Core,
-changes no `Intent`, `Receipt`, `WithdrawalOutcome` or `Reconciliation`, and
-defines no external serving/completion, cancellation, reconnect, destination
-call, production adapter or public write API semantics.
+M6C.1b extends the [internal dispatch contract](M6C_DISPATCH_OWNERSHIP.md).
+Explicit retry is limited to proven non-submission. A current dispatch grant
+authorizes commands, and correlated evidence for already-sent work remains
+eligible after revocation. Receipts and withdrawal outcomes are tracked
+independently of service. Correlated serving evidence starts service for the
+already assigned car. Only fresh Operational arrival and open-door evidence
+can complete it through the existing call registry.
+
+Proven prevention and physical completion release active external records into
+bounded terminal history. Virtual restore keeps operation identity and fences
+grants and stale observation evidence. This is an internal in-memory boundary.
+Vendor mapping, durable recovery, destination calls, production adapters and
+public write interfaces remain separate review work.
 
 ## Current composition
 

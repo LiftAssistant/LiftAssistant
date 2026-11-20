@@ -4,7 +4,28 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6C.0 + M6C.1a are HUMAN-ACCEPTED. M6C.1b lifecycle and recovery is authorized.**
+**M6C.1b is IMPLEMENTED and awaiting HUMAN architecture/quality review.**
+
+M6C.0 and M6C.1a are HUMAN-ACCEPTED. M6C.1b implements the
+[frozen internal lifecycle and recovery contract](M6C_DISPATCH_OWNERSHIP.md#m6c1b-external-dispatch-lifecycle-and-recovery).
+Only proven non-submission permits explicit retry of the same CallId. Correlated
+receipts and serving evidence retain their own meanings. Revoked grants fence
+commands while remote evidence remains eligible. Proven prevention retires the
+unstarted operation. Fresh Operational observations complete serving calls
+through the shared call registry. The virtual checkpoint preserves active and
+recent retired work, revokes grants and invalidates physical evidence.
+
+Local validation passed formatting, locked workspace all-target Clippy, 163
+workspace tests with one expected ignored test, the exact Rust/Cargo 1.85.0
+all-target check, nine TUI scenarios and four non-live Headless scenarios. The
+deterministic retirement regression exercises 129 physical completions and 129
+preventions, with zero active records and 128 retained tombstones of each kind
+at the end. The implementation uses in-memory fixtures and existing crate
+dependencies.
+
+**Terminal:** `M6C.1b COMPLETE — awaiting HUMAN architecture/quality review. No live KONE validation, production adapter, destination-call Core expansion, or M7 work started.`
+
+### M6B.3, M6C.0 and M6C.1a evidence
 
 The [M6B.3 live Sandbox run](M6B3_KONE_SANDBOX_VALIDATION.md#executed-live-sandbox-validation) completed the frozen A–K matrix with two bounded normal destination calls. All five official-inventory candidates passed read-only topology/actions audit. The deterministic ranking selected the only nine-lift group; its chosen normal route had three common eligible lifts. Exact group scope was sufficient.
 
@@ -54,7 +75,7 @@ HTTP or vendor dependency. Secret-free hosted
 [CI run 44600147449](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44600147449)
 passed both Stable format/Clippy/test and Rust 1.85 jobs on the final code commit.
 
-**Terminal:** `M6C.0 + M6C.1a COMPLETE — awaiting HUMAN architecture/quality review. No live KONE validation, destination-call Core expansion, production adapter, or M7 work started.`
+M6C.0 and M6C.1a subsequently passed that HUMAN review and authorized M6C.1b.
 
 M1 Interactive Simulator is closed and human-accepted.
 

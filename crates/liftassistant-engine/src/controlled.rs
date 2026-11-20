@@ -624,6 +624,7 @@ impl Engine {
     pub fn restore_virtual(checkpoint: VirtualCheckpoint) -> Self {
         let mut engine = checkpoint.0;
         engine.controlled.grants.clear();
+        engine.external_dispatch.fence_grants();
         for record in engine.controlled.active.values_mut() {
             if record.receipt == Receipt::Awaiting {
                 record.receipt = Receipt::Indeterminate;

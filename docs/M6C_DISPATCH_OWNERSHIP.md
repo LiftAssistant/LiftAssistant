@@ -91,11 +91,14 @@ The following M6B.3 findings remain deferred constraints:
   retry may send the same request and CallId only after proven `NotSubmitted`,
   using the current grant, scope and configured controller. `Submitted` and
   `Indeterminate` are fenced against resend, including after virtual restore.
+  Engine reserves external ownership and uncertainty before entering the sink.
+  An interrupted send that unwinds to the caller retains that fence.
 - Correlated controller receipts record Accepted, Rejected or Indeterminate
   independently of delivery. An identical receipt is idempotent. A definitive
   disposition may resolve Indeterminate. A late Indeterminate cannot erase a
   definitive disposition, and conflicting definitive receipts are reported.
-  No receipt changes assignment, service or physical state.
+  A Rejected receipt records the controller's disposition. Correlated
+  assignment and service evidence remain independently observable.
 - Assignment requires the configured native mapping. Only the same native
   assignment is a duplicate. Separate serving evidence must match that
   assignment and its call, scope and controller. Only then may `Assigned`
@@ -108,7 +111,9 @@ The following M6B.3 findings remain deferred constraints:
   A post-serving observation of travel or of a closed door at the target
   distinguishes current service from an already open, idle snapshot. Evidence
   from before serving, before observation invalidation or before virtual
-  restore cannot satisfy completion. Vendor terminal states and legacy
+  restore cannot satisfy completion. Door evidence must be observed at or
+  after the position and stopped evidence. A shared car/floor sample leaves
+  multiple matching serving calls unresolved. Vendor terminal states and legacy
   uncorrelated car-specific feedback carry no external completion authority.
 - Withdrawal rechecks the current grant, scope and controller. Requested
   and Unsupported keep the operation active and observable. A proven Prevented
@@ -117,7 +122,8 @@ The following M6B.3 findings remain deferred constraints:
   with observed progress. An already recorded withdrawal outcome suppresses
   repeat commands in this proof.
 - Physical completion and proven prevention remove active external records.
-  A bounded recent tombstone retains identity and terminal outcome. After
+  Each terminal outcome retains up to 128 recent tombstones with call identity
+  and dispatch scope. After
   eviction, delayed evidence can become Unknown and still cannot recreate a
   call. The existing CallId allocator never rewinds in virtual recovery.
 - Consume-and-restore checkpoints preserve logical work, delivery uncertainty,
