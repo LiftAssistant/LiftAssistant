@@ -476,6 +476,14 @@ impl Engine {
                 result: admission,
             });
         if admission == Admission::Admitted {
+            // If the sink unwinds after possible transmission, preserve uncertainty and
+            // keep the admitted identity active so a caller that catches the unwind cannot
+            // resend it or accept a conflicting replacement.
+            self.controlled
+                .active
+                .get_mut(car)
+                .expect("admitted record")
+                .receipt = Receipt::Indeterminate;
             let submission = backend.submit(request.id, &request.intent);
             self.diagnostics
                 .record_controlled(ControlledEvent::Submission(request.id, submission));
@@ -538,6 +546,10 @@ impl Engine {
         if backend.controller_id() != &record.controller {
             return Err(WithdrawalError::WrongController);
         }
+        // Requested is the conservative existing state when the sink may unwind after
+        // transmitting the withdrawal. Pre-reserving it fences a second command without
+        // claiming that execution was prevented.
+        record.withdrawal = Some((reason, WithdrawalOutcome::Requested));
         let outcome = backend.withdraw(id);
         record.withdrawal = Some((reason, outcome));
         let car = record.request.intent.car().clone();
@@ -838,6 +850,123 @@ mod tests {
         fn submit(&mut self, _id: IntentId, _intent: &Intent) -> Submission {
             Submission::Submitted
         }
+    }
+
+    struct InterruptingController {
+        id: ControllerId,
+        submissions: usize,
+        withdrawals: usize,
+        interrupt_submission: bool,
+        interrupt_withdrawal: bool,
+    }
+
+    impl ControlledIntentSink for InterruptingController {
+        fn controller_id(&self) -> &ControllerId {
+            &self.id
+        }
+
+        fn available(&self, _car: &CarId) -> bool {
+            true
+        }
+
+        fn submit(&mut self, _id: IntentId, _intent: &Intent) -> Submission {
+            self.submissions += 1;
+            assert!(!self.interrupt_submission, "interrupted controlled send");
+            Submission::Submitted
+        }
+
+        fn withdraw(&mut self, _id: IntentId) -> WithdrawalOutcome {
+            self.withdrawals += 1;
+            assert!(
+                !self.interrupt_withdrawal,
+                "interrupted controlled withdrawal"
+            );
+            WithdrawalOutcome::Requested
+        }
+    }
+
+    #[test]
+    fn interrupted_controlled_commands_preserve_uncertainty_and_fence_resend() {
+        use std::panic::{AssertUnwindSafe, catch_unwind};
+
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let car = CarId::new("A");
+        let source = ObservationSourceId::new("physical");
+        let mut backend = InterruptingController {
+            id: ControllerId::new("virtual"),
+            submissions: 0,
+            withdrawals: 0,
+            interrupt_submission: true,
+            interrupt_withdrawal: false,
+        };
+        engine
+            .bind_controlled_car(car.clone(), backend.id.clone())
+            .unwrap();
+        let grant = engine
+            .grant_authority(&car, PrincipalId::new("test"))
+            .unwrap();
+        engine
+            .bind_observation(
+                source.clone(),
+                car.clone(),
+                crate::ObservationBindingRole::Operational,
+            )
+            .unwrap();
+        engine
+            .begin_source_session(source, ObservationSessionId::new("test-incarnation"))
+            .unwrap();
+        engine.set_execution_capabilities(car.clone(), ExecutionCapabilities::reference_defaults());
+        observe(&mut engine, &CarState::new("A", Floor::new(1)), 1);
+        let request = engine.issue_controlled_intent(
+            Intent::ServeFloor {
+                car,
+                floor: Floor::new(2),
+            },
+            None,
+        );
+
+        let send = catch_unwind(AssertUnwindSafe(|| {
+            let _ = engine.submit_controlled(request.clone(), &grant, &mut backend);
+        }));
+        assert!(send.is_err());
+        assert_eq!(backend.submissions, 1);
+        assert_eq!(
+            engine.intent_record(request.id()).unwrap().receipt,
+            Receipt::Indeterminate
+        );
+
+        backend.interrupt_submission = false;
+        assert_eq!(
+            engine.submit_controlled(request.clone(), &grant, &mut backend),
+            Admission::Retry
+        );
+        assert_eq!(backend.submissions, 1);
+        assert_eq!(
+            engine.receive_intent_receipt(IntentReceipt {
+                controller: backend.id.clone(),
+                intent: request.id(),
+                status: ReceiptStatus::Accepted,
+            }),
+            ReceiptResult::Recorded
+        );
+
+        backend.interrupt_withdrawal = true;
+        let withdrawal = catch_unwind(AssertUnwindSafe(|| {
+            let _ = engine.cancel_controlled_intent(request.id(), &grant, &mut backend);
+        }));
+        assert!(withdrawal.is_err());
+        assert_eq!(backend.withdrawals, 1);
+        assert_eq!(
+            engine.intent_record(request.id()).unwrap().withdrawal,
+            Some((WithdrawalReason::Cancelled, WithdrawalOutcome::Requested))
+        );
+
+        backend.interrupt_withdrawal = false;
+        assert_eq!(
+            engine.cancel_controlled_intent(request.id(), &grant, &mut backend),
+            Err(WithdrawalError::AlreadyWithdrawn)
+        );
+        assert_eq!(backend.withdrawals, 1);
     }
 
     #[test]

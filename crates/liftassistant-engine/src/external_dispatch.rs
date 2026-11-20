@@ -736,9 +736,19 @@ impl Engine {
         if record.withdrawal.is_some() {
             return Err(ExternalCommandRejection::AlreadyWithdrawn);
         }
-        let outcome = sink.withdraw(&record.request);
+        let request = record.request.clone();
+        let serving = matches!(state.state, CallState::Serving(_));
+        // Requested is the conservative existing state when the sink may unwind after
+        // transmitting the withdrawal. Pre-reserving it prevents an unsafe duplicate
+        // command without claiming that execution was prevented.
+        self.external_dispatch
+            .active
+            .get_mut(&call)
+            .expect("active withdrawal")
+            .withdrawal = Some(WithdrawalOutcome::Requested);
+        let outcome = sink.withdraw(&request);
         if outcome == WithdrawalOutcome::Prevented {
-            if matches!(state.state, CallState::Serving(_)) {
+            if serving {
                 return Err(ExternalCommandRejection::InconsistentPrevention);
             }
             assert!(self.calls.remove_unstarted(call));
@@ -866,6 +876,7 @@ mod tests {
         pub(super) withdrawal: WithdrawalOutcome,
         pub(super) withdrawals: Vec<CallId>,
         pub(super) interrupt_submission: bool,
+        pub(super) interrupt_withdrawal: bool,
     }
 
     impl RecordingExternalSink {
@@ -877,6 +888,7 @@ mod tests {
                 withdrawal: WithdrawalOutcome::Unsupported,
                 withdrawals: Vec::new(),
                 interrupt_submission: false,
+                interrupt_withdrawal: false,
             }
         }
     }
@@ -894,6 +906,10 @@ mod tests {
 
         fn withdraw(&mut self, request: &ExternalDispatchRequest) -> WithdrawalOutcome {
             self.withdrawals.push(request.call);
+            assert!(
+                !self.interrupt_withdrawal,
+                "interrupted external withdrawal"
+            );
             self.withdrawal
         }
     }

@@ -178,6 +178,33 @@ fn interrupted_send_reserves_external_ownership_and_fences_retry() {
 }
 
 #[test]
+fn interrupted_withdrawal_preserves_uncertainty_and_fences_duplicate_command() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    let mut engine = engine();
+    let (id, scope, grant, mut sink) = submitted_call(&mut engine);
+    sink.interrupt_withdrawal = true;
+
+    let withdrawal = catch_unwind(AssertUnwindSafe(|| {
+        let _ = engine.withdraw_external_call(id, &scope, &grant, &mut sink);
+    }));
+    assert!(withdrawal.is_err());
+    assert_eq!(sink.withdrawals, [id]);
+    assert_eq!(
+        engine.external_dispatch_record(id).unwrap().withdrawal,
+        Some(WithdrawalOutcome::Requested)
+    );
+    assert_eq!(engine.calls().get(id).unwrap().state, CallState::Pending);
+
+    sink.interrupt_withdrawal = false;
+    assert_eq!(
+        engine.withdraw_external_call(id, &scope, &grant, &mut sink),
+        Err(ExternalCommandRejection::AlreadyWithdrawn)
+    );
+    assert_eq!(sink.withdrawals, [id]);
+}
+
+#[test]
 fn receipt_records_controller_disposition_independently_of_assignment() {
     use ExternalDispatchDisposition::{Accepted, Indeterminate, Rejected};
     let mut engine = engine();
