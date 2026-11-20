@@ -209,19 +209,25 @@ Only high-level intents belong here. Raw brake, motor torque, safety-chain bypas
 
 Goal: allow approved high-level LiftAssistant intents to reach validated lower controllers while retaining clear safety and authority boundaries.
 
-M6 exit and M7 entry were HUMAN-approved on 2026-11-20. M7.0 + M7.1a now
-implement the production intent-gateway boundary and one Open-RMF `ServeFloor`
-process/recovery vertical slice against software/simulation only. It uses private
-local ingress, existing Engine authority/reconciliation, write-before-side-effect
-durable uncertainty and restart without automatic resend. The result is awaiting
-HUMAN architecture/quality review. No subsequent M7 slice is READY. Public write
-APIs, real passenger equipment and real controller/CAN/OEM/OPC access remain
-later HUMAN gates.
+M6 exit and M7 entry were HUMAN-approved on 2026-11-20. M7.0 + M7.1a implement
+the production intent-gateway boundary and one Open-RMF `ServeFloor`
+process/recovery vertical slice against software/simulation only. They use
+private local ingress, existing Engine authority/reconciliation,
+write-before-side-effect durable uncertainty and restart without automatic
+resend, and are HUMAN-accepted.
 
-Evidence-driven candidates after that review include strengthening explicit
-operator recovery for an RMF operation whose correlation is no longer observable,
-production service/filesystem hardening, or a separately authorized HIL/bench
-controller proof. None is implied or authorized by M7.1a completion.
+M7.1b is READY as the final software/simulation closure before another HUMAN
+decision. It adds explicit operator inspection, outcome-unknown retirement and
+a separate safe-resumption gate with bounded durable audit, current
+control-domain fencing, commissioning checks and fail-closed overload behavior.
+Retirement is neither physical completion nor proof of remote inactivity and
+cannot itself restore write readiness. Public write APIs, HIL/bench access, real
+passenger equipment and real controller/CAN/OEM/OPC access remain later HUMAN
+gates.
+
+After M7.1b closes, the next possible step is a separately authorized
+HIL/bench-controller environment decision. It is not implied by completing the
+software/simulation recovery boundary.
 
 Possible scope after M6 evidence:
 

@@ -365,6 +365,17 @@ Once data has flowed, silence revokes Operational truth; only a real payload can
 restore it. This keeps transport discovery, current payload activity, source
 incarnation and canonical readiness distinct.
 
+M7.1b keeps uncertain crash recovery gateway-local. An authorized operator may
+retire the one durable unresolved operation only as outcome unknown; that action
+does not mark Engine completion, prove remote inactivity or restore write
+readiness. It creates a durable `ResumptionRequired` boundary. A distinct
+authorized resumption action must re-evaluate the current local control-domain
+lease, configuration revision, fresh complete Operational evidence, command
+transport, observable RMF holder/correlation and absence of active local work.
+Any accepted residual uncertainty is recorded as uncertainty in a bounded audit
+trail. Generic Engine call/receipt meanings and all public read-only interfaces
+remain unchanged.
+
 
 ## Target production direction
 

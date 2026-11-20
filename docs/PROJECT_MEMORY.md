@@ -217,6 +217,17 @@ source incarnation or treating transport creation as payload health. These are
 software/simulation results, not HIL, passenger, controller, safety, production
 or certification evidence.
 
+HUMAN accepted M7.0 and M7.1a, including the late-restart negative evidence, and
+authorized M7.1b as the final software/simulation recovery closure. The durable
+boundary is that local outcome-unknown retirement is not physical completion,
+proof that remote work stopped, or authority to send new work. Retirement must
+remain non-ready until a separate authorized safe-resumption decision rechecks
+current control-domain ownership, matching configuration, fresh complete
+Operational evidence, command transport, holder/correlation compatibility and
+absence of active local work. Explicitly accepted residual uncertainty remains
+durably labelled uncertainty. HIL, bench controllers, real equipment and
+passenger operation still require another HUMAN decision.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

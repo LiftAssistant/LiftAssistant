@@ -4,9 +4,10 @@ Updated: 2026-11-20
 
 ## Current milestone
 
-**M6 is HUMAN-ACCEPTED and COMPLETE. M7.0 + M7.1a are IMPLEMENTED and awaiting
-HUMAN architecture/quality review: the production intent-gateway boundary and
-first process-isolated Open-RMF simulation/recovery vertical slice are complete.**
+**M6 is HUMAN-ACCEPTED and COMPLETE. M7.0 + M7.1a are HUMAN-ACCEPTED and
+COMPLETE. M7.1b is READY: explicit recovery, retirement and safe resumption are
+the final authorized software/simulation closure before a separate HUMAN
+HIL/bench-controller environment decision.**
 
 M6C.2 is HUMAN-ACCEPTED with its `PARTIAL_MAPPING` result and negative evidence
 unchanged. The [full implementation-backed audit](M6_COMPLETION_AUDIT.md)
@@ -68,7 +69,9 @@ scenarios. Focused RMF tests include 22 unit and two independent-process tests.
 Model/Core/Engine dependency boundaries, bounded queues/state, private ingress,
 read-only public surfaces and secret patterns were re-audited. A final resource
 review replaced an unbounded historical set of unknown RMF names with one
-process-bounded diagnostic latch. No subsequent M7 slice is READY.
+process-bounded diagnostic latch. HUMAN accepted M7.0 + M7.1a, including the
+late-restart negative evidence, without converting target-floor state into
+completion or remote-inactivity proof. M7.1b is the only READY slice.
 Hosted [CI run 44699464154](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44699464154)
 passed Stable format/Clippy/test and the Rust 1.85 workspace check on the M7
 implementation and documentation commit.
@@ -116,7 +119,16 @@ protocol messages and zero drops; credential/token scans passed. The focused
 recorded regression preserves Submitted + Indeterminate + Pending, no resume
 resend and Requested withdrawal through actual Engine APIs.
 
-**Current terminal target:** `M7.0 + M7.1a COMPLETE — production gateway boundary and first RMF process/recovery vertical slice implemented. Awaiting HUMAN architecture/quality review before HIL/bench-controller progression. No passenger or real-controller write path authorized.`
+**M7.1b governing invariant:** retiring a local unresolved operation does not
+prove physical completion, does not prove the remote operation stopped, and
+does not by itself authorize another write. Retirement must enter a durable
+`ResumptionRequired` boundary. A separately authorized, audited safe-resumption
+decision must recheck current control-domain ownership, configuration,
+Operational evidence, command transport, holder/correlation compatibility and
+local activity before write readiness can return. Residual uncertainty may be
+accepted explicitly and durably, but it remains uncertainty.
+
+**Current terminal target:** `M7.1b COMPLETE — explicit recovery, retirement and safe-resumption boundary validated. Awaiting HUMAN HIL/bench-controller environment decision. No real controller or passenger-equipment write path authorized.`
 
 ### M6B.3, M6C.0 and M6C.1a evidence
 

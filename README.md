@@ -11,11 +11,13 @@ LiftAssistant is an early semantic-core and simulation project. **It is not appr
 M1 Interactive Simulator is implemented and human-accepted.
 
 M5 is complete at its read-only milestone boundary and M6's controlled intent
-laboratory is HUMAN-accepted and complete. M7.0 + M7.1a implement one private,
-process-isolated Open-RMF `ServeFloor` gateway for software/simulation review.
-It is not a public write API: Headless HTTP/SSE, CLI and Flutter remain read-only,
-and no passenger elevator, real controller cabinet, CAN/OEM network or OPC
-installation is authorized. The next M7 progression requires HUMAN review.
+laboratory is HUMAN-accepted and complete. M7.0 + M7.1a are HUMAN-accepted and
+implement one private, process-isolated Open-RMF `ServeFloor` gateway for
+software/simulation review. M7.1b is the current authorized software/simulation
+slice for explicit recovery, retirement and safe resumption. It is not a public
+write API: Headless HTTP/SSE, CLI and Flutter remain read-only, and no passenger
+elevator, real controller cabinet, CAN/OEM network or OPC installation is
+authorized.
 
 The current working vertical path is:
 
