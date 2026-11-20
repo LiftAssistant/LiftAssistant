@@ -7,9 +7,10 @@ mod external_dispatch;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub use controlled::{
-    Admission, AuthorityError, AuthorityGrant, AuthorityGrantId, ControlledEvent, IntentRecord,
-    IntentRequest, PrincipalId, Receipt, ReceiptResult, Reconciliation, VirtualCheckpoint,
-    WithdrawalError, WithdrawalReason, WriteBlocker,
+    Admission, AuthorityError, AuthorityGrant, AuthorityGrantId, ControlledEvent,
+    ControlledIntentRecovery, ControlledRecoveryError, IntentRecord, IntentRequest, PrincipalId,
+    Receipt, ReceiptResult, Reconciliation, VirtualCheckpoint, WithdrawalError, WithdrawalReason,
+    WriteBlocker,
 };
 pub use diagnostics::{
     ControlledIssue, DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, DiagnosticSequence,

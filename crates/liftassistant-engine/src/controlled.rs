@@ -79,6 +79,49 @@ pub struct IntentRecord {
     saw_closed_at_target: bool,
 }
 
+impl IntentRecord {
+    pub const fn started_at(&self) -> CarLocation {
+        self.started_at
+    }
+
+    pub const fn saw_progress(&self) -> bool {
+        self.saw_progress
+    }
+
+    pub const fn saw_closed_at_target(&self) -> bool {
+        self.saw_closed_at_target
+    }
+}
+
+/// Private workspace recovery input for one durably unresolved controlled operation.
+///
+/// This carries no transport/session identity and grants no authority. The host must
+/// establish a fresh grant and current Operational evidence before Engine will restore it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ControlledIntentRecovery {
+    pub id: IntentId,
+    pub intent: Intent,
+    pub controller: ControllerId,
+    pub receipt: Receipt,
+    pub started_at: CarLocation,
+    pub saw_progress: bool,
+    pub saw_closed_at_target: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlledRecoveryError {
+    AuthorityFenced,
+    ControllerUnbound,
+    WrongController,
+    ActiveIntent,
+    RetiredIdentity,
+    ObservationUnavailable,
+    CapabilitiesUnavailable,
+    OperationUnsupported,
+    UnsupportedFloor,
+    TerminalReceipt,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Receipt {
     NotSubmitted,
@@ -304,6 +347,92 @@ impl Engine {
             intent,
             call,
         }
+    }
+
+    /// Restore one previously admitted operation without submitting it again.
+    ///
+    /// The caller owns durable storage. Engine requires a fresh grant and fresh current
+    /// Operational evidence, then establishes a new observation baseline so only evidence
+    /// arriving after recovery can complete the operation.
+    pub fn recover_controlled_intent(
+        &mut self,
+        recovery: ControlledIntentRecovery,
+        grant: &AuthorityGrant,
+    ) -> Result<(), ControlledRecoveryError> {
+        let car = recovery.intent.car().clone();
+        self.controlled
+            .check_grant(&car, grant)
+            .map_err(|_| ControlledRecoveryError::AuthorityFenced)?;
+        let expected = self
+            .controlled
+            .controllers
+            .get(&car)
+            .ok_or(ControlledRecoveryError::ControllerUnbound)?;
+        if expected != &recovery.controller {
+            return Err(ControlledRecoveryError::WrongController);
+        }
+        if self.controlled.active.contains_key(&car) {
+            return Err(ControlledRecoveryError::ActiveIntent);
+        }
+        if self
+            .controlled
+            .last_admitted
+            .get(&car)
+            .is_some_and(|last| recovery.id <= *last)
+        {
+            return Err(ControlledRecoveryError::RetiredIdentity);
+        }
+        if !matches!(recovery.receipt, Receipt::Accepted | Receipt::Indeterminate) {
+            return Err(ControlledRecoveryError::TerminalReceipt);
+        }
+        let caps = self
+            .execution_capabilities(&car)
+            .ok_or(ControlledRecoveryError::CapabilitiesUnavailable)?;
+        if !matches!(recovery.intent, Intent::ServeFloor { .. }) || !caps.serve_floor {
+            return Err(ControlledRecoveryError::OperationUnsupported);
+        }
+        if !self.topology.contains(recovery.intent.floor())
+            || !caps.supports_floor(recovery.intent.floor())
+        {
+            return Err(ControlledRecoveryError::UnsupportedFloor);
+        }
+        self.operational_car_state(&car)
+            .ok_or(ControlledRecoveryError::ObservationUnavailable)?;
+        let source = self
+            .operational_authorities
+            .get(&car)
+            .ok_or(ControlledRecoveryError::ObservationUnavailable)?;
+        let baseline = self
+            .evidence(source, &car)
+            .ok_or(ControlledRecoveryError::ObservationUnavailable)?
+            .latest_provenance
+            .clone();
+        let request = IntentRequest {
+            id: recovery.id,
+            intent: recovery.intent.clone(),
+            call: None,
+            original: (recovery.intent, None),
+        };
+        self.controlled.last_issued = self.controlled.last_issued.max(recovery.id.value());
+        self.controlled
+            .last_admitted
+            .insert(car.clone(), recovery.id);
+        self.controlled.active.insert(
+            car,
+            IntentRecord {
+                request,
+                controller: recovery.controller,
+                authority: grant.clone(),
+                receipt: recovery.receipt,
+                reconciliation: Reconciliation::Pending,
+                withdrawal: None,
+                baseline,
+                started_at: recovery.started_at,
+                saw_progress: recovery.saw_progress,
+                saw_closed_at_target: recovery.saw_closed_at_target,
+            },
+        );
+        Ok(())
     }
 
     /// Per-car readiness for this operation. Admission separately checks request identity.
@@ -1212,6 +1341,113 @@ mod tests {
         assert_eq!(
             engine.admit_virtual_intent(request, &grant, &controller, true),
             Admission::Blocked(WriteBlocker::AuthorityFenced)
+        );
+    }
+
+    #[test]
+    fn durable_recovery_restores_identity_without_resubmission() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let car = CarId::new("A");
+        let controller = ControllerId::new("rmf-gateway");
+        let source = ObservationSourceId::new("physical");
+        engine
+            .bind_controlled_car(car.clone(), controller.clone())
+            .unwrap();
+        let grant = engine
+            .grant_authority(&car, PrincipalId::new("local-gateway-caller"))
+            .unwrap();
+        engine
+            .bind_observation(
+                source.clone(),
+                car.clone(),
+                crate::ObservationBindingRole::Operational,
+            )
+            .unwrap();
+        engine
+            .begin_source_session(source, ObservationSessionId::new("test-incarnation"))
+            .unwrap();
+        engine.set_execution_capabilities(car.clone(), ExecutionCapabilities::reference_defaults());
+        observe(&mut engine, &CarState::new("A", Floor::new(1)), 1);
+
+        let id = IntentId::new(41);
+        engine
+            .recover_controlled_intent(
+                ControlledIntentRecovery {
+                    id,
+                    intent: Intent::ServeFloor {
+                        car: car.clone(),
+                        floor: Floor::new(3),
+                    },
+                    controller,
+                    receipt: Receipt::Indeterminate,
+                    started_at: CarLocation::Floor(Floor::new(1)),
+                    saw_progress: false,
+                    saw_closed_at_target: false,
+                },
+                &grant,
+            )
+            .unwrap();
+        assert_eq!(
+            engine.intent_record(id).unwrap().receipt,
+            Receipt::Indeterminate
+        );
+        assert_eq!(
+            engine
+                .issue_controlled_intent(
+                    Intent::ServeFloor {
+                        car: car.clone(),
+                        floor: Floor::new(4),
+                    },
+                    None,
+                )
+                .id(),
+            IntentId::new(42)
+        );
+
+        let mut moving = CarState::new("A", Floor::new(2));
+        moving.motion = MotionState::Moving(liftassistant_model::Direction::Up);
+        observe(&mut engine, &moving, 2);
+        assert!(engine.intent_record(id).unwrap().saw_progress());
+        observe(&mut engine, &CarState::new("A", Floor::new(3)), 3);
+        assert_eq!(
+            engine.intent_record(id).unwrap().reconciliation,
+            Reconciliation::Satisfied
+        );
+    }
+
+    #[test]
+    fn durable_recovery_requires_current_evidence_and_nonterminal_uncertainty() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let car = CarId::new("A");
+        let controller = ControllerId::new("rmf-gateway");
+        engine
+            .bind_controlled_car(car.clone(), controller.clone())
+            .unwrap();
+        engine.set_execution_capabilities(car.clone(), ExecutionCapabilities::reference_defaults());
+        let grant = engine
+            .grant_authority(&car, PrincipalId::new("local-gateway-caller"))
+            .unwrap();
+        let recovery = ControlledIntentRecovery {
+            id: IntentId::new(9),
+            intent: Intent::ServeFloor {
+                car,
+                floor: Floor::new(3),
+            },
+            controller,
+            receipt: Receipt::Rejected,
+            started_at: CarLocation::Floor(Floor::new(1)),
+            saw_progress: false,
+            saw_closed_at_target: false,
+        };
+        assert_eq!(
+            engine.recover_controlled_intent(recovery.clone(), &grant),
+            Err(ControlledRecoveryError::TerminalReceipt)
+        );
+        let mut uncertain = recovery;
+        uncertain.receipt = Receipt::Indeterminate;
+        assert_eq!(
+            engine.recover_controlled_intent(uncertain, &grant),
+            Err(ControlledRecoveryError::ObservationUnavailable)
         );
     }
 }
