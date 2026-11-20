@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     env,
     error::Error,
     io,
@@ -16,9 +17,10 @@ use std::{
 
 use liftassistant_model::ObservationSessionId;
 use liftassistant_rmf::{
-    GatewayCommandRequest, PrivateIngress, PrivateIngressConnection, RmfCommandTransport,
-    RmfFreshnessPolicy, RmfIntentGateway, RmfLiftCommand, RmfLiftRequestPublisher, RmfLivePayload,
-    RmfLiveSubscriber, RmfReceiveControl, RmfReceiveOutcome, load_gateway_config,
+    GatewayCommandRequest, GatewayIngestError, PrivateIngress, PrivateIngressConnection,
+    RmfAdapterError, RmfCommandTransport, RmfFreshnessPolicy, RmfIntentGateway, RmfLiftCommand,
+    RmfLiftRequestPublisher, RmfLivePayload, RmfLiveSubscriber, RmfReceiveControl,
+    RmfReceiveOutcome, load_gateway_config,
 };
 use signal_hook::consts::signal::{SIGINT, SIGTERM};
 
@@ -164,11 +166,18 @@ fn run() -> Result<(), Box<dyn Error>> {
         config.socket_path.display(),
         gateway.readiness()
     );
+    let mut reported_unconfigured_lifts = BTreeSet::new();
     while !shutdown.load(Ordering::Relaxed) {
         match observation_rx.recv_timeout(LOOP_POLL) {
             Ok(ObservationEvent::Payload(payload)) => {
                 if let Err(error) = gateway.ingest(payload) {
-                    eprintln!("RMF observation evidence rejected: {error}");
+                    match &error {
+                        GatewayIngestError::Adapter(RmfAdapterError::UnconfiguredLift {
+                            lift_name,
+                            ..
+                        }) if !reported_unconfigured_lifts.insert(lift_name.clone()) => {}
+                        _ => eprintln!("RMF observation evidence rejected: {error}"),
+                    }
                 }
             }
             Ok(ObservationEvent::Stale) => {
@@ -240,16 +249,20 @@ fn spawn_observer(
         let policy = RmfFreshnessPolicy::new(freshness).expect("validated nonzero freshness");
         let mut generation = 0_usize;
         let mut backoff = Duration::from_millis(250);
+        let mut received_in_lifetime = false;
         while !shutdown.load(Ordering::Relaxed) {
             let node_name = format!("rmf_intent_gateway_reader_{generation}");
             generation = generation.saturating_add(1);
+            let mut received_in_generation = false;
             let result = RmfLiveSubscriber::connect(domain_id, &node_name).and_then(|subscriber| {
-                subscriber.receive_until_stale_or_shutdown(
+                subscriber.receive_supervised(
                     policy,
+                    freshness,
                     Duration::from_millis(100),
                     || shutdown.load(Ordering::Relaxed),
                     |payload| {
                         if let Some(payload) = payload {
+                            received_in_generation = true;
                             if events.send(ObservationEvent::Payload(payload)).is_err() {
                                 return RmfReceiveControl::Stop;
                             }
@@ -258,7 +271,19 @@ fn spawn_observer(
                     },
                 )
             });
+            if received_in_generation {
+                received_in_lifetime = true;
+                backoff = Duration::from_millis(250);
+            }
             match result {
+                Ok(RmfReceiveOutcome::AwaitingPayloadTimeout { max_wait }) => {
+                    if received_in_lifetime {
+                        let _ = events.send(ObservationEvent::Stale);
+                    }
+                    let _ = events.send(ObservationEvent::Transport(format!(
+                        "subscriber generation received no payload within {max_wait:?}"
+                    )));
+                }
                 Ok(RmfReceiveOutcome::PayloadStale { .. }) => {
                     let _ = events.send(ObservationEvent::Stale);
                 }

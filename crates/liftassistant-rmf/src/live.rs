@@ -125,6 +125,7 @@ impl Error for RmfFreshnessPolicyError {}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RmfReceiveOutcome {
     HandlerStopped,
+    AwaitingPayloadTimeout { max_wait: Duration },
     PayloadStale { max_silence: Duration },
     ShutdownRequested,
 }
@@ -264,11 +265,13 @@ impl RmfLiveSubscriber {
         self,
         mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
     ) -> Result<(), RmfTransportError> {
-        match self.receive(None, None, None, |payload| {
+        match self.receive(None, None, None, None, |payload| {
             payload.map_or(RmfReceiveControl::Continue, &mut handler)
         })? {
             RmfReceiveOutcome::HandlerStopped => Ok(()),
-            RmfReceiveOutcome::PayloadStale { .. } | RmfReceiveOutcome::ShutdownRequested => {
+            RmfReceiveOutcome::AwaitingPayloadTimeout { .. }
+            | RmfReceiveOutcome::PayloadStale { .. }
+            | RmfReceiveOutcome::ShutdownRequested => {
                 unreachable!("receive_until has no payload-silence policy")
             }
         }
@@ -284,7 +287,7 @@ impl RmfLiveSubscriber {
         policy: RmfFreshnessPolicy,
         mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
     ) -> Result<RmfReceiveOutcome, RmfTransportError> {
-        self.receive(Some(policy), None, None, |payload| {
+        self.receive(Some(policy), None, None, None, |payload| {
             payload.map_or(RmfReceiveControl::Continue, &mut handler)
         })
     }
@@ -307,6 +310,34 @@ impl RmfLiveSubscriber {
         }
         self.receive(
             Some(policy),
+            None,
+            Some(shutdown_poll_interval),
+            Some(&mut should_shutdown),
+            handler,
+        )
+    }
+
+    /// Supervises one concrete subscriber generation as well as active payload freshness.
+    ///
+    /// A generation timing out before its first payload is not a source-stale claim. It lets an
+    /// adapter recreate a DDS subscriber whose graph discovery did not produce a data plane,
+    /// while keeping the adapter's source session and sequence domain unchanged.
+    pub fn receive_supervised(
+        self,
+        policy: RmfFreshnessPolicy,
+        initial_payload_wait: Duration,
+        shutdown_poll_interval: Duration,
+        mut should_shutdown: impl FnMut() -> bool,
+        handler: impl FnMut(Option<RmfLivePayload>) -> RmfReceiveControl,
+    ) -> Result<RmfReceiveOutcome, RmfTransportError> {
+        if initial_payload_wait.is_zero() || shutdown_poll_interval.is_zero() {
+            return Err(RmfTransportError::Create(
+                "Open-RMF supervision intervals must be greater than zero".into(),
+            ));
+        }
+        self.receive(
+            Some(policy),
+            Some(initial_payload_wait),
             Some(shutdown_poll_interval),
             Some(&mut should_shutdown),
             handler,
@@ -316,6 +347,7 @@ impl RmfLiveSubscriber {
     fn receive(
         mut self,
         freshness: Option<RmfFreshnessPolicy>,
+        initial_payload_wait: Option<Duration>,
         shutdown_poll_interval: Option<Duration>,
         mut should_shutdown: Option<&mut dyn FnMut() -> bool>,
         mut handler: impl FnMut(Option<RmfLivePayload>) -> RmfReceiveControl,
@@ -328,6 +360,7 @@ impl RmfLiveSubscriber {
             let stream = self.subscription.async_stream();
             futures::pin_mut!(stream);
             let mut last_payload_at = None;
+            let generation_started_at = Instant::now();
             loop {
                 if should_shutdown.as_mut().is_some_and(|check| check()) {
                     return Ok(RmfReceiveOutcome::ShutdownRequested);
@@ -336,7 +369,17 @@ impl RmfLiveSubscriber {
                     freshness
                         .map(|policy| policy.max_payload_silence().saturating_sub(last.elapsed()))
                 });
-                let wait = match (freshness_remaining, shutdown_poll_interval) {
+                let initial_remaining = if last_payload_at.is_none() {
+                    initial_payload_wait
+                        .map(|limit| limit.saturating_sub(generation_started_at.elapsed()))
+                } else {
+                    None
+                };
+                let supervised_remaining = match (freshness_remaining, initial_remaining) {
+                    (Some(freshness), _) => Some(freshness),
+                    (None, initial) => initial,
+                };
+                let wait = match (supervised_remaining, shutdown_poll_interval) {
                     (Some(freshness), Some(shutdown)) => Some(freshness.min(shutdown)),
                     (Some(freshness), None) => Some(freshness),
                     (None, Some(shutdown)) => Some(shutdown),
@@ -362,6 +405,13 @@ impl RmfLiveSubscriber {
                         return Ok(RmfReceiveOutcome::PayloadStale {
                             max_silence: policy.max_payload_silence(),
                         });
+                    }
+                    if let Some(limit) = initial_payload_wait {
+                        if last_payload_at.is_none() && generation_started_at.elapsed() >= limit {
+                            return Ok(RmfReceiveOutcome::AwaitingPayloadTimeout {
+                                max_wait: limit,
+                            });
+                        }
                     }
                     if handler(None) == RmfReceiveControl::Stop {
                         return Ok(RmfReceiveOutcome::HandlerStopped);

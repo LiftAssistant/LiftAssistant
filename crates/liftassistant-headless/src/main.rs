@@ -1540,6 +1540,9 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
             }
         };
         match outcome {
+            RmfReceiveOutcome::AwaitingPayloadTimeout { .. } => {
+                unreachable!("read-only host does not configure a subscriber-generation timeout")
+            }
             RmfReceiveOutcome::ShutdownRequested => break,
             RmfReceiveOutcome::PayloadStale { max_silence } => {
                 host.mark_source_payload_stale(config.source.clone(), session.clone())
