@@ -443,15 +443,19 @@ class _ClientShellPageState extends State<ClientShellPage> {
     final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
     final bool hasAlerts =
         state.hasRetainedStaleSnapshot || state.error != null;
+    final ConfiguredOperationalCarsView carsView =
+        projectConfiguredOperationalCars(snapshot);
+    final int renderedCarCardCount = carsView.hasResolvedCars
+        ? carsView.slots.length
+        : 0;
 
     if (isSplitDesktop) {
       final bool isSingleColumnStage =
           textScale > 1.45 ||
-          (snapshot.operationalCars.length <= 1 &&
-              snapshot.sources.length <= 1);
+          (renderedCarCardCount <= 1 && snapshot.sources.length <= 1);
       final bool useThreeCarCols =
           !isSingleColumnStage &&
-          snapshot.operationalCars.length >= 3 &&
+          renderedCarCardCount >= 3 &&
           viewport.width >= 1340 &&
           textScale <= 1.2;
 
@@ -490,13 +494,21 @@ class _ClientShellPageState extends State<ClientShellPage> {
             sliver: SliverToBoxAdapter(
               child: SectionHeader(
                 title: 'Operational Cars',
-                count: snapshot.operationalCars.length,
+                count: carsView.totalCount,
+                trailingNote: carsView.unavailableCars.isNotEmpty
+                    ? '${carsView.resolvedCars.length} resolved · ${carsView.unavailableCars.length} unavailable'
+                    : null,
               ),
             ),
           ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            sliver: _buildCarsSliver(context, snapshot, textScale: textScale),
+            sliver: _buildCarsSliver(
+              context,
+              snapshot,
+              carsView: carsView,
+              textScale: textScale,
+            ),
           ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
@@ -512,6 +524,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
             sliver: _buildSourcesSliver(
               context,
               snapshot,
+              renderedCarCardCount: renderedCarCardCount,
               textScale: textScale,
             ),
           ),
@@ -652,7 +665,11 @@ class _ClientShellPageState extends State<ClientShellPage> {
           isLive: state.isSnapshotLive,
           revisionReset: state.lastRevisionReset,
         ),
-        _buildCompactTabStrip(context, snapshot),
+        _buildCompactTabStrip(
+          context,
+          snapshot,
+          carsCount: carsView.totalCount,
+        ),
         Expanded(
           child: AnimatedOpacity(
             duration: const Duration(milliseconds: 150),
@@ -680,6 +697,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                           sliver: _buildCarsSliver(
                             context,
                             snapshot,
+                            carsView: carsView,
                             textScale: textScale,
                           ),
                         ),
@@ -690,6 +708,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                           sliver: _buildSourcesSliver(
                             context,
                             snapshot,
+                            renderedCarCardCount: renderedCarCardCount,
                             textScale: textScale,
                           ),
                         ),
@@ -721,8 +740,9 @@ class _ClientShellPageState extends State<ClientShellPage> {
 
   Widget _buildCompactTabStrip(
     BuildContext context,
-    ReadModelSnapshot snapshot,
-  ) {
+    ReadModelSnapshot snapshot, {
+    required int carsCount,
+  }) {
     final InstrumentPalette palette = context.palette;
     return DecoratedBox(
       key: const Key('compact-section-strip'),
@@ -739,7 +759,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
               _CompactTabButton(
                 key: const Key('compact-tab-cars'),
                 label: 'Cars',
-                count: snapshot.operationalCars.length,
+                count: carsCount,
                 selected: _compactSection == CompactSection.cars,
                 onTap: () =>
                     setState(() => _compactSection = CompactSection.cars),
@@ -782,20 +802,39 @@ class _ClientShellPageState extends State<ClientShellPage> {
     return stageWidth.clamp(0.0, 540.0);
   }
 
+  Widget _buildCarSlotCard(
+    OperationalCarSlot slot, {
+    bool stretchToRowHeight = false,
+    required bool useTabularFooter,
+  }) {
+    return switch (slot) {
+      ResolvedCarSlot(:final car) => OperationalCarCard(
+        car: car,
+        stretchToRowHeight: stretchToRowHeight,
+        useTabularFooter: useTabularFooter,
+      ),
+      UnavailableCarSlot(:final car) => UnavailableOperationalCarCard(
+        car: car,
+        stretchToRowHeight: stretchToRowHeight,
+        useTabularFooter: useTabularFooter,
+      ),
+    };
+  }
+
   Widget _buildCarsSliver(
     BuildContext context,
     ReadModelSnapshot snapshot, {
+    required ConfiguredOperationalCarsView carsView,
     required double textScale,
   }) {
     const double spacing = 10;
     const double maxTrackWidth = 500;
-    final List<OperationalCar> cars = snapshot.operationalCars;
-    if (cars.isEmpty) {
+    if (!carsView.hasResolvedCars) {
       return SliverLayoutBuilder(
         builder: (BuildContext context, SliverConstraints sliverConstraints) {
           final double width = sliverConstraints.crossAxisExtent;
           final Widget panel = _EmptyOperationalCarsPanel(
-            sources: snapshot.sources,
+            unavailableCars: carsView.unavailableCars,
           );
           if (width <= 540 || textScale > 1.45) {
             return SliverToBoxAdapter(child: panel);
@@ -813,16 +852,18 @@ class _ClientShellPageState extends State<ClientShellPage> {
       );
     }
 
+    final List<OperationalCarSlot> slots = carsView.slots;
+
     return SliverLayoutBuilder(
       builder: (BuildContext context, SliverConstraints sliverConstraints) {
         final double width = sliverConstraints.crossAxisExtent;
-        if ((cars.length > 1 && width < 520) || textScale > 1.45) {
+        if ((slots.length > 1 && width < 520) || textScale > 1.45) {
           final bool useTabularFooter = width >= 250 && textScale <= 1.35;
           return SliverList.builder(
-            itemCount: cars.length,
+            itemCount: slots.length,
             itemBuilder: (BuildContext context, int index) {
-              final Widget card = OperationalCarCard(
-                car: cars[index],
+              final Widget card = _buildCarSlotCard(
+                slots[index],
                 useTabularFooter: useTabularFooter,
               );
               if (index == 0) {
@@ -836,7 +877,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
           );
         }
 
-        if (cars.length == 1) {
+        if (slots.length == 1) {
           final bool sourcesUseTwoCols =
               snapshot.sources.length >= 2 && width >= 700 && textScale <= 1.25;
           final double singleWidth = _singleStageCardWidth(
@@ -851,8 +892,8 @@ class _ClientShellPageState extends State<ClientShellPage> {
               alignment: Alignment.topLeft,
               child: SizedBox(
                 width: singleWidth,
-                child: OperationalCarCard(
-                  car: cars.first,
+                child: _buildCarSlotCard(
+                  slots.first,
                   useTabularFooter: useTabularFooter,
                 ),
               ),
@@ -861,7 +902,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
         }
 
         final int columns =
-            (cars.length >= 3 && width >= 920 && textScale <= 1.2) ? 3 : 2;
+            (slots.length >= 3 && width >= 920 && textScale <= 1.2) ? 3 : 2;
         final double columnCap = columns == 3 ? 460.0 : maxTrackWidth;
         final double maxRowWidth =
             columns * columnCap + (columns - 1) * spacing;
@@ -871,7 +912,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
         final double cardWidth =
             (effectiveRowWidth - spacing * (columns - 1)) / columns;
         final bool useTabularFooter = cardWidth >= 250 && textScale <= 1.35;
-        final int rowCount = (cars.length + columns - 1) ~/ columns;
+        final int rowCount = (slots.length + columns - 1) ~/ columns;
 
         return SliverList.builder(
           itemCount: rowCount,
@@ -888,9 +929,9 @@ class _ClientShellPageState extends State<ClientShellPage> {
                       for (int col = 0; col < columns; col++) ...<Widget>[
                         if (col > 0) const SizedBox(width: spacing),
                         Expanded(
-                          child: (start + col < cars.length)
-                              ? OperationalCarCard(
-                                  car: cars[start + col],
+                          child: (start + col < slots.length)
+                              ? _buildCarSlotCard(
+                                  slots[start + col],
                                   stretchToRowHeight: true,
                                   useTabularFooter: useTabularFooter,
                                 )
@@ -919,6 +960,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
   Widget _buildSourcesSliver(
     BuildContext context,
     ReadModelSnapshot snapshot, {
+    required int renderedCarCardCount,
     required double textScale,
   }) {
     const double spacing = 10;
@@ -981,8 +1023,8 @@ class _ClientShellPageState extends State<ClientShellPage> {
         if (sources.length == 1) {
           final bool carsUseTwoCols =
               width >= 520 &&
-              (snapshot.operationalCars.length == 2 ||
-                  (snapshot.operationalCars.length >= 3 &&
+              (renderedCarCardCount == 2 ||
+                  (renderedCarCardCount >= 3 &&
                       !(width >= 920 && textScale <= 1.2)));
           final double singleWidth = _singleStageCardWidth(
             stageWidth: width,
@@ -1003,7 +1045,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
 
         final int columns = (width >= 700 && textScale <= 1.25) ? 2 : 1;
         final double maxRowWidth = columns == 1
-            ? (snapshot.operationalCars.length >= 2
+            ? (renderedCarCardCount >= 2
                   ? (2 * maxTrackWidth + spacing)
                   : 540.0)
             : (columns * maxTrackWidth + (columns - 1) * spacing);
@@ -1195,22 +1237,13 @@ class _CompactTabButton extends StatelessWidget {
 }
 
 class _EmptyOperationalCarsPanel extends StatelessWidget {
-  const _EmptyOperationalCarsPanel({required this.sources});
+  const _EmptyOperationalCarsPanel({required this.unavailableCars});
 
-  final List<SourceHealth> sources;
+  final List<UnavailableOperationalCar> unavailableCars;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
-    final List<
-      (String sourceId, SourceObservation obs, PayloadActivity payload)
-    >
-    pendingOperational = <(String, SourceObservation, PayloadActivity)>[
-      for (final SourceHealth src in sources)
-        for (final SourceObservation obs in src.observations)
-          if (obs.role == BindingRole.operational)
-            (src.source, obs, src.payload),
-    ];
 
     return DecoratedBox(
       key: const Key('empty-operational-cars-card'),
@@ -1245,18 +1278,13 @@ class _EmptyOperationalCarsPanel extends StatelessWidget {
                 color: palette.subtleText,
               ),
             ),
-            if (pendingOperational.isNotEmpty) ...<Widget>[
+            if (unavailableCars.isNotEmpty) ...<Widget>[
               const SizedBox(height: 10),
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
                 children: <Widget>[
-                  for (final (
-                        String sourceId,
-                        SourceObservation obs,
-                        PayloadActivity payload,
-                      )
-                      in pendingOperational)
+                  for (final UnavailableOperationalCar car in unavailableCars)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
@@ -1268,7 +1296,7 @@ class _EmptyOperationalCarsPanel extends StatelessWidget {
                         border: Border.all(color: palette.border),
                       ),
                       child: Text(
-                        '${obs.car} · ${obs.availability.wireValue} ($sourceId, payload:${payload.wireValue})',
+                        '${car.carId} · ${car.availability.wireValue} (${car.source}, payload:${car.payload.wireValue})',
                         style: instrumentMonoStyle(
                           context,
                           fontSize: 11,

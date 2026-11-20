@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liftassistant_client/src/api/host_url.dart';
+import 'package:liftassistant_client/src/api/read_model.dart';
 import 'package:liftassistant_client/src/state/client_controller.dart';
 import 'package:liftassistant_client/src/transport/host_transport.dart';
 import 'package:liftassistant_client/src/ui/app.dart';
@@ -1028,6 +1029,630 @@ void main() {
         ultraWideDiagHeader.left - ultraWideCar1.right,
         lessThanOrEqualTo(36.0),
       );
+    },
+  );
+
+  test('projectConfiguredOperationalCars separates resolved vs unavailable Operational cars, deduplicates by logical CarId, and excludes Auxiliary bindings', () {
+    const OperationalCar carA = OperationalCar(
+      id: 'lift-A',
+      location: FloorLocation(floor: 3),
+      motion: StoppedMotion(),
+      door: CarDoorState.closed,
+      operatingMode: CarOperatingMode.normal,
+      reportedDestination: NoReportedDestination(),
+    );
+
+    final ReadModelSnapshot snapshot = ReadModelSnapshot(
+      apiVersion: 'experimental/v0',
+      revision: 7,
+      lifecycle: HostLifecycle.synchronizing,
+      readiness: HostReadiness.notReady,
+      operationalCars: const <OperationalCar>[carA, carA],
+      sources: const <SourceHealth>[
+        SourceHealth(
+          source: 'rmf/site-main',
+          session: ActiveSourceSession(session: 's1'),
+          transport: TransportState.discoveryObserved,
+          payload: PayloadActivity.active,
+          observations: <SourceObservation>[
+            SourceObservation(
+              car: 'lift-A',
+              role: BindingRole.operational,
+              availability: ObservationAvailability.resolved,
+            ),
+            SourceObservation(
+              car: 'lift-B',
+              role: BindingRole.operational,
+              availability: ObservationAvailability.revoked,
+            ),
+            SourceObservation(
+              car: 'lift-D',
+              role: BindingRole.operational,
+              availability: ObservationAvailability.awaiting,
+            ),
+          ],
+        ),
+        // Defensive duplicate Operational entry for lift-B plus resolved Auxiliary entries
+        // for lift-B and Auxiliary-only lift-C.
+        SourceHealth(
+          source: 'bacnet/wing-west',
+          session: ActiveSourceSession(session: 's2'),
+          transport: TransportState.discoveryObserved,
+          payload: PayloadActivity.active,
+          observations: <SourceObservation>[
+            SourceObservation(
+              car: 'lift-B',
+              role: BindingRole.auxiliary,
+              availability: ObservationAvailability.resolved,
+            ),
+            SourceObservation(
+              car: 'lift-B',
+              role: BindingRole.operational,
+              availability: ObservationAvailability.unresolved,
+            ),
+            SourceObservation(
+              car: 'lift-C',
+              role: BindingRole.auxiliary,
+              availability: ObservationAvailability.resolved,
+            ),
+          ],
+        ),
+      ],
+      recentDiagnostics: const <DiagnosticEntry>[],
+    );
+
+    final ConfiguredOperationalCarsView view = projectConfiguredOperationalCars(
+      snapshot,
+    );
+
+    expect(view.resolvedCars, equals(const <OperationalCar>[carA]));
+    expect(view.unavailableCars.length, equals(2));
+    expect(
+      view.unavailableCars.map((UnavailableOperationalCar c) => c.carId),
+      equals(<String>['lift-B', 'lift-D']),
+    );
+    expect(view.unavailableCars[0].source, equals('rmf/site-main'));
+    expect(
+      view.unavailableCars[0].availability,
+      equals(ObservationAvailability.revoked),
+    );
+    expect(
+      view.unavailableCars[1].availability,
+      equals(ObservationAvailability.awaiting),
+    );
+    expect(
+      view.slots.map((OperationalCarSlot s) => s.carId),
+      equals(<String>['lift-A', 'lift-B', 'lift-D']),
+    );
+    expect(view.slots[0], isA<ResolvedCarSlot>());
+    expect(view.slots[1], isA<UnavailableCarSlot>());
+    expect(view.slots[2], isA<UnavailableCarSlot>());
+  });
+
+  testWidgets(
+    'preserves configured Operational cars across 2->1->2 transitions without stale values, Auxiliary fallback, Auxiliary-only leakage, or duplicates',
+    (WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(1366, 900);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      // Case B + Case C + Case G:
+      // - lift-A: Operational resolved
+      // - lift-B: Operational revoked (rmf/site-main) AND Auxiliary resolved (bacnet/wing-west)
+      // - lift-C: Auxiliary-only resolved (bacnet/wing-west, NO Operational binding)
+      const String partialRevokedWithAuxJson = '''
+      {
+        "api_version": "experimental/v0",
+        "revision": 13,
+        "lifecycle": "synchronizing",
+        "readiness": "not_ready",
+        "operational_cars": [
+          {
+            "id": "lift-A",
+            "location": {"kind": "floor", "floor": 3},
+            "motion": {"state": "stopped"},
+            "door": "closed",
+            "operating_mode": "normal",
+            "reported_destination": {"kind": "known", "floor": 6}
+          }
+        ],
+        "sources": [
+          {
+            "source": "rmf/site-main",
+            "session": {"state": "active", "session": "session-alpha"},
+            "transport": "discovery_observed",
+            "payload": "active",
+            "observations": [
+              {"car": "lift-A", "role": "operational", "availability": "resolved"},
+              {"car": "lift-B", "role": "operational", "availability": "revoked"}
+            ]
+          },
+          {
+            "source": "bacnet/wing-west",
+            "session": {"state": "active", "session": "session-beta"},
+            "transport": "discovery_observed",
+            "payload": "active",
+            "observations": [
+              {"car": "lift-B", "role": "auxiliary", "availability": "resolved"},
+              {"car": "lift-C", "role": "auxiliary", "availability": "resolved"}
+            ]
+          }
+        ],
+        "recent_diagnostics": []
+      }
+      ''';
+
+      String partialAvailabilityJson(int revision, String availability) =>
+          '''
+      {
+        "api_version": "experimental/v0",
+        "revision": $revision,
+        "lifecycle": "synchronizing",
+        "readiness": "not_ready",
+        "operational_cars": [
+          {
+            "id": "lift-A",
+            "location": {"kind": "floor", "floor": 3},
+            "motion": {"state": "stopped"},
+            "door": "closed",
+            "operating_mode": "normal",
+            "reported_destination": {"kind": "known", "floor": 6}
+          }
+        ],
+        "sources": [
+          {
+            "source": "rmf/site-main",
+            "session": {"state": "active", "session": "session-alpha"},
+            "transport": "discovery_observed",
+            "payload": "active",
+            "observations": [
+              {"car": "lift-A", "role": "operational", "availability": "resolved"},
+              {"car": "lift-B", "role": "operational", "availability": "$availability"}
+            ]
+          }
+        ],
+        "recent_diagnostics": []
+      }
+      ''';
+
+      // Case E: lift-B recovers with fresh Operational state.
+      const String recoveredBothJson = '''
+      {
+        "api_version": "experimental/v0",
+        "revision": 17,
+        "lifecycle": "ready_read_only",
+        "readiness": "read_only",
+        "operational_cars": [
+          {
+            "id": "lift-A",
+            "location": {"kind": "floor", "floor": 3},
+            "motion": {"state": "stopped"},
+            "door": "closed",
+            "operating_mode": "normal",
+            "reported_destination": {"kind": "known", "floor": 6}
+          },
+          {
+            "id": "lift-B",
+            "location": {"kind": "floor", "floor": 5},
+            "motion": {"state": "stopped"},
+            "door": "open",
+            "operating_mode": "normal",
+            "reported_destination": {"kind": "none"}
+          }
+        ],
+        "sources": [
+          {
+            "source": "rmf/site-main",
+            "session": {"state": "active", "session": "session-alpha"},
+            "transport": "discovery_observed",
+            "payload": "active",
+            "observations": [
+              {"car": "lift-A", "role": "operational", "availability": "resolved"},
+              {"car": "lift-B", "role": "operational", "availability": "resolved"}
+            ]
+          },
+          {
+            "source": "bacnet/wing-west",
+            "session": {"state": "active", "session": "session-beta"},
+            "transport": "discovery_observed",
+            "payload": "active",
+            "observations": [
+              {"car": "lift-B", "role": "auxiliary", "availability": "resolved"},
+              {"car": "lift-C", "role": "auxiliary", "availability": "resolved"}
+            ]
+          }
+        ],
+        "recent_diagnostics": []
+      }
+      ''';
+
+      final _WidgetTestTransport transport = _WidgetTestTransport();
+      final ClientController controller = ClientController(
+        transport: transport,
+        initialUrlInput: 'http://127.0.0.1:8080',
+      );
+      addTearDown(() {
+        controller.dispose();
+        transport.dispose();
+      });
+
+      await tester.pumpWidget(
+        LiftAssistantClientApp(
+          controller: controller,
+          initialHostUrl: 'http://127.0.0.1:8080',
+          autoConnect: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Case A: 2 resolved operational cars, 0 unavailable duplicates.
+      expect(find.byType(OperationalCarCard), findsNWidgets(2));
+      expect(find.byType(UnavailableOperationalCarCard), findsNothing);
+      expect(find.text('2.25'), findsOneWidget);
+      expect(find.text('Inspection'), findsOneWidget);
+
+      // Case B + C + G: lift-B loses Operational state while Auxiliary is resolved,
+      // and lift-C is Auxiliary-only.
+      transport.sseController.add(partialRevokedWithAuxJson);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      expect(find.byType(OperationalCarCard), findsOneWidget);
+      expect(find.byType(UnavailableOperationalCarCard), findsOneWidget);
+      expect(
+        find.byKey(const Key('unavailable-car-card-lift-B')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('unavailable-car-card-lift-A')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const Key('unavailable-car-card-lift-C')),
+        findsNothing,
+      );
+
+      // Desktop section header distinguishes total configured vs resolved/unavailable.
+      expect(find.text('1 resolved · 1 unavailable'), findsOneWidget);
+
+      // Side-by-side resolved + unavailable cards share exact desktop row height.
+      final Rect resolvedRect = tester.getRect(find.byType(OperationalCarCard));
+      final Rect unavailableRect = tester.getRect(
+        find.byType(UnavailableOperationalCarCard),
+      );
+      expect(resolvedRect.top, equals(unavailableRect.top));
+      expect(resolvedRect.height, equals(unavailableRect.height));
+
+      // Unavailable lift-B shows honest observation-unavailable state + Operational source context only.
+      final Finder unavailableCard = find.byType(UnavailableOperationalCarCard);
+      expect(
+        find.descendant(of: unavailableCard, matching: find.text('lift-B')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: unavailableCard,
+          matching: find.text('Current observation unavailable'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: unavailableCard, matching: find.text('Revoked')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: unavailableCard,
+          matching: find.text(
+            'Configured Operational binding; prior observation revoked.',
+          ),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: unavailableCard,
+          matching: find.text('rmf/site-main'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: unavailableCard, matching: find.text('revoked')),
+        findsOneWidget,
+      );
+      // Auxiliary source must NOT leak into the unavailable car card.
+      expect(
+        find.descendant(
+          of: unavailableCard,
+          matching: find.text('bacnet/wing-west'),
+        ),
+        findsNothing,
+      );
+
+      // Stale lift-B canonical telemetry must NOT be retained anywhere.
+      expect(find.text('2.25'), findsNothing);
+      expect(find.text('Nearest Floor 2 (+0.25)'), findsNothing);
+      expect(find.text('Moving Up'), findsNothing);
+      expect(find.text('Opening'), findsNothing);
+      expect(find.text('Inspection'), findsNothing);
+      expect(find.text('Unknown'), findsNothing);
+
+      // Never mislabels unavailable observation as OutOfService, Fault, timeout, or disconnected.
+      expect(find.text('OutOfService'), findsNothing);
+      expect(find.text('Fault'), findsNothing);
+      expect(find.textContaining('timeout'), findsNothing);
+      expect(find.textContaining('disconnected'), findsNothing);
+
+      // Existing Sources view still surfaces Auxiliary bindings for lift-B and lift-C.
+      expect(
+        find.descendant(
+          of: find.byType(SourceHealthCard),
+          matching: find.text('lift-C'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(SourceHealthCard),
+          matching: find.text('Auxiliary'),
+        ),
+        findsNWidgets(2),
+      );
+
+      // Case D: never-received / partial / unresolved Operational states are shown honestly.
+      for (final (int rev, String wire, String badge, String detail)
+          in <(int, String, String, String)>[
+            (
+              14,
+              'awaiting',
+              'Awaiting',
+              'Configured Operational binding; awaiting observation state.',
+            ),
+            (
+              15,
+              'incomplete',
+              'Incomplete',
+              'Configured Operational binding; partial evidence only.',
+            ),
+            (
+              16,
+              'unresolved',
+              'Unresolved',
+              'Configured Operational binding; observation unresolved.',
+            ),
+          ]) {
+        transport.sseController.add(partialAvailabilityJson(rev, wire));
+        await tester.pumpAndSettle();
+        expect(find.byType(OperationalCarCard), findsOneWidget);
+        expect(find.byType(UnavailableOperationalCarCard), findsOneWidget);
+        expect(
+          find.descendant(of: unavailableCard, matching: find.text(badge)),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: unavailableCard, matching: find.text(detail)),
+          findsOneWidget,
+        );
+        expect(find.textContaining('disconnected'), findsNothing);
+      }
+
+      // Case E: lift-B recovers -> replaced cleanly by normal OperationalCarCard with no duplicate.
+      transport.sseController.add(recoveredBothJson);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      expect(find.byType(OperationalCarCard), findsNWidgets(2));
+      expect(find.byType(UnavailableOperationalCarCard), findsNothing);
+      expect(find.text('Floor 5'), findsOneWidget);
+      expect(find.text('Open'), findsOneWidget);
+      expect(find.textContaining('unavailable'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'handles narrow layout, 2.0x text scaling, all-unavailable empty UX, and snapshot/reconnect replacement without ghost cars',
+    (WidgetTester tester) async {
+      tester.view.devicePixelRatio = 1.0;
+      tester.view.physicalSize = const Size(360, 780);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      const String mixedLongIdsJson = '''
+      {
+        "api_version": "experimental/v0",
+        "revision": 10,
+        "lifecycle": "synchronizing",
+        "readiness": "not_ready",
+        "operational_cars": [
+          {
+            "id": "lift-A",
+            "location": {"kind": "floor", "floor": 1},
+            "motion": {"state": "stopped"},
+            "door": "closed",
+            "operating_mode": "normal",
+            "reported_destination": {"kind": "none"}
+          }
+        ],
+        "sources": [
+          {
+            "source": "rmf/site-main-east-tower-primary",
+            "session": {"state": "inactive"},
+            "transport": "subscriber_created",
+            "payload": "stale",
+            "observations": [
+              {"car": "lift-A", "role": "operational", "availability": "resolved"},
+              {"car": "building-north-tower-service-car-02", "role": "operational", "availability": "revoked"}
+            ]
+          }
+        ],
+        "recent_diagnostics": []
+      }
+      ''';
+
+      // Case F: All Operational cars unavailable + Auxiliary-only car present.
+      const String allUnavailableWithAuxJson = '''
+      {
+        "api_version": "experimental/v0",
+        "revision": 11,
+        "lifecycle": "synchronizing",
+        "readiness": "not_ready",
+        "operational_cars": [],
+        "sources": [
+          {
+            "source": "rmf/site-main-east-tower-primary",
+            "session": {"state": "active", "session": "s2"},
+            "transport": "discovery_observed",
+            "payload": "stale",
+            "observations": [
+              {"car": "lift-A", "role": "operational", "availability": "revoked"},
+              {"car": "building-north-tower-service-car-02", "role": "operational", "availability": "awaiting"}
+            ]
+          },
+          {
+            "source": "bacnet/wing-west",
+            "session": {"state": "active", "session": "s3"},
+            "transport": "discovery_observed",
+            "payload": "active",
+            "observations": [
+              {"car": "aux-only-car", "role": "auxiliary", "availability": "resolved"}
+            ]
+          }
+        ],
+        "recent_diagnostics": []
+      }
+      ''';
+
+      // Case H: Host restart/reconnect replaces entire fleet (revision resets 11 -> 1).
+      const String restartedDifferentFleetJson = '''
+      {
+        "api_version": "experimental/v0",
+        "revision": 1,
+        "lifecycle": "ready_read_only",
+        "readiness": "read_only",
+        "operational_cars": [
+          {
+            "id": "lift-Z",
+            "location": {"kind": "floor", "floor": 8},
+            "motion": {"state": "stopped"},
+            "door": "closed",
+            "operating_mode": "normal",
+            "reported_destination": {"kind": "none"}
+          }
+        ],
+        "sources": [
+          {
+            "source": "rmf/site-west",
+            "session": {"state": "active", "session": "s-fresh"},
+            "transport": "discovery_observed",
+            "payload": "active",
+            "observations": [
+              {"car": "lift-Z", "role": "operational", "availability": "resolved"}
+            ]
+          }
+        ],
+        "recent_diagnostics": []
+      }
+      ''';
+
+      final _WidgetTestTransport transport = _WidgetTestTransport()
+        ..currentSnapshot = mixedLongIdsJson;
+      final ClientController controller = ClientController(
+        transport: transport,
+        initialUrlInput: 'http://127.0.0.1:8080',
+        retryBackoff: (_) => const Duration(seconds: 30),
+      );
+      addTearDown(() {
+        controller.dispose();
+        transport.dispose();
+      });
+
+      await tester.pumpWidget(
+        LiftAssistantClientApp(
+          controller: controller,
+          initialHostUrl: 'http://127.0.0.1:8080',
+          autoConnect: true,
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      expect(find.byType(OperationalCarCard), findsOneWidget);
+      expect(find.byType(UnavailableOperationalCarCard), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('compact-tab-cars')),
+          matching: find.text('2'),
+        ),
+        findsOneWidget,
+      );
+
+      // Narrow 320x568 viewport at 2.0x text scaling renders without overflow.
+      tester.view.physicalSize = const Size(320, 568);
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      // Restore mobile viewport and verify Sources tab still works cleanly.
+      tester.platformDispatcher.clearTextScaleFactorTestValue();
+      tester.view.physicalSize = const Size(360, 780);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('compact-tab-sources')));
+      await tester.pumpAndSettle();
+      expect(find.text('rmf/site-main-east-tower-primary'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('compact-tab-cars')));
+      await tester.pumpAndSettle();
+
+      // Case F: all cars unavailable -> single summary panel without duplicate per-car cards,
+      // and Auxiliary-only car is NOT listed in Cars.
+      transport.sseController.add(allUnavailableWithAuxJson);
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      expect(
+        find.byKey(const Key('empty-operational-cars-card')),
+        findsOneWidget,
+      );
+      expect(find.byType(OperationalCarCard), findsNothing);
+      expect(find.byType(UnavailableOperationalCarCard), findsNothing);
+      expect(
+        find.textContaining(
+          'lift-A · revoked (rmf/site-main-east-tower-primary, payload:stale)',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining(
+          'building-north-tower-service-car-02 · awaiting (rmf/site-main-east-tower-primary, payload:stale)',
+        ),
+        findsOneWidget,
+      );
+      expect(find.textContaining('aux-only-car'), findsNothing);
+
+      // Case H: disconnect + Host restart/reconnect replaces snapshot completely with zero ghost entries.
+      transport.sseController.addError(
+        const HostStreamDisconnectedException('Host restarted'),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      transport.currentSnapshot = restartedDifferentFleetJson;
+      await tester.tap(find.byKey(const Key('banner-reconnect-button')));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+
+      expect(find.byType(OperationalCarCard), findsOneWidget);
+      expect(find.byType(UnavailableOperationalCarCard), findsNothing);
+      expect(
+        find.byKey(const Key('empty-operational-cars-card')),
+        findsNothing,
+      );
+      expect(find.text('lift-Z'), findsOneWidget);
+      expect(find.text('Floor 8'), findsOneWidget);
+      expect(find.text('lift-A'), findsNothing);
+      expect(find.text('building-north-tower-service-car-02'), findsNothing);
     },
   );
 }

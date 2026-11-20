@@ -1,8 +1,190 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../api/read_model.dart';
 import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
+
+/// A logical car with an explicit `Operational` observation binding in the
+/// current snapshot that has no currently resolved entry in `operational_cars`.
+///
+/// This represents current observation availability only — never an elevator
+/// equipment fault, `OutOfService` mode, timeout inference, or Auxiliary fallback.
+@immutable
+final class UnavailableOperationalCar {
+  const UnavailableOperationalCar({
+    required this.carId,
+    required this.source,
+    required this.session,
+    required this.availability,
+    required this.payload,
+  });
+
+  final String carId;
+  final String source;
+  final SourceSession session;
+  final ObservationAvailability availability;
+  final PayloadActivity payload;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is UnavailableOperationalCar &&
+          other.carId == carId &&
+          other.source == source &&
+          other.session == session &&
+          other.availability == availability &&
+          other.payload == payload);
+
+  @override
+  int get hashCode =>
+      Object.hash(carId, source, session, availability, payload);
+}
+
+@immutable
+sealed class OperationalCarSlot {
+  const OperationalCarSlot();
+
+  String get carId;
+}
+
+@immutable
+final class ResolvedCarSlot extends OperationalCarSlot {
+  const ResolvedCarSlot(this.car);
+
+  final OperationalCar car;
+
+  @override
+  String get carId => car.id;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || (other is ResolvedCarSlot && other.car == car);
+
+  @override
+  int get hashCode => Object.hash(ResolvedCarSlot, car);
+}
+
+@immutable
+final class UnavailableCarSlot extends OperationalCarSlot {
+  const UnavailableCarSlot(this.car);
+
+  final UnavailableOperationalCar car;
+
+  @override
+  String get carId => car.carId;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is UnavailableCarSlot && other.car == car);
+
+  @override
+  int get hashCode => Object.hash(UnavailableCarSlot, car);
+}
+
+@immutable
+final class ConfiguredOperationalCarsView {
+  const ConfiguredOperationalCarsView({
+    required this.resolvedCars,
+    required this.unavailableCars,
+    required this.slots,
+  });
+
+  final List<OperationalCar> resolvedCars;
+  final List<UnavailableOperationalCar> unavailableCars;
+  final List<OperationalCarSlot> slots;
+
+  bool get hasResolvedCars => resolvedCars.isNotEmpty;
+  int get totalCount => slots.length;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ConfiguredOperationalCarsView &&
+          listEquals(other.resolvedCars, resolvedCars) &&
+          listEquals(other.unavailableCars, unavailableCars) &&
+          listEquals(other.slots, slots));
+
+  @override
+  int get hashCode => Object.hash(
+    Object.hashAll(resolvedCars),
+    Object.hashAll(unavailableCars),
+    Object.hashAll(slots),
+  );
+}
+
+/// Projects the Cars display list strictly from the current [ReadModelSnapshot]:
+///
+/// - Deduplicates resolved cars by logical [OperationalCar.id].
+/// - Computes `configured Operational-bound logical cars MINUS current operational_cars`.
+/// - Ignores `Auxiliary` bindings completely (never promotes Auxiliary to operational
+///   truth or fallback, and never introduces Auxiliary-only cars into Cars).
+/// - Deduplicates unavailable cars by logical `car` identity.
+ConfiguredOperationalCarsView projectConfiguredOperationalCars(
+  ReadModelSnapshot snapshot,
+) {
+  final List<OperationalCar> resolvedCars = <OperationalCar>[];
+  final Set<String> resolvedIds = <String>{};
+  for (final OperationalCar car in snapshot.operationalCars) {
+    if (resolvedIds.add(car.id)) {
+      resolvedCars.add(car);
+    }
+  }
+
+  final Map<String, UnavailableOperationalCar> unavailableByCarId =
+      <String, UnavailableOperationalCar>{};
+  for (final SourceHealth src in snapshot.sources) {
+    for (final SourceObservation obs in src.observations) {
+      if (obs.role != BindingRole.operational) {
+        continue;
+      }
+      if (resolvedIds.contains(obs.car)) {
+        continue;
+      }
+      unavailableByCarId.putIfAbsent(
+        obs.car,
+        () => UnavailableOperationalCar(
+          carId: obs.car,
+          source: src.source,
+          session: src.session,
+          availability: obs.availability,
+          payload: src.payload,
+        ),
+      );
+    }
+  }
+
+  final List<UnavailableOperationalCar> unavailableCars =
+      unavailableByCarId.values.toList()
+        ..sort((UnavailableOperationalCar a, UnavailableOperationalCar b) {
+          return a.carId.compareTo(b.carId);
+        });
+
+  final List<OperationalCarSlot> slots;
+  if (unavailableCars.isEmpty) {
+    slots = <OperationalCarSlot>[
+      for (final OperationalCar car in resolvedCars) ResolvedCarSlot(car),
+    ];
+  } else {
+    slots =
+        <OperationalCarSlot>[
+          for (final OperationalCar car in resolvedCars) ResolvedCarSlot(car),
+          for (final UnavailableOperationalCar car in unavailableCars)
+            UnavailableCarSlot(car),
+        ]..sort((OperationalCarSlot a, OperationalCarSlot b) {
+          return a.carId.compareTo(b.carId);
+        });
+  }
+
+  return ConfiguredOperationalCarsView(
+    resolvedCars: List<OperationalCar>.unmodifiable(resolvedCars),
+    unavailableCars: List<UnavailableOperationalCar>.unmodifiable(
+      unavailableCars,
+    ),
+    slots: List<OperationalCarSlot>.unmodifiable(slots),
+  );
+}
 
 class OperationalCarCard extends StatelessWidget {
   const OperationalCarCard({
@@ -784,6 +966,391 @@ class _SafeInlineKv extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Renders a configured `Operational`-bound logical car that currently has no
+/// resolved `operational_cars` entry in the Host snapshot.
+///
+/// Deliberately displays zero floor, motion, door, mode, or destination values
+/// and never infers timeouts, network failures, controller faults, or
+/// `OutOfService` mode from observation availability.
+class UnavailableOperationalCarCard extends StatelessWidget {
+  const UnavailableOperationalCarCard({
+    super.key,
+    required this.car,
+    this.stretchToRowHeight = false,
+    this.useTabularFooter = true,
+  });
+
+  final UnavailableOperationalCar car;
+  final bool stretchToRowHeight;
+  final bool useTabularFooter;
+
+  Color _leftStripeColor(InstrumentPalette palette) {
+    return switch (car.availability) {
+      ObservationAvailability.awaiting => palette.neutral,
+      ObservationAvailability.incomplete ||
+      ObservationAvailability.unresolved ||
+      ObservationAvailability.revoked ||
+      ObservationAvailability.resolved => palette.caution,
+    };
+  }
+
+  String _detailSummary() {
+    return switch (car.availability) {
+      ObservationAvailability.awaiting =>
+        'Configured Operational binding; awaiting observation state.',
+      ObservationAvailability.incomplete =>
+        'Configured Operational binding; partial evidence only.',
+      ObservationAvailability.unresolved =>
+        'Configured Operational binding; observation unresolved.',
+      ObservationAvailability.revoked =>
+        'Configured Operational binding; prior observation revoked.',
+      ObservationAvailability.resolved =>
+        'Configured Operational binding; no current operational state.',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final Color stripe = _leftStripeColor(palette);
+
+    return DecoratedBox(
+      key: Key('unavailable-car-card-${car.carId}'),
+      decoration: BoxDecoration(
+        color: palette.surface,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: palette.border),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(5),
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: BoxDecoration(
+            border: Border(left: BorderSide(color: stripe, width: 2.5)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: stretchToRowHeight
+                ? MainAxisSize.max
+                : MainAxisSize.min,
+            mainAxisAlignment: stretchToRowHeight
+                ? MainAxisAlignment.spaceBetween
+                : MainAxisAlignment.start,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    // Header: Logical CarId + Observation Availability Badge
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Tooltip(
+                            message: 'Logical CarId: ${car.carId}',
+                            child: Text(
+                              car.carId,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: instrumentMonoStyle(
+                                context,
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 156),
+                          child: _UnavailableAvailabilityBadge(
+                            availability: car.availability,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 9),
+
+                    // Primary body: Non-operational placeholder graphic + honest evidence message
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: <Widget>[
+                        _UnavailableApertureGraphic(
+                          availability: car.availability,
+                        ),
+                        const SizedBox(width: 11),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: <Widget>[
+                              Text(
+                                'Current observation unavailable',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 2.5),
+                              Text(
+                                _detailSummary(),
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  height: 1.3,
+                                  color: palette.subtleText,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              // Bottom source/availability context strip (aligned with OperationalCarCard footer)
+              _UnavailableCarContextFooter(
+                car: car,
+                useTabularColumns: useTabularFooter,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UnavailableAvailabilityBadge extends StatelessWidget {
+  const _UnavailableAvailabilityBadge({required this.availability});
+
+  final ObservationAvailability availability;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final (
+      String label,
+      Color fg,
+      Color bg,
+      Color dotColor,
+      bool hollowDot,
+    ) = switch (availability) {
+      ObservationAvailability.awaiting => (
+        'Awaiting',
+        palette.subtleText,
+        palette.neutralContainer,
+        palette.neutral,
+        true,
+      ),
+      ObservationAvailability.incomplete => (
+        'Incomplete',
+        palette.caution,
+        palette.cautionContainer,
+        palette.caution,
+        true,
+      ),
+      ObservationAvailability.unresolved => (
+        'Unresolved',
+        palette.caution,
+        palette.cautionContainer,
+        palette.caution,
+        true,
+      ),
+      ObservationAvailability.revoked => (
+        'Revoked',
+        palette.caution,
+        palette.cautionContainer,
+        palette.caution,
+        false,
+      ),
+      ObservationAvailability.resolved => (
+        'Unavailable',
+        palette.caution,
+        palette.cautionContainer,
+        palette.caution,
+        true,
+      ),
+    };
+
+    return SemanticBadge(
+      label: label,
+      foreground: fg,
+      background: bg,
+      dotColor: dotColor,
+      hollowDot: hollowDot,
+      outlined: true,
+      tooltip:
+          'Observation availability (${availability.wireValue}) describes LiftAssistant evidence state only — NOT an elevator fault or OutOfService mode.',
+    );
+  }
+}
+
+class _UnavailableApertureGraphic extends StatelessWidget {
+  const _UnavailableApertureGraphic({required this.availability});
+
+  final ObservationAvailability availability;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final Color accent = availability == ObservationAvailability.awaiting
+        ? palette.mutedText
+        : palette.caution;
+
+    return SizedBox(
+      width: 38,
+      height: 42,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: palette.elevatedSurface,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: palette.border, width: 1.15),
+        ),
+        child: Center(
+          child: Icon(Icons.visibility_off_outlined, size: 16, color: accent),
+        ),
+      ),
+    );
+  }
+}
+
+class _UnavailableCarContextFooter extends StatelessWidget {
+  const _UnavailableCarContextFooter({
+    required this.car,
+    required this.useTabularColumns,
+  });
+
+  final UnavailableOperationalCar car;
+  final bool useTabularColumns;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final bool showTabular = useTabularColumns && textScale <= 1.35;
+
+    final String sessionLabel = switch (car.session) {
+      InactiveSourceSession() => 'inactive',
+      ActiveSourceSession(:final session) => session,
+    };
+
+    final Color availabilityColor =
+        car.availability == ObservationAvailability.awaiting
+        ? palette.subtleText
+        : palette.caution;
+
+    final Color payloadColor = car.payload == PayloadActivity.active
+        ? palette.subtleText
+        : palette.caution;
+
+    final String sourceTooltip =
+        'Configured Operational source: ${car.source} (session: $sessionLabel)';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.elevatedSurface,
+        border: Border(top: BorderSide(color: palette.border)),
+      ),
+      child: showTabular
+          ? Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 6.5,
+              ),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    flex: 11,
+                    child: Tooltip(
+                      message: sourceTooltip,
+                      child: _TabularField(
+                        label: 'Source',
+                        value: car.source,
+                        valueColor: palette.subtleText,
+                        emphasize: false,
+                        monospaceValue: true,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    width: 1,
+                    height: 22,
+                    margin: const EdgeInsets.symmetric(horizontal: 4.5),
+                    color: palette.border,
+                  ),
+                  Expanded(
+                    flex: 7,
+                    child: _TabularField(
+                      label: 'Availability',
+                      value: car.availability.wireValue,
+                      valueColor: availabilityColor,
+                      emphasize: true,
+                      monospaceValue: true,
+                    ),
+                  ),
+                  Container(
+                    width: 1,
+                    height: 22,
+                    margin: const EdgeInsets.symmetric(horizontal: 4.5),
+                    color: palette.border,
+                  ),
+                  Expanded(
+                    flex: 6,
+                    child: _TabularField(
+                      label: 'Payload',
+                      value: car.payload.wireValue,
+                      valueColor: payloadColor,
+                      emphasize: car.payload != PayloadActivity.active,
+                      monospaceValue: true,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 5,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  Tooltip(
+                    message: sourceTooltip,
+                    child: _SafeInlineKv(
+                      label: 'Source',
+                      value: car.source,
+                      valueColor: palette.subtleText,
+                      emphasize: false,
+                      monospaceValue: true,
+                    ),
+                  ),
+                  _SafeInlineKv(
+                    label: 'Availability',
+                    value: car.availability.wireValue,
+                    valueColor: availabilityColor,
+                    emphasize: true,
+                    monospaceValue: true,
+                  ),
+                  _SafeInlineKv(
+                    label: 'Payload',
+                    value: car.payload.wireValue,
+                    valueColor: payloadColor,
+                    emphasize: car.payload != PayloadActivity.active,
+                    monospaceValue: true,
+                  ),
+                ],
+              ),
+            ),
     );
   }
 }
