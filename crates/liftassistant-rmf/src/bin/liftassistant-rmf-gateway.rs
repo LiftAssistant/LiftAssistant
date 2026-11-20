@@ -6,9 +6,9 @@ use std::{
     os::unix::net::UnixStream,
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
-        mpsc,
+        mpsc::{self, TrySendError},
     },
     thread,
     time::{Duration, Instant},
@@ -121,11 +121,15 @@ fn run() -> Result<(), Box<dyn Error>> {
     let ingress = PrivateIngress::bind(&config.socket_path)?;
 
     let (observation_tx, observation_rx) = mpsc::sync_channel(OBSERVATION_QUEUE);
+    let observation_overloaded = Arc::new(AtomicBool::new(false));
+    let observation_admission_gate = Arc::new(Mutex::new(()));
     let observer = spawn_observer(
         config.domain_id,
         Duration::from_millis(config.max_payload_silence_ms),
         shutdown.clone(),
         observation_tx,
+        observation_overloaded.clone(),
+        observation_admission_gate.clone(),
     );
     let (ingress_tx, ingress_rx) = mpsc::sync_channel(INGRESS_QUEUE);
     let ingress_shutdown = shutdown.clone();
@@ -167,6 +171,12 @@ fn run() -> Result<(), Box<dyn Error>> {
     );
     let mut reported_unconfigured_lift = false;
     while !shutdown.load(Ordering::Relaxed) {
+        {
+            let _admission = observation_admission_gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            apply_observation_overload(&observation_overloaded, &observation_rx, &mut gateway);
+        }
         match observation_rx.recv_timeout(LOOP_POLL) {
             Ok(ObservationEvent::Payload(payload)) => {
                 if let Err(error) = gateway.ingest(payload) {
@@ -196,7 +206,14 @@ fn run() -> Result<(), Box<dyn Error>> {
                 return Err(io::Error::other("RMF observation supervisor stopped").into());
             }
         }
-        while let Ok(event) = ingress_rx.try_recv() {
+        for _ in 0..INGRESS_QUEUE {
+            let Ok(event) = ingress_rx.try_recv() else {
+                break;
+            };
+            let _admission = observation_admission_gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            apply_observation_overload(&observation_overloaded, &observation_rx, &mut gateway);
             let response = gateway.handle_command(event.uid, event.request);
             if let Err(error) = event.connection.respond(&response) {
                 eprintln!("private gateway response failed: {error}");
@@ -248,6 +265,8 @@ fn spawn_observer(
     freshness: Duration,
     shutdown: Arc<AtomicBool>,
     events: mpsc::SyncSender<ObservationEvent>,
+    overloaded: Arc<AtomicBool>,
+    admission_gate: Arc<Mutex<()>>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let policy = RmfFreshnessPolicy::new(freshness).expect("validated nonzero freshness");
@@ -267,7 +286,13 @@ fn spawn_observer(
                     |payload| {
                         if let Some(payload) = payload {
                             received_in_generation = true;
-                            if events.send(ObservationEvent::Payload(payload)).is_err() {
+                            if queue_observation_event(
+                                &events,
+                                &overloaded,
+                                &admission_gate,
+                                ObservationEvent::Payload(payload),
+                            ) == RmfReceiveControl::Stop
+                            {
                                 return RmfReceiveControl::Stop;
                             }
                         }
@@ -282,20 +307,40 @@ fn spawn_observer(
             match result {
                 Ok(RmfReceiveOutcome::AwaitingPayloadTimeout { max_wait }) => {
                     if received_in_lifetime {
-                        let _ = events.send(ObservationEvent::Stale);
+                        let _ = queue_observation_event(
+                            &events,
+                            &overloaded,
+                            &admission_gate,
+                            ObservationEvent::Stale,
+                        );
                     }
-                    let _ = events.send(ObservationEvent::Transport(format!(
-                        "subscriber generation received no payload within {max_wait:?}"
-                    )));
+                    let _ = queue_observation_event(
+                        &events,
+                        &overloaded,
+                        &admission_gate,
+                        ObservationEvent::Transport(format!(
+                            "subscriber generation received no payload within {max_wait:?}"
+                        )),
+                    );
                 }
                 Ok(RmfReceiveOutcome::PayloadStale { .. }) => {
-                    let _ = events.send(ObservationEvent::Stale);
+                    let _ = queue_observation_event(
+                        &events,
+                        &overloaded,
+                        &admission_gate,
+                        ObservationEvent::Stale,
+                    );
                 }
                 Ok(RmfReceiveOutcome::ShutdownRequested | RmfReceiveOutcome::HandlerStopped) => {
                     break;
                 }
                 Err(error) => {
-                    let _ = events.send(ObservationEvent::Transport(error.to_string()));
+                    let _ = queue_observation_event(
+                        &events,
+                        &overloaded,
+                        &admission_gate,
+                        ObservationEvent::Transport(error.to_string()),
+                    );
                 }
             }
             if shutdown.load(Ordering::Relaxed) {
@@ -305,4 +350,112 @@ fn spawn_observer(
             backoff = (backoff * 2).min(Duration::from_secs(4));
         }
     })
+}
+
+fn queue_observation_event(
+    events: &mpsc::SyncSender<ObservationEvent>,
+    overloaded: &AtomicBool,
+    admission_gate: &Mutex<()>,
+    event: ObservationEvent,
+) -> RmfReceiveControl {
+    let _admission = admission_gate
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if overloaded.load(Ordering::Acquire) {
+        return RmfReceiveControl::Continue;
+    }
+    match events.try_send(event) {
+        Ok(()) => RmfReceiveControl::Continue,
+        Err(TrySendError::Full(_)) => {
+            overloaded.store(true, Ordering::Release);
+            RmfReceiveControl::Continue
+        }
+        Err(TrySendError::Disconnected(_)) => RmfReceiveControl::Stop,
+    }
+}
+
+fn apply_observation_overload<T: RmfCommandTransport>(
+    overloaded: &AtomicBool,
+    events: &mpsc::Receiver<ObservationEvent>,
+    gateway: &mut RmfIntentGateway<T>,
+) {
+    if overloaded.swap(false, Ordering::AcqRel) {
+        while events.try_recv().is_ok() {}
+        gateway.mark_observation_overloaded();
+        eprintln!(
+            "RMF observation queue overloaded; Operational evidence was revoked and writes are not ready"
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use liftassistant_rmf::RmfLiftState;
+
+    fn payload(sequence: i64) -> RmfLivePayload {
+        RmfLivePayload {
+            source_time_nanos: sequence,
+            state: RmfLiftState {
+                lift_name: "Lift1".into(),
+                available_floors: vec!["L1".into()],
+                current_floor: "L1".into(),
+                destination_floor: "L1".into(),
+                door_state: RmfLiftState::DOOR_CLOSED,
+                motion_state: RmfLiftState::MOTION_STOPPED,
+                available_modes: vec![RmfLiftState::MODE_AGV],
+                current_mode: RmfLiftState::MODE_AGV,
+                session_id: String::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn bounded_observation_queue_signals_overload_and_drops_until_supervisor_acknowledges() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let overloaded = AtomicBool::new(false);
+        let admission_gate = Mutex::new(());
+        assert_eq!(
+            queue_observation_event(
+                &sender,
+                &overloaded,
+                &admission_gate,
+                ObservationEvent::Payload(payload(1))
+            ),
+            RmfReceiveControl::Continue
+        );
+        assert_eq!(
+            queue_observation_event(
+                &sender,
+                &overloaded,
+                &admission_gate,
+                ObservationEvent::Payload(payload(2))
+            ),
+            RmfReceiveControl::Continue
+        );
+        assert!(overloaded.load(Ordering::Acquire));
+        let _ = queue_observation_event(
+            &sender,
+            &overloaded,
+            &admission_gate,
+            ObservationEvent::Payload(payload(3)),
+        );
+        let ObservationEvent::Payload(retained) = receiver.recv().unwrap() else {
+            panic!("first payload remains queued until the supervisor revokes evidence");
+        };
+        assert_eq!(retained.source_time_nanos, 1);
+        assert!(receiver.try_recv().is_err());
+
+        overloaded.store(false, Ordering::Release);
+        let _ = queue_observation_event(
+            &sender,
+            &overloaded,
+            &admission_gate,
+            ObservationEvent::Payload(payload(4)),
+        );
+        let ObservationEvent::Payload(recovered) = receiver.recv().unwrap() else {
+            panic!("fresh payload is accepted after overload acknowledgement");
+        };
+        assert_eq!(recovered.source_time_nanos, 4);
+    }
 }

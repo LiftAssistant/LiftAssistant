@@ -348,14 +348,18 @@ progression and grants no passenger or real-controller write authority.
 
 The first concrete process uses a mode-`0600` Unix socket plus kernel peer UID
 for local caller authentication. Configuration maps that UID to one
-`PrincipalId`; Engine creates a fresh process-local grant. A local advisory lock
-prevents overlapping gateway processes at the configured socket. Neither the
-socket, RMF participant, holder session nor durable file is a reusable grant.
-The private file retains one unresolved operation plus the `IntentId` watermark,
-is committed and directory-synchronized before publication, and fails closed on
-corruption, incompatible revision, unsafe permissions or an unreadable state.
-This is bounded single-operation recovery, not a database or exactly-once
-transport.
+`PrincipalId`; Engine creates a fresh process-local grant. A separate explicit
+UID/Principal mapping grants the narrow recovery permission. Recovery never
+turns that operator into the ordinary command Principal. A local advisory lease
+derived from the RMF domain and native lift prevents overlapping processes from
+covering the same control domain through different sockets; it is not a
+cross-host lock. Neither the socket, RMF participant, holder session nor durable
+file is a reusable grant. The private file retains one unresolved or
+resumption-required operation, the `IntentId` watermark and 32 recent recovery
+audit records, is committed and directory-synchronized before publication or
+recovery transitions, and fails closed on corruption, incompatible revision,
+unsafe permissions or an unreadable state. This is bounded single-operation
+recovery, not a database or exactly-once transport.
 
 RMF subscriber generations are transport resources inside one adapter source
 lifetime. A generation that discovers peers but receives no first payload is

@@ -130,6 +130,28 @@ accepted explicitly and durably, but it remains uncertainty.
 
 **Current terminal target:** `M7.1b COMPLETE — explicit recovery, retirement and safe-resumption boundary validated. Awaiting HUMAN HIL/bench-controller environment decision. No real controller or passenger-equipment write path authorized.`
 
+**M7.1b local implementation — IMPLEMENTED; OFFICIAL HOTEL RERUN PENDING.** The
+private gateway now distinguishes an explicit recovery UID/Principal from the
+ordinary caller, exposes private inspection, durably retires an unresolved
+operation only as outcome unknown, enters restart-stable `ResumptionRequired`,
+and requires a second authorized decision with fresh compatible Operational
+evidence, available command transport, an empty current RMF holder, the current
+local control-domain lease and explicit residual-uncertainty acceptance. The
+retirement fences the old ordinary grant; restart creates a normal fresh process
+grant without skipping resumption. No Engine CallState/receipt semantics or
+public read-only surface changed.
+
+Durable state v2 keeps one unresolved or resumption-required operation, the
+monotonic Intent watermark and 32 recent recovery audit records; v1 state is
+read conservatively. Configuration/native mapping is rechecked, commissioning
+requires current observed floor compatibility, and a local lock keyed by RMF
+domain plus native lift fences the same control domain across different socket
+paths. Queue overload atomically revokes Operational evidence before command
+admission and recovers only on a fresh compatible payload. Focused validation
+currently passes 29 RMF library tests, one gateway queue test and three
+independent-process tests. The required late-restart official-Hotel proof and
+full workspace/scenario/Rust-1.85/CI closure are not yet claimed.
+
 ### M6B.3, M6C.0 and M6C.1a evidence
 
 The [M6B.3 live Sandbox run](M6B3_KONE_SANDBOX_VALIDATION.md#executed-live-sandbox-validation) completed the frozen A–K matrix with two bounded normal destination calls. All five official-inventory candidates passed read-only topology/actions audit. The deterministic ranking selected the only nine-lift group; its chosen normal route had three common eligible lifts. Exact group scope was sufficient.

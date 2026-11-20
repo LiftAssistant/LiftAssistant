@@ -13,8 +13,8 @@ use std::{
 
 use liftassistant_model::ObservationSessionId;
 use liftassistant_rmf::{
-    GatewayCommandResponse, GatewayConfig, PrivateIngress, RmfCommandTransport, RmfIntentGateway,
-    RmfLiftCommand, RmfLiftState, RmfLivePayload,
+    GatewayCommandResponse, GatewayConfig, PrivateIngress, RecoveryOperatorConfig,
+    RmfCommandTransport, RmfIntentGateway, RmfLiftCommand, RmfLiftState, RmfLivePayload,
 };
 use serde_json::Value;
 use tempfile::TempDir;
@@ -50,13 +50,21 @@ impl RmfCommandTransport for ProcessTransport {
 }
 
 fn config(root: &Path) -> GatewayConfig {
+    let domain_id = root.to_string_lossy().bytes().fold(0_u16, |value, byte| {
+        value.wrapping_mul(31).wrapping_add(u16::from(byte))
+    }) % 200
+        + 1;
     GatewayConfig {
         socket_path: root.join("gateway.sock"),
         state_path: root.join("gateway-state.json"),
         config_revision: "process-fixture-v1".into(),
         allowed_uid: rustix::process::getuid().as_raw(),
         principal: "process-fixture-caller".into(),
-        domain_id: 47,
+        recovery_operator: Some(RecoveryOperatorConfig {
+            allowed_uid: rustix::process::getuid().as_raw(),
+            principal: "process-recovery-operator".into(),
+        }),
+        domain_id,
         source_id: "process-rmf-fixture".into(),
         logical_car: "A".into(),
         native_lift: "Lift1".into(),
@@ -109,12 +117,22 @@ fn gateway_child_process() {
         ))
         .unwrap();
     let ingress = PrivateIngress::bind(&config.socket_path).unwrap();
-    let mut connection = ingress.accept().unwrap();
-    let request = connection.read_request().unwrap();
-    let response = gateway.handle_command(connection.peer_uid(), request);
-    connection.respond(&response).unwrap();
+    let requests = match mode.as_str() {
+        "recovery-retire" => 4,
+        "recovery-resume" => 3,
+        _ => 1,
+    };
+    let mut responses = Vec::new();
+    for _ in 0..requests {
+        let mut connection = ingress.accept().unwrap();
+        let request = connection.read_request().unwrap();
+        let response = gateway.handle_command(connection.peer_uid(), request);
+        connection.respond(&response).unwrap();
+        responses.push(response);
+    }
 
     if mode == "recover" {
+        let response = &responses[0];
         assert_eq!(response.code, "recovery_required");
         let holder = gateway.unresolved().unwrap().rmf_session_id.clone();
         gateway
@@ -180,6 +198,91 @@ fn process_restart_recovers_same_operation_without_resend() {
     assert!(recovered["unresolved"].is_null());
 }
 
+#[test]
+fn private_ipc_recovery_retirement_and_resumption_survive_process_restart() {
+    if env::var_os("LIFTASSISTANT_GATEWAY_CHILD_MODE").is_some() {
+        return;
+    }
+    let temp = TempDir::new().unwrap();
+    let first = spawn_child(temp.path(), "crash-after-send");
+    wait_for_socket(&temp.path().join("gateway.sock"));
+    assert!(send_request(&temp.path().join("gateway.sock")).is_err());
+    assert!(!first.wait_with_output().unwrap().status.success());
+    assert_eq!(send_count(&temp.path().join("send.log")), 1);
+
+    let retiring = spawn_child(temp.path(), "recovery-retire");
+    wait_for_socket(&temp.path().join("gateway.sock"));
+    let wrong = send_json(
+        &temp.path().join("gateway.sock"),
+        serde_json::json!({
+            "version": 1,
+            "operation": "inspect_recovery",
+            "principal": "process-fixture-caller"
+        }),
+    )
+    .unwrap();
+    assert_eq!(wrong.code, "unauthorized_recovery_principal");
+    let normal = send_request(&temp.path().join("gateway.sock")).unwrap();
+    assert_eq!(normal.code, "recovery_required");
+    let inspection = send_json(
+        &temp.path().join("gateway.sock"),
+        serde_json::json!({
+            "version": 1,
+            "operation": "inspect_recovery",
+            "principal": "process-recovery-operator"
+        }),
+    )
+    .unwrap();
+    assert!(inspection.accepted);
+    assert_eq!(
+        inspection.recovery.unwrap().unresolved.unwrap().intent_id,
+        1
+    );
+    let retired = send_json(
+        &temp.path().join("gateway.sock"),
+        serde_json::json!({
+            "version": 1,
+            "operation": "retire_unknown",
+            "principal": "process-recovery-operator",
+            "reason": "process crash recovery outcome remains unknown"
+        }),
+    )
+    .unwrap();
+    assert_eq!(retired.code, "retired_outcome_unknown");
+    assert_eq!(
+        retired.readiness,
+        liftassistant_rmf::GatewayReadiness::ResumptionRequired
+    );
+    assert!(retiring.wait_with_output().unwrap().status.success());
+    assert_eq!(send_count(&temp.path().join("send.log")), 1);
+
+    let state: Value =
+        serde_json::from_slice(&fs::read(temp.path().join("gateway-state.json")).unwrap()).unwrap();
+    assert!(state["unresolved"].is_null());
+    assert_eq!(state["resumption_required"]["operation"]["intent_id"], 1);
+
+    let resuming = spawn_child(temp.path(), "recovery-resume");
+    wait_for_socket(&temp.path().join("gateway.sock"));
+    let bypass = send_request(&temp.path().join("gateway.sock")).unwrap();
+    assert_eq!(bypass.code, "resumption_required");
+    let resumed = send_json(
+        &temp.path().join("gateway.sock"),
+        serde_json::json!({
+            "version": 1,
+            "operation": "resume_control",
+            "principal": "process-recovery-operator",
+            "reason": "resume despite explicitly retained historical uncertainty",
+            "accept_residual_uncertainty": true
+        }),
+    )
+    .unwrap();
+    assert_eq!(resumed.code, "control_resumed_with_residual_uncertainty");
+    let next = send_request(&temp.path().join("gateway.sock")).unwrap();
+    assert_eq!(next.intent_id, Some(2));
+    assert!(resuming.wait_with_output().unwrap().status.success());
+    assert_eq!(send_count(&temp.path().join("send.log")), 2);
+}
+
 fn spawn_child(root: &Path, mode: &str) -> std::process::Child {
     Command::new(env::current_exe().unwrap())
         .arg("--exact")
@@ -205,6 +308,18 @@ fn wait_for_socket(path: &Path) {
 }
 
 fn send_request(path: &Path) -> Result<GatewayCommandResponse, String> {
+    send_json(
+        path,
+        serde_json::json!({
+            "version": 1,
+            "operation": "serve_floor",
+            "logical_car": "A",
+            "floor": 2
+        }),
+    )
+}
+
+fn send_json(path: &Path, request: Value) -> Result<GatewayCommandResponse, String> {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut stream = loop {
         match UnixStream::connect(path) {
@@ -216,16 +331,7 @@ fn send_request(path: &Path) -> Result<GatewayCommandResponse, String> {
             Err(error) => return Err(error.to_string()),
         }
     };
-    serde_json::to_writer(
-        &mut stream,
-        &serde_json::json!({
-            "version": 1,
-            "operation": "serve_floor",
-            "logical_car": "A",
-            "floor": 2
-        }),
-    )
-    .map_err(|error| error.to_string())?;
+    serde_json::to_writer(&mut stream, &request).map_err(|error| error.to_string())?;
     stream
         .shutdown(Shutdown::Write)
         .map_err(|error| error.to_string())?;

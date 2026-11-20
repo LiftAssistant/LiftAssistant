@@ -1,8 +1,10 @@
 # M7 Open-RMF intent gateway
 
-Status: implemented for software/simulation review on 2026-11-20. This is a
-private, experimental process boundary. It is not approved for passenger
-equipment, a real controller, a public write API, certification, or deployment.
+Status: M7.0 + M7.1a are HUMAN-accepted. M7.1b explicit recovery, retirement
+and safe resumption are implemented and deterministically validated; the
+required official-Hotel late-restart rerun remains pending. This is a private,
+experimental process boundary. It is not approved for HIL, passenger equipment,
+a real controller, a public write API, certification, or deployment.
 
 ## Boundary
 
@@ -53,6 +55,10 @@ A minimal non-secret shape is:
   "config_revision": "site-a-rmf-v1",
   "allowed_uid": 1000,
   "principal": "site-a-orchestrator",
+  "recovery_operator": {
+    "allowed_uid": 1000,
+    "principal": "site-a-recovery-operator"
+  },
   "domain_id": 47,
   "source_id": "site-a-rmf-gateway",
   "logical_car": "A",
@@ -74,7 +80,17 @@ the kernel-authenticated UID. That UID must exactly match the configured caller
 mapping before the gateway uses the configured `PrincipalId` and a fresh,
 process-local Engine grant. Grants are never restored from disk.
 
-The ingress protocol currently accepts one private JSON request shape:
+`recovery_operator` is optional so an existing installation fails closed with
+no recovery permission. When present, both its peer UID and explicitly named
+Principal must match a recovery request. Ordinary command permission does not
+imply recovery permission. A recovery Principal is not installed as the
+ordinary command Principal and recovery does not create a command grant. If
+several applications share one Unix service UID, `SO_PEERCRED` cannot
+independently distinguish them; separate UID ownership or an explicitly
+accepted shared-peer context is required. This limitation is why the private
+socket is not a public control API or a general authentication system.
+
+The ingress protocol accepts the ordinary private request:
 
 ```json
 {"version":1,"operation":"serve_floor","logical_car":"A","floor":2}
@@ -83,20 +99,43 @@ The ingress protocol currently accepts one private JSON request shape:
 It is not a public or stable schema. The existing Headless HTTP/SSE API, CLI,
 and Flutter client remain read-only and expose no route to this socket.
 
-An advisory lock adjacent to the socket prevents two gateway processes from
-covering the same configured ingress. A crashed process releases the kernel
-lock; its successor may then remove only the stale socket at that exact path.
-This is local single-instance fencing, not a distributed lock or permission to
-operate a second competing control path for the same physical lift.
+The same bounded private socket supports three recovery-only operations. Each
+requires the configured recovery Principal:
+
+```json
+{"version":1,"operation":"inspect_recovery","principal":"site-a-recovery-operator"}
+{"version":1,"operation":"retire_unknown","principal":"site-a-recovery-operator","reason":"operator-reviewed outcome remains unknown"}
+{"version":1,"operation":"resume_control","principal":"site-a-recovery-operator","reason":"resume current control while preserving historical uncertainty","accept_residual_uncertainty":true}
+```
+
+Inspection returns the operation identity and immutable car/floor, RMF holder
+correlation, durable delivery and reconciliation progress, current private
+readiness, current canonical Operational snapshot, observable current holder,
+configuration revision, commissioning/overload state and bounded recent audit.
+It contains no backend credential, grant or ROS identity.
+
+A socket-adjacent lock still protects exact ingress cleanup. Independently, an
+owner-only advisory lock derived from `RMF domain_id + native_lift` fences the
+actual local control domain, so two processes cannot cover the same lift through
+different socket or state paths. Different native control domains can coexist,
+and a crashed process releases the kernel lock. The stable lock filename is only
+a local identifier; its file also stores and verifies the full domain string,
+failing closed on a collision. This does not solve cross-host split brain, which
+remains a HIL/deployment gate.
 
 ## Durable unresolved operation
 
-The private JSON store contains only a version, configuration revision,
-monotonic `last_intent_id`, and at most one unresolved operation. An unresolved
-record contains the immutable logical/native target and identities plus the
-conservative delivery/correlation and reconciliation evidence needed after a
-restart. It does not contain grants, credentials, bearer tokens, ROS identity,
-or an observation source incarnation.
+The version-2 private JSON store contains a configuration revision, monotonic
+`last_intent_id`, at most one unresolved operation, at most one
+resumption-required record, and at most 32 retirement/resumption audit records.
+Version-1 M7.1a state is read conservatively and upgraded on its next mutation.
+An unresolved record contains the immutable logical/native target and identities
+plus conservative delivery/correlation and reconciliation evidence. A recovery
+audit records the action, Principal, configuration/control domain, prior durable
+progress, current canonical snapshot, observable holder, bounded operator reason
+and whether remote inactivity remained uncertain or was explicitly accepted.
+It does not contain grants, credentials, bearer tokens, ROS identity, or an
+observation source incarnation.
 
 Before publication the gateway creates a fresh Engine `IntentId`, commits the
 unresolved record through a new mode-`0600` temporary file, `fsync`s it,
@@ -105,6 +144,8 @@ publisher run. State and request payloads are size-bounded. Symlinks,
 group/world-accessible state, non-regular files, unknown/incompatible versions,
 configuration-revision mismatches, malformed identities, and oversized or
 unreadable state fail closed rather than starting with an empty history.
+The stored operation mapping and retired control domain are rechecked against
+current configuration even when a revision string was mistakenly reused.
 
 The crash contract is conservative:
 
@@ -122,6 +163,13 @@ blocks incompatible new work with `recovery_required`. A new process creates a
 fresh observation SourceSession and a fresh grant but does not create a
 replacement Intent and does not publish the unresolved request again.
 
+Atomic rename plus file and directory synchronization provide crash
+consistency, not cryptographic rollback resistance. Normal in-process updates
+cannot rewind the watermark or audit sequence. An external actor able to replace
+the owner-only state file with an older but syntactically valid copy is outside
+this local storage guarantee and requires a stronger deployment trust anchor
+before a real-controller decision.
+
 ## Observation, readiness, and recovery
 
 The gateway consumes `/lift_states` through the existing explicit
@@ -131,12 +179,34 @@ Command transport state never overrides the observed state. Unknown native
 lifts are reported and isolated; configured mapping failures invalidate the
 configured car rather than fabricate state.
 
-Private readiness distinguishes startup/synchronization, ready, degraded, and
-recovery-required conditions. It is not a global health framework. A command
+Private readiness distinguishes startup/synchronization, ready, degraded,
+recovery-required and resumption-required conditions. It is not a global health
+framework. A command
 requires current complete Operational evidence, the current grant, the
 configured controller/capability/floor, an available RMF request subscriber,
 and no prior unresolved operation. Observation loss invalidates Operational
 truth, blocks admission and completion, and preserves unresolved work.
+
+Configured `available_floors` are commissioning evidence for this concrete
+write gateway. The configured native lift must be observed and its current
+floor set must match the explicitly mapped served-floor labels before Ready.
+Duplicate, missing or foreign labels invalidate that car and keep writes
+degraded. This adapter check does not promote RMF floors into generic Engine
+execution authority.
+
+`retire_unknown` atomically moves the durable unresolved operation into
+`ResumptionRequired`, appends an outcome-unknown audit, and fences the old
+process command grant. It does not call Engine completion/prevention/rejection
+and cannot make Ready. The old in-memory operation is not rewritten; a normal
+gateway restart establishes a new process-local grant while the durable
+resumption gate remains closed. `resume_control` separately requires recovery
+authorization, the same local control-domain lease and configuration, fresh
+complete compatible Operational evidence, available command transport, an
+empty current RMF holder, no active operation in the new Engine lifetime, and
+an explicit acceptance of residual historical uncertainty. Empty holder is not
+recorded as proof of historical inactivity. Successful resumption clears only
+the gate and preserves the retired Intent and audit as outcome unknown; the next
+accepted Intent must use a greater identity.
 
 Command publisher reconnect and observation subscription run independently.
 Both use bounded retry/backoff. Reconnect keeps the same unresolved operation
@@ -148,6 +218,14 @@ a real new payload restores it. This distinction was required by a live Hotel
 case where DDS graph discovery succeeded but a newly created RustDDS reader
 received no data.
 
+The observation channel is bounded. A full queue sets a dedicated fail-closed
+signal rather than blocking silently: queued evidence is discarded,
+Operational state is invalidated, and the gateway remains degraded until a
+fresh compatible payload is ingested. Observation enqueue and command admission
+share one narrow local critical section so a newly detected overload cannot be
+crossed by a concurrent publish. Ingress processing is also capped per main-loop
+iteration to avoid starving observations.
+
 ## Deterministic and external evidence
 
 Focused unit and independent-child-process tests cover caller/grant/floor/
@@ -157,6 +235,14 @@ restart recovery with one captured backend send. The child process is killed
 after a possible send; the next process restores `IntentId(1)`, replies
 `recovery_required`, consumes correlated canonical observations, clears the
 record, retains the watermark, and leaves the send log at exactly one entry.
+
+M7.1b regressions additionally cover distinct recovery permission, wrong
+Principal/UID, authorized inspection, outcome-unknown retirement, grant fencing,
+restart-stable `ResumptionRequired`, stale/transport/holder/overload resumption
+blocks, explicit residual-uncertainty acceptance, no old resend, monotonic next
+Intent, configuration contradiction, local control-domain exclusion through
+different paths, crash-consistent retirement/resumption windows, and 80 audit
+actions retaining only the newest 32 records.
 
 The external proof used the official Open-RMF Hotel simulation image pinned at
 `sha256:601a6bb7c04d559fb9ec654d9b7a41650918990e35712036d836f072a6430db5`
@@ -182,13 +268,15 @@ repeated first-payload generation timeouts; unpausing it caused a later
 generation to ingest Lift1 without changing the source lifetime. An unconfigured
 Lift2 continued to be isolated and produced only one diagnostic per process.
 
-A deliberately late restart supplied an important negative result: Hotel had
+A deliberately late M7.1a restart supplied an important negative result: Hotel had
 already cleared the holder and reached the target before the new subscriber
 observed progress. A target-floor snapshot alone was insufficient, so the
 gateway correctly retained `RecoveryRequired` indefinitely instead of guessing
 completion or resending. This is an evidence limit, not a successful recovery
 claim. A backend with no replayable correlation may require an explicit future
-recovery decision, but that policy is not authorized here.
+recovery decision. M7.1b implements that policy without changing the negative
+result. Its required Hotel recovery/retirement/resumption rerun has not yet been
+performed at this document state.
 
 The proof used only software processes and the official simulator. It accessed
 no passenger elevator, real controller, CAN/CANopen interface, OEM endpoint,
@@ -197,16 +285,15 @@ certification claim.
 
 ## Remaining review boundary
 
-M7.1a deliberately leaves these questions to HUMAN review or a later bounded
-slice:
+After the M7.1b official-Hotel rerun and completion audit, the hard stop is a
+HUMAN HIL/bench-controller environment decision. Remaining items include:
 
 - operational packaging, service supervision, filesystem ownership, and
   deployment hardening;
-- an approved explicit retirement/operator-recovery path when RMF correlation
-  is no longer observable;
 - HIL/bench-controller evidence and a second concrete backend;
 - public control clients, withdrawal, multiple controlled cars/processes,
   cross-host authority coverage, and real credentials;
 - any passenger or real-controller write authorization.
 
-No later item is implied by completion of this software/simulation slice.
+No HIL, real-controller, passenger or later item is implied by completion of
+this software/simulation slice.
