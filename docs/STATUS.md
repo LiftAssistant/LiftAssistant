@@ -69,6 +69,9 @@ Model/Core/Engine dependency boundaries, bounded queues/state, private ingress,
 read-only public surfaces and secret patterns were re-audited. A final resource
 review replaced an unbounded historical set of unknown RMF names with one
 process-bounded diagnostic latch. No subsequent M7 slice is READY.
+Hosted [CI run 44699464154](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44699464154)
+passed Stable format/Clippy/test and the Rust 1.85 workspace check on the M7
+implementation and documentation commit.
 
 M6C.0, M6C.1a, M6C.1b and M6C.2 are HUMAN-ACCEPTED. M6C.1b implements the
 [frozen internal lifecycle and recovery contract](M6C_DISPATCH_OWNERSHIP.md#m6c1b-external-dispatch-lifecycle-and-recovery).
