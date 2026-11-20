@@ -26,6 +26,9 @@ scenarios. Core/model/Engine dependency boundaries and bounded histories were
 re-audited. The private M6B.3 and M6C.2 Evidence v0 bundles were retained outside
 Git with verified SHA-256 manifests and 0700/0600 permissions; secret-pattern
 scans passed. No live external validation was re-run in this closure pass.
+Hosted [CI run 44667635143](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44667635143)
+passed Stable format/Clippy/test and Rust 1.85 on the audit implementation and
+documentation commit.
 
 M6C.0, M6C.1a, M6C.1b and M6C.2 are HUMAN-ACCEPTED. M6C.1b implements the
 [frozen internal lifecycle and recovery contract](M6C_DISPATCH_OWNERSHIP.md#m6c1b-external-dispatch-lifecycle-and-recovery).

@@ -203,6 +203,9 @@ automatic failover and certification claims remain out of scope.
 - All four existing non-live Headless scenarios: PASS.
 - Dependency and resource-bound scans: PASS; no Cargo dependency changed.
 - Private evidence checksum, permission and credential-pattern checks: PASS.
+- Hosted [CI run 44667635143](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44667635143):
+  PASS for Stable format/Clippy/test and Rust 1.85 workspace check on the audit
+  implementation and documentation commit.
 
 No live Open-RMF, KONE, real CAN, controller or equipment run was repeated in
 this closure pass. The accepted external evidence retains its original scope.
