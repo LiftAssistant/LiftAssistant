@@ -83,6 +83,19 @@ impl IncidentRecorder {
         });
     }
 
+    pub(super) fn record_car_invalidation(
+        &mut self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+        car: &CarId,
+    ) {
+        self.push(CapsuleAction::InvalidateCar {
+            source: source.as_str().to_owned(),
+            session: session.as_str().to_owned(),
+            car: car.as_str().to_owned(),
+        });
+    }
+
     pub(super) fn capture(
         &self,
         topology: &BuildingTopology,
@@ -132,9 +145,8 @@ impl IncidentRecorder {
     }
 
     fn push(&mut self, action: CapsuleAction) {
-        if self.actions.len() == self.capacity
-            && let Some(evicted) = self.actions.pop_front()
-        {
+        if self.actions.len() == self.capacity {
+            let evicted = self.actions.pop_front().expect("full action window");
             self.baseline.apply_evicted(&self.bindings, evicted);
         }
         self.actions.push_back(action);
@@ -155,6 +167,7 @@ struct BaselineSource {
     invalidated_at: Option<Option<(u64, String)>>,
     last_sequence: Option<(u64, String)>,
     cars: BTreeMap<String, BaselineCar>,
+    revoked_cars: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -320,6 +333,7 @@ impl CapsuleBaseline {
                         invalidated_at: None,
                         last_sequence: None,
                         cars: BTreeMap::new(),
+                        revoked_cars: BTreeSet::new(),
                     },
                 );
             }
@@ -333,10 +347,30 @@ impl CapsuleBaseline {
                 }
                 source_state.invalidated_at = Some(source_state.last_sequence.clone());
                 source_state.cars.clear();
+                source_state.revoked_cars.clear();
                 if has_operational {
                     self.saw_operational_activity = true;
                     self.degrading = None;
                 }
+            }
+            CapsuleAction::InvalidateCar {
+                source,
+                session,
+                car,
+            } => {
+                let Some(state) = self
+                    .sources
+                    .get_mut(&source)
+                    .filter(|state| state.session == session)
+                else {
+                    return;
+                };
+                state.cars.remove(&car);
+                if is_operational_binding(bindings, &source, &car) {
+                    self.saw_operational_activity = true;
+                    self.degrading = None;
+                }
+                state.revoked_cars.insert(car);
             }
             CapsuleAction::Observation { update } => {
                 let Some(binding) = bindings.get(&(update.source.clone(), update.car.clone()))
@@ -365,8 +399,10 @@ impl CapsuleBaseline {
                     }
                     return;
                 }
-                if let Some((previous_seq, watermark_car)) = &source_state.last_sequence
-                    && update.sequence <= *previous_seq
+                if let Some((previous_seq, watermark_car)) = source_state
+                    .last_sequence
+                    .as_ref()
+                    .filter(|(previous, _)| update.sequence <= *previous)
                 {
                     if is_operational {
                         self.degrading = Some(BaselineDegradation {
@@ -383,6 +419,7 @@ impl CapsuleBaseline {
                     return;
                 }
                 source_state.last_sequence = Some((update.sequence, update.car.clone()));
+                source_state.revoked_cars.remove(&update.car);
                 source_state
                     .cars
                     .entry(update.car.clone())
@@ -414,7 +451,8 @@ impl CapsuleBaseline {
         for action in window {
             match action {
                 CapsuleAction::BeginSourceSession { source, .. }
-                | CapsuleAction::InvalidateSource { source, .. } => {
+                | CapsuleAction::InvalidateSource { source, .. }
+                | CapsuleAction::InvalidateCar { source, .. } => {
                     referenced_sources.insert(source.as_str());
                 }
                 CapsuleAction::Observation { update } => {
@@ -435,21 +473,12 @@ impl CapsuleBaseline {
                 is_operational_binding(bindings, source, car)
                     || trigger_car == Some((source.as_str(), car.as_str()))
             });
-            if referenced_sources.contains(source.as_str())
-                && let Some((max_seq, max_car)) = &state.last_sequence
-            {
-                let invalidated_watermark = state
-                    .invalidated_at
-                    .as_ref()
-                    .and_then(|watermark| watermark.as_ref())
-                    .map(|(seq, _)| *seq);
-                let cars_max = state.cars.values().map(|car| car.latest_sequence).max();
-                if cars_max != Some(*max_seq) && invalidated_watermark != Some(*max_seq) {
-                    state
-                        .cars
-                        .entry(max_car.clone())
-                        .or_insert_with(|| BaselineCar::empty(*max_seq));
-                }
+            state.revoked_cars.retain(|car| {
+                is_operational_binding(bindings, source, car)
+                    || trigger_car == Some((source.as_str(), car.as_str()))
+            });
+            if !referenced_sources.contains(source.as_str()) {
+                state.last_sequence = None;
             }
         }
     }
@@ -476,15 +505,20 @@ impl CapsuleBaseline {
                 || state
                     .cars
                     .keys()
+                    .chain(&state.revoked_cars)
                     .any(|car| is_operational_binding(bindings, source, car))
         });
         let mut need_prior_synchronizing =
             self.saw_operational_activity && !active_emits_operational;
 
         for (source, state) in &self.sources {
-            if need_prior_synchronizing
-                && let Some(prior_session) = &state.prior_session
-                && let Some(op_car) = first_operational_car(bindings, source)
+            if let Some((prior_session, op_car)) = state
+                .prior_session
+                .as_ref()
+                .filter(|_| need_prior_synchronizing)
+                .and_then(|session| {
+                    first_operational_car(bindings, source).map(|car| (session, car))
+                })
             {
                 preamble.push(CapsuleAction::BeginSourceSession {
                     source: source.clone(),
@@ -556,13 +590,53 @@ fn emit_active_source_actions(
             session: state.session.clone(),
         });
     }
-    let mut cars: Vec<_> = state.cars.iter().collect();
-    cars.sort_by_key(|(_, car_state)| car_state.latest_sequence);
-    for (car, car_state) in cars {
-        preamble.push(CapsuleAction::Observation {
-            update: car_state.to_observation_update(source, &state.session, car),
-        });
+    preamble.extend(
+        current_car_seeds(source, state)
+            .into_iter()
+            .map(|update| CapsuleAction::Observation { update }),
+    );
+    emit_car_revocations(preamble, source, state, |_| true);
+}
+
+fn current_car_seeds(source: &str, state: &BaselineSource) -> Vec<CapsuleObservationUpdate> {
+    let mut seeds: Vec<_> = state
+        .cars
+        .iter()
+        .map(|(car, state_of_car)| state_of_car.to_observation_update(source, &state.session, car))
+        .collect();
+    if let Some((seq, car)) = &state.last_sequence {
+        let source_revocation_sequence = state
+            .invalidated_at
+            .as_ref()
+            .and_then(|at| at.as_ref())
+            .map(|(seq, _)| *seq);
+        if source_revocation_sequence != Some(*seq)
+            && !seeds.iter().any(|update| update.sequence == *seq)
+        {
+            seeds.push(BaselineCar::empty(*seq).to_observation_update(source, &state.session, car));
+        }
     }
+    seeds.sort_by_key(|update| update.sequence);
+    seeds
+}
+
+fn emit_car_revocations(
+    preamble: &mut Vec<CapsuleAction>,
+    source: &str,
+    state: &BaselineSource,
+    include: impl Fn(&str) -> bool,
+) {
+    preamble.extend(
+        state
+            .revoked_cars
+            .iter()
+            .filter(|car| include(car))
+            .map(|car| CapsuleAction::InvalidateCar {
+                source: source.to_owned(),
+                session: state.session.clone(),
+                car: car.clone(),
+            }),
+    );
 }
 
 fn emit_degraded_source_actions(
@@ -637,8 +711,7 @@ fn emit_degraded_source_actions(
             session: state.session.clone(),
         });
     }
-    let mut cars: Vec<_> = state.cars.iter().collect();
-    cars.sort_by_key(|(_, car_state)| car_state.latest_sequence);
+    let seeds = current_car_seeds(source, state);
 
     match &deg.kind {
         BaselineDegradationKind::NonIncreasingSequence {
@@ -647,15 +720,11 @@ fn emit_degraded_source_actions(
             car,
             received,
         } => {
-            for (bound_car, car_state) in cars
-                .iter()
-                .copied()
-                .filter(|(_, car_state)| car_state.latest_sequence <= *previous)
-            {
+            for update in seeds.iter().filter(|update| update.sequence <= *previous) {
                 preamble.push(CapsuleAction::Observation {
-                    update: car_state.to_observation_update(source, &state.session, bound_car),
+                    update: update.clone(),
                 });
-                emitted_watermark = Some(car_state.latest_sequence);
+                emitted_watermark = Some(update.sequence);
             }
             if emitted_watermark != Some(*previous) {
                 preamble.push(CapsuleAction::Observation {
@@ -666,6 +735,12 @@ fn emit_degraded_source_actions(
                     ),
                 });
             }
+            let seeded_after_anomaly = |car: &str| {
+                seeds
+                    .iter()
+                    .any(|update| update.car == car && update.sequence > *previous)
+            };
+            emit_car_revocations(preamble, source, state, |car| !seeded_after_anomaly(car));
             preamble.push(CapsuleAction::Observation {
                 update: BaselineCar::empty(*received).to_observation_update(
                     source,
@@ -673,25 +748,24 @@ fn emit_degraded_source_actions(
                     car,
                 ),
             });
-            for (bound_car, car_state) in cars
-                .into_iter()
-                .filter(|(_, car_state)| car_state.latest_sequence > *previous)
-            {
+            for update in seeds.iter().filter(|update| update.sequence > *previous) {
                 preamble.push(CapsuleAction::Observation {
-                    update: car_state.to_observation_update(source, &state.session, bound_car),
+                    update: update.clone(),
                 });
             }
+            emit_car_revocations(preamble, source, state, seeded_after_anomaly);
         }
         BaselineDegradationKind::InactiveSession {
             received_session,
             car,
             sequence,
         } => {
-            for (bound_car, car_state) in cars {
-                preamble.push(CapsuleAction::Observation {
-                    update: car_state.to_observation_update(source, &state.session, bound_car),
-                });
-            }
+            preamble.extend(
+                seeds
+                    .into_iter()
+                    .map(|update| CapsuleAction::Observation { update }),
+            );
+            emit_car_revocations(preamble, source, state, |_| true);
             preamble.push(CapsuleAction::Observation {
                 update: BaselineCar::empty(*sequence).to_observation_update(
                     source,
@@ -802,6 +876,20 @@ impl IncidentCapsule {
                     )
                     .map_err(|error| format!("capsule invalidation replay failed: {error:?}"))?;
                 }
+                CapsuleAction::InvalidateCar {
+                    source,
+                    session,
+                    car,
+                } => {
+                    host.revoke_car_observations(
+                        &ObservationSourceId::new(source),
+                        &ObservationSessionId::new(session),
+                        &CarId::new(car),
+                    )
+                    .map_err(|error| {
+                        format!("capsule car invalidation replay failed: {error:?}")
+                    })?;
+                }
             }
         }
 
@@ -862,7 +950,10 @@ impl IncidentCapsule {
         for action in &self.actions {
             match action {
                 CapsuleAction::BeginSourceSession { source, session }
-                | CapsuleAction::InvalidateSource { source, session } => {
+                | CapsuleAction::InvalidateSource { source, session }
+                | CapsuleAction::InvalidateCar {
+                    source, session, ..
+                } => {
                     sessions_by_source
                         .entry(source.clone())
                         .or_default()
@@ -952,9 +1043,14 @@ impl IncidentCapsule {
                 self.context.producer
             ));
         }
-        if let Some(sanitization) = &self.context.sanitization
-            && (sanitization.profile != "deterministic-pseudonymization/1"
-                || !sanitization.manual_review_required)
+        if self
+            .context
+            .sanitization
+            .as_ref()
+            .is_some_and(|sanitization| {
+                sanitization.profile != "deterministic-pseudonymization/1"
+                    || !sanitization.manual_review_required
+            })
         {
             return Err("incident capsule has unsupported sanitization metadata".into());
         }
@@ -996,11 +1092,17 @@ impl IncidentCapsule {
             bound_sources.insert(binding.source.as_str());
         }
         let mut active_sessions = BTreeMap::<&str, &str>::new();
+        let mut incarnations = BTreeSet::new();
         for action in &self.actions {
             match action {
                 CapsuleAction::BeginSourceSession { source, session } => {
                     if !bound_sources.contains(source.as_str()) {
                         return Err(format!("incident capsule starts unbound source {source:?}"));
+                    }
+                    if !incarnations.insert((source.as_str(), session.as_str())) {
+                        return Err(format!(
+                            "incident capsule reuses source incarnation {session:?} for {source:?}"
+                        ));
                     }
                     active_sessions.insert(source, session);
                 }
@@ -1018,11 +1120,21 @@ impl IncidentCapsule {
                         ));
                     }
                 }
-                CapsuleAction::InvalidateSource { source, session } => {
+                CapsuleAction::InvalidateSource { source, session }
+                | CapsuleAction::InvalidateCar {
+                    source, session, ..
+                } => {
                     if active_sessions.get(source.as_str()).copied() != Some(session.as_str()) {
                         return Err(format!(
                             "incident capsule invalidation for source {source:?} does not target its explicitly active session"
                         ));
+                    }
+                    if let CapsuleAction::InvalidateCar { car, .. } = action {
+                        if !bindings.contains(&(source.as_str(), car.as_str())) {
+                            return Err(format!(
+                                "incident capsule invalidates an unbound car {car:?} on source {source:?}"
+                            ));
+                        }
                     }
                 }
             }
@@ -1072,6 +1184,16 @@ fn sanitize_action(
     floors: &BTreeMap<i16, i16>,
 ) -> Result<(), String> {
     match action {
+        CapsuleAction::InvalidateCar {
+            source,
+            session,
+            car,
+        } => {
+            let sanitized_session = mapped_session(sessions, source, session)?;
+            *source = mapped_identity(sources, source, "source")?;
+            *session = sanitized_session;
+            *car = mapped_identity(cars, car, "car")?;
+        }
         CapsuleAction::BeginSourceSession { source, session }
         | CapsuleAction::InvalidateSource { source, session } => {
             let sanitized_source = mapped_identity(sources, source, "source")?;
@@ -1204,9 +1326,22 @@ impl From<CapsuleBindingRole> for ObservationBindingRole {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 enum CapsuleAction {
-    BeginSourceSession { source: String, session: String },
-    Observation { update: CapsuleObservationUpdate },
-    InvalidateSource { source: String, session: String },
+    BeginSourceSession {
+        source: String,
+        session: String,
+    },
+    Observation {
+        update: CapsuleObservationUpdate,
+    },
+    InvalidateSource {
+        source: String,
+        session: String,
+    },
+    InvalidateCar {
+        source: String,
+        session: String,
+        car: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1717,5 +1852,99 @@ impl SanitizationReport {
             "sanitization: PASS profile=deterministic-pseudonymization/1 sources={} sessions={} cars={} floors={} manual_review=REQUIRED",
             self.source_count, self.session_count, self.car_count, self.floor_count
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compaction_and_sanitization_keep_car_revocation_and_source_watermark() {
+        let mut host = ReadOnlyHost::new(BuildingTopology::reference_eight_floor());
+        host.incident_recorder = IncidentRecorder::new(2);
+        let source = ObservationSourceId::new("fixture/multiplexed");
+        let session = ObservationSessionId::new("fixture-session");
+        let a = CarId::new("A");
+        let b = CarId::new("B");
+        for car in [&a, &b] {
+            host.bind_observation(
+                source.clone(),
+                car.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .unwrap();
+        }
+        host.begin_source_session(source.clone(), session.clone())
+            .unwrap();
+        let update = |car: &CarId, sequence| {
+            CarObservationUpdate::from_state(
+                ObservationProvenance {
+                    source: source.clone(),
+                    session: session.clone(),
+                    sequence: ObservationSequence::new(sequence),
+                },
+                &liftassistant_model::CarState::new(car.as_str(), Floor::new(1)),
+            )
+        };
+        host.ingest_observation(update(&b, 1));
+        host.ingest_observation(update(&a, 4));
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+        let retired = ObservationSessionId::new("previous");
+        assert!(host.revoke_car_observations(&source, &retired, &b).is_err());
+        assert!(
+            host.revoke_car_observations(&source, &session, &CarId::new("unbound"))
+                .is_err()
+        );
+        host.revoke_car_observations(&source, &session, &a).unwrap();
+        assert!(host.engine.evidence(&source, &a).is_none());
+        assert!(host.engine.operational_car_state(&b).is_some());
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        // The revocation has to survive eviction even though the revoked car supplied
+        // the previous source-global sequence watermark.
+        for _ in 0..3 {
+            host.ingest_observation(update(&b, 2));
+        }
+        assert!(host.engine.evidence(&source, &a).is_none());
+        let anomaly = DiagnosticAnomaly::ObservationSequenceNotIncreasing {
+            source: source.clone(),
+            session: session.clone(),
+            previous: ObservationSequence::new(4),
+            received: ObservationSequence::new(2),
+        };
+        let trigger = CapsuleTrigger::observation_sequence_not_increasing(
+            &b,
+            ObservationBindingRole::Operational,
+            &anomaly,
+        )
+        .unwrap();
+        let capsule = host.capture_incident(trigger);
+        assert!(capsule.to_json().unwrap().contains("invalidate_car"));
+        capsule.replay().unwrap();
+        capsule.sanitize_candidate().unwrap().0.replay().unwrap();
+        host.ingest_observation(update(&a, 5));
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
+    }
+
+    #[test]
+    fn bounded_capsule_rejects_reactivation_of_a_historical_incarnation() {
+        let mut capsule = crate::capture_reference_incident_capsule().unwrap();
+        let first = capsule
+            .actions
+            .iter()
+            .find(|action| matches!(action, CapsuleAction::BeginSourceSession { .. }))
+            .unwrap()
+            .clone();
+        let CapsuleAction::BeginSourceSession { source, .. } = &first else {
+            unreachable!()
+        };
+        assert!(capsule.actions.iter().filter(|action| matches!(action, CapsuleAction::BeginSourceSession { source: other, .. } if other == source)).count() >= 2);
+        capsule.actions.push(first);
+        assert!(
+            capsule
+                .replay()
+                .unwrap_err()
+                .contains("reuses source incarnation")
+        );
     }
 }

@@ -1,12 +1,16 @@
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+mod failure_matrix;
 mod http_api;
 mod incident;
 mod read_api;
+mod rmf_host;
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    env, io,
+    env, fmt,
+    io::{self, Write},
     net::{SocketAddr, TcpListener},
     path::PathBuf,
     process::{Command, ExitCode},
@@ -15,8 +19,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
-    time::Duration,
-    time::SystemTime,
+    time::{Duration, Instant},
 };
 
 use liftassistant_engine::{
@@ -158,6 +161,12 @@ enum HostEvent {
         session: ObservationSessionId,
         invalidated_cars: Vec<CarId>,
     },
+    CarObservationsRevoked {
+        source: ObservationSourceId,
+        session: ObservationSessionId,
+        car: CarId,
+        role: ObservationBindingRole,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -188,6 +197,7 @@ enum HostDiagnosticId {
     TransportFailed,
     SourceSessionActivated,
     SourcePayloadStale,
+    CarObservationsRevoked,
     MappingRejected,
     ObservationIncomplete,
     ObservationUnresolved,
@@ -205,6 +215,7 @@ impl HostDiagnosticId {
             Self::TransportFailed => "transport.receive-failed",
             Self::SourceSessionActivated => "source.session-activated",
             Self::SourcePayloadStale => "source.payload-stale",
+            Self::CarObservationsRevoked => "observation.revoked",
             Self::MappingRejected => "mapping.rejected",
             Self::ObservationIncomplete => "observation.incomplete",
             Self::ObservationUnresolved => "observation.unresolved",
@@ -327,6 +338,21 @@ fn classify_host_event(
             (
                 HostDiagnosticLayer::Source,
                 HostDiagnosticId::SourcePayloadStale,
+            )
+        }
+        HostEvent::CarObservationsRevoked {
+            source,
+            session,
+            car,
+            role,
+        } => {
+            context.source = Some(source.clone());
+            context.session = Some(session.clone());
+            context.car = Some(car.clone());
+            context.role = Some(*role);
+            (
+                HostDiagnosticLayer::Observation,
+                HostDiagnosticId::CarObservationsRevoked,
             )
         }
         HostEvent::MappingRejected {
@@ -636,8 +662,8 @@ impl ReadOnlyHost {
         }
 
         let accepted_availability = observation_availability(&resolution);
-        if let Some(availability) = accepted_availability
-            && let Some(health) = self.source_health.get_mut(&observation_source)
+        if let Some((availability, health)) =
+            accepted_availability.zip(self.source_health.get_mut(&observation_source))
         {
             health.payload = PayloadActivity::Active;
             health.observations.insert(car.clone(), availability);
@@ -763,26 +789,19 @@ impl ReadOnlyHost {
     }
 
     fn note_transport_subscriber_created(&mut self, source: &ObservationSourceId) {
-        let changed = if let Some(health) = self.source_health.get_mut(source) {
-            if health.transport_discovery != TransportDiscoveryState::Unknown {
-                return;
-            }
-            health.transport_discovery = TransportDiscoveryState::SubscriberCreated;
-            let SourceSessionActivity::Active(session) = &health.session else {
-                return self.bump_read_model_revision();
-            };
+        let Some(health) = self.source_health.get_mut(source) else {
+            return;
+        };
+        // Each call denotes a freshly created subscriber, even within the same ingestion lifetime.
+        health.transport_discovery = TransportDiscoveryState::SubscriberCreated;
+        if let SourceSessionActivity::Active(session) = &health.session {
             self.diagnostics
                 .record(HostEvent::TransportSubscriberCreated {
                     source: source.clone(),
                     session: session.clone(),
                 });
-            true
-        } else {
-            false
-        };
-        if changed {
-            self.bump_read_model_revision();
         }
+        self.bump_read_model_revision();
     }
 
     fn note_transport_discovery(&mut self, source: &ObservationSourceId) {
@@ -814,6 +833,11 @@ impl ReadOnlyHost {
         session: ObservationSessionId,
         message: String,
     ) {
+        if let Some(health) = self.source_health.get_mut(&source).filter(|health|
+            matches!(&health.session, SourceSessionActivity::Active(active) if active == &session)
+        ) {
+            health.transport_discovery = TransportDiscoveryState::Unknown;
+        }
         self.diagnostics.record(HostEvent::TransportFailed {
             source,
             session,
@@ -879,6 +903,37 @@ impl ReadOnlyHost {
                 .record(HostEvent::LifecycleChanged(lifecycle));
             self.bump_read_model_revision();
         }
+    }
+
+    fn revoke_car_observations(
+        &mut self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+        car: &CarId,
+    ) -> Result<(), SourceObservationInvalidationError> {
+        let role = self
+            .engine
+            .invalidate_car_observations(source, session, car)?;
+        self.incident_recorder
+            .record_car_invalidation(source, session, car);
+        let health = self
+            .source_health
+            .get_mut(source)
+            .expect("bound car has source health");
+        health
+            .observations
+            .insert(car.clone(), ObservationAvailability::Revoked);
+        self.diagnostics.record(HostEvent::CarObservationsRevoked {
+            source: source.clone(),
+            session: session.clone(),
+            car: car.clone(),
+            role,
+        });
+        if role == ObservationBindingRole::Operational {
+            self.transition(HostLifecycle::Synchronizing);
+        }
+        self.bump_read_model_revision();
+        Ok(())
     }
 
     fn capture_incident(&self, trigger: CapsuleTrigger) -> IncidentCapsule {
@@ -969,11 +1024,13 @@ impl ExperimentalApiServer {
             .local_addr()
             .map_err(|error| format!("failed to inspect experimental API listener: {error}"))?;
         if !local_addr.ip().is_loopback() {
-            eprintln!(
+            report_host_warning(format_args!(
                 "warning: experimental unauthenticated read-only API is exposed on {local_addr}"
-            );
+            ));
         }
-        println!("experimental read-only API listening on http://{local_addr}");
+        report_host_status(format_args!(
+            "experimental read-only API listening on http://{local_addr}"
+        ));
         let publisher = http_api::ReadModelPublisher::new(host.read_model());
         let server_publisher = publisher.clone();
         let server_shutdown = Arc::clone(&shutdown);
@@ -981,7 +1038,9 @@ impl ExperimentalApiServer {
             .name("liftassistant-experimental-api".into())
             .spawn(move || {
                 if let Err(error) = http_api::serve(listener, server_publisher, server_shutdown) {
-                    eprintln!("warning: experimental read-only API stopped: {error}");
+                    report_host_warning(format_args!(
+                        "warning: experimental read-only API stopped: {error}"
+                    ));
                 }
             })
             .map_err(|error| format!("failed to start experimental API thread: {error}"))?;
@@ -1002,7 +1061,9 @@ impl Drop for ExperimentalApiServer {
         self.shutdown.store(true, Ordering::Relaxed);
         if let Some(thread) = self.thread.take() {
             if thread.join().is_err() {
-                eprintln!("warning: experimental read-only API thread panicked");
+                report_host_warning(format_args!(
+                    "warning: experimental read-only API thread panicked"
+                ));
             }
         }
     }
@@ -1365,8 +1426,8 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
         .map(|listen| ExperimentalApiServer::start(listen, &host, Arc::clone(&shutdown)))
         .transpose()?;
 
-    println!("LiftAssistant RMF read-only host starting");
-    println!(
+    report_host_status(format_args!("LiftAssistant RMF read-only host starting"));
+    report_host_status(format_args!(
         "source={} session={} domain={} freshness_ms={} bindings={} floors={}",
         config.source,
         session.as_str(),
@@ -1374,12 +1435,12 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
         config.max_payload_silence.as_millis(),
         config.bindings.len(),
         topology.served_floors().len()
-    );
-    println!(
+    ));
+    report_host_status(format_args!(
         "readiness={:?} lifecycle={:?}",
         host.readiness(),
         host.lifecycle()
-    );
+    ));
     let mut reported_lifecycle = host.lifecycle().clone();
     let mut reported_diagnostic_sequence = 0;
     let mut incident_capsule_out = config.incident_capsule_out.clone();
@@ -1411,6 +1472,7 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
             }
         };
         host.note_transport_subscriber_created(adapter.source());
+        let mut car_freshness = rmf_host::RmfCarFreshness::new(freshness);
         publish_read_model(&api_server, &host);
         emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
         let mut ingestion_error = None;
@@ -1419,50 +1481,28 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
             SHUTDOWN_POLL_INTERVAL,
             || shutdown.load(Ordering::Relaxed),
             |payload| {
-                host.note_transport_discovery(adapter.source());
-                let native_entity = payload.state.lift_name.clone();
-                let mapped = match adapter.map(&payload.state) {
-                    Ok(mapped) => mapped,
-                    Err(error) => {
-                        host.record_mapping_rejection(
-                            adapter.source().clone(),
-                            adapter.session().clone(),
-                            native_entity,
-                            error.to_string(),
-                        );
-                        publish_read_model(&api_server, &host);
-                        emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
-                        ingestion_error = Some(error.to_string());
-                        return RmfReceiveControl::Stop;
-                    }
-                };
-                if mapped.topology != topology {
-                    let error = format!(
-                        "source topology {:?} differs from configured host topology {:?}",
-                        mapped.topology.served_floors(),
-                        topology.served_floors()
-                    );
-                    host.record_mapping_rejection(
-                        adapter.source().clone(),
-                        adapter.session().clone(),
-                        native_entity,
-                        error.clone(),
-                    );
+                let before = host.read_model_revision;
+                let result = car_freshness.supervise(
+                    &mut host,
+                    &mut adapter,
+                    Instant::now(),
+                    payload.as_ref().map(|payload| &payload.state),
+                );
+                if host.read_model_revision != before {
                     publish_read_model(&api_server, &host);
                     emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
+                }
+                if let Err(error) = result {
                     ingestion_error = Some(error);
                     return RmfReceiveControl::Stop;
                 }
-                host.ingest_observation(mapped.update);
-                publish_read_model(&api_server, &host);
-                emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 if host.lifecycle() != &reported_lifecycle {
                     reported_lifecycle = host.lifecycle().clone();
-                    println!(
+                    report_host_status(format_args!(
                         "readiness={:?} lifecycle={:?}",
                         host.readiness(),
                         host.lifecycle()
-                    );
+                    ));
                 }
                 RmfReceiveControl::Continue
             },
@@ -1488,17 +1528,21 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     &mut incident_capsule_out,
                     &config.source,
                     &session,
-                )?;
+                    io::stderr().lock(),
+                );
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
-                println!(
+                report_host_status(format_args!(
                     "readiness={:?} lifecycle={:?} reason=transport-error",
                     host.readiness(),
                     host.lifecycle()
-                );
+                ));
                 return Err(format!("RMF read-only subscription failed: {error}"));
             }
         };
         match outcome {
+            RmfReceiveOutcome::AwaitingPayloadTimeout { .. } => {
+                unreachable!("read-only host does not configure a subscriber-generation timeout")
+            }
             RmfReceiveOutcome::ShutdownRequested => break,
             RmfReceiveOutcome::PayloadStale { max_silence } => {
                 host.mark_source_payload_stale(config.source.clone(), session.clone())
@@ -1511,15 +1555,16 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     &mut incident_capsule_out,
                     &config.source,
                     &session,
-                )?;
+                    io::stderr().lock(),
+                );
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
                 reported_lifecycle = host.lifecycle().clone();
-                println!(
+                report_host_status(format_args!(
                     "readiness={:?} lifecycle={:?} reason=payload-stale silence_ms={}",
                     host.readiness(),
                     host.lifecycle(),
                     max_silence.as_millis()
-                );
+                ));
             }
             RmfReceiveOutcome::HandlerStopped => {
                 let error = ingestion_error
@@ -1536,19 +1581,22 @@ fn run_rmf_read_only_host(config: RmfHostConfig, shutdown: Arc<AtomicBool>) -> R
                     &mut incident_capsule_out,
                     &config.source,
                     &session,
-                )?;
+                    io::stderr().lock(),
+                );
                 emit_new_host_diagnostics(&host, &mut reported_diagnostic_sequence);
-                println!(
+                report_host_status(format_args!(
                     "readiness={:?} lifecycle={:?} reason=ingestion-error",
                     host.readiness(),
                     host.lifecycle()
-                );
+                ));
                 return Err(error);
             }
         }
     }
 
-    println!("LiftAssistant RMF read-only host stopped gracefully");
+    report_host_status(format_args!(
+        "LiftAssistant RMF read-only host stopped gracefully"
+    ));
     Ok(())
 }
 
@@ -1559,13 +1607,12 @@ fn publish_read_model(api_server: &Option<ExperimentalApiServer>, host: &ReadOnl
 }
 
 fn new_host_source_session() -> Result<ObservationSessionId, String> {
-    let since_epoch = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map_err(|error| format!("host clock is before UNIX epoch: {error}"))?;
+    let mut entropy = [0_u8; 16];
+    getrandom::fill(&mut entropy)
+        .map_err(|error| format!("failed to generate RMF source incarnation: {error}"))?;
     Ok(ObservationSessionId::new(format!(
-        "rmf-host-{}-{}",
-        std::process::id(),
-        since_epoch.as_nanos()
+        "{:032x}",
+        u128::from_be_bytes(entropy)
     )))
 }
 
@@ -1574,15 +1621,25 @@ fn write_source_stale_capsule(
     output: &mut Option<PathBuf>,
     source: &ObservationSourceId,
     session: &ObservationSessionId,
-) -> Result<(), String> {
-    let Some(path) = output.as_ref() else {
-        return Ok(());
+    mut warnings: impl io::Write,
+) {
+    let Some(path) = output.take() else {
+        return;
     };
-    host.capture_incident(CapsuleTrigger::source_payload_stale(source, session))
-        .write_new(path)?;
-    println!("incident capsule captured path={path:?} trigger=source.payload-stale");
-    *output = None;
-    Ok(())
+    match host
+        .capture_incident(CapsuleTrigger::source_payload_stale(source, session))
+        .write_new(&path)
+    {
+        Ok(()) => report_host_status(format_args!(
+            "incident capsule captured path={path:?} trigger=source.payload-stale"
+        )),
+        Err(error) => {
+            let _ = writeln!(
+                warnings,
+                "warning: optional incident capsule for {source}/{session} at {path:?} failed: {error}"
+            );
+        }
+    }
 }
 
 fn emit_new_host_diagnostics(host: &ReadOnlyHost, reported_sequence: &mut u64) {
@@ -1592,9 +1649,23 @@ fn emit_new_host_diagnostics(host: &ReadOnlyHost, reported_sequence: &mut u64) {
         .entries()
         .filter(|entry| entry.sequence > after_sequence)
     {
-        println!("{}", render_host_diagnostic(entry));
+        report_host_status(format_args!("{}", render_host_diagnostic(entry)));
         *reported_sequence = entry.sequence;
     }
+}
+
+fn write_host_line(mut output: impl Write, line: fmt::Arguments<'_>) {
+    // Logging is a side effect of observation. A closed diagnostic pipe must not
+    // unwind the Host or interrupt API shutdown.
+    let _ = writeln!(output, "{line}");
+}
+
+fn report_host_status(line: fmt::Arguments<'_>) {
+    write_host_line(io::stdout().lock(), line);
+}
+
+fn report_host_warning(line: fmt::Arguments<'_>) {
+    write_host_line(io::stderr().lock(), line);
 }
 
 fn render_host_diagnostic(entry: &HostDiagnosticEntry) -> String {
@@ -2325,12 +2396,10 @@ fn receive_live_rmf_round(
                     return RmfReceiveControl::Stop;
                 }
             };
-            if mapped.topology != expected_topology {
-                mapping_error = Some(format!(
-                    "live RMF topology {:?} differs from configured Engine topology {:?}",
-                    mapped.topology.served_floors(),
-                    expected_topology.served_floors()
-                ));
+            if let Err(error) =
+                rmf_host::validate_available_floors(&expected_topology, &mapped.topology)
+            {
+                mapping_error = Some(error);
                 return RmfReceiveControl::Stop;
             }
             source_times.push(payload.source_time_nanos);
@@ -2553,6 +2622,20 @@ fn render_report(run: &ProofRun) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closed_host_log_sink_is_nonfatal() {
+        struct ClosedPipe;
+        impl Write for ClosedPipe {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+        }
+        write_host_line(ClosedPipe, format_args!("diagnostic"));
+    }
     use liftassistant_sim::{
         BacnetDoorStatus, BacnetLiftCarDirection, BacnetLiftCarMode, BacnetMappingError,
         RecordedBacnetLiftProperties, map_bacnet_lift_properties,
@@ -2909,8 +2992,8 @@ mod tests {
             &mut output,
             &reference_source_id(),
             &reference_session_id(),
-        )
-        .expect("configured incident path captures the first stale trigger");
+            io::sink(),
+        );
         assert_eq!(output, None);
 
         let report = IncidentCapsule::read(&path)
@@ -2919,6 +3002,45 @@ mod tests {
         let cleanup = std::fs::remove_file(&path);
         cleanup.expect("fixture capsule is removed");
         assert_eq!(report.trigger_id, "source.payload-stale");
+    }
+
+    #[test]
+    fn existing_capsule_path_warns_once_and_does_not_stop_read_only_recovery() {
+        let mut host = reference_host();
+        let source = reference_source_id();
+        let session = reference_session_id();
+        let path = env::temp_dir().join(format!(
+            "liftassistant-existing-{}.json",
+            new_host_source_session().unwrap()
+        ));
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        host.ingest_observation(
+            complete_observation(source.clone(), session.clone(), 1, Floor::new(4)).into(),
+        );
+        host.mark_source_payload_stale(source.clone(), session.clone())
+            .unwrap();
+        let mut output = Some(path.clone());
+        let mut warnings = Vec::new();
+        write_source_stale_capsule(&host, &mut output, &source, &session, &mut warnings);
+        let existing = std::fs::metadata(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            existing.len(),
+            0,
+            "create-new never replaces the existing file"
+        );
+        assert_eq!(host.readiness(), Readiness::NotReady);
+        assert!(output.is_none());
+        let warning_count = warnings.len();
+        assert!(String::from_utf8_lossy(&warnings).contains("warning: optional incident capsule"));
+        write_source_stale_capsule(&host, &mut output, &source, &session, &mut warnings);
+        assert_eq!(warnings.len(), warning_count);
+        host.ingest_observation(complete_observation(source, session, 2, Floor::new(4)).into());
+        assert_eq!(host.readiness(), Readiness::ReadOnly);
     }
 
     #[test]
@@ -4039,7 +4161,6 @@ mod tests {
         host.note_transport_subscriber_created(&reference_source_id());
         host.note_transport_discovery(&reference_source_id());
         let discovered_revision = host.read_model().revision();
-        host.note_transport_subscriber_created(&reference_source_id());
 
         let health = host
             .source_health(&reference_source_id())
@@ -4055,7 +4176,15 @@ mod tests {
         );
         assert_eq!(host.readiness(), Readiness::NotReady);
         assert!(host.engine.car_states().is_empty());
-        assert_eq!(host.read_model().revision(), discovered_revision);
+        host.note_transport_subscriber_created(&reference_source_id());
+        assert!(host.read_model().revision() > discovered_revision);
+        assert_eq!(
+            host.source_health(&reference_source_id())
+                .unwrap()
+                .transport_discovery,
+            TransportDiscoveryState::SubscriberCreated
+        );
+        assert_eq!(host.readiness(), Readiness::NotReady);
     }
 
     #[test]

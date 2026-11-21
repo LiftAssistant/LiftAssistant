@@ -1,5 +1,57 @@
 # Architecture
 
+## M6A virtual intent boundary
+
+The controlled laboratory composes high-level `ServeFloor` and `ParkAt` with deterministic authority and a virtual lower controller. A hall call retains its `CallId` across dispatch decisions. Each distinct lower operation gets an `IntentId` from one deterministic issuer in the virtual orchestration lifetime. The caller-held request retains its original operation and call binding, so changed payloads still conflict after history eviction. Per-car admission watermarks prevent old IDs from executing again and let cars advance independently. Active calls and unresolved intents have separate registries from bounded terminal history. A retry of an evicted unchanged request returns a retired identity without resending.
+
+An explicit grant authorizes one internal Principal for a controlled car. The grant identity is independent of controller identity and vendor holder/session. Write readiness checks that grant, configured controller binding and availability, current Operational evidence, explicit operation and floor coverage, and incompatible outstanding work. Read-only readiness supplies no write permission. Stale grants, conflict and unknown delivery fail closed. Engine and Core act on explicit inputs and use no wall clock.
+
+Controller receipt is correlated by configured controller and operation identity. Only canonical Operational observations can satisfy an intent. The virtual predicate needs new position and motion evidence of a stopped car at the exact target after progress. For a car already at the target, a new closed-to-open door observation can establish that the queued operation had a physical effect. A linked hall call requires its own open-door evidence at the target. Reported destination stays separate from desired intent. Cancellation or expiry withdraws desired work and keeps conflicts fenced while execution is unresolved. The virtual checkpoint keeps ordering and unresolved work, fences old grants, and revokes stale observations. After restore, explicit receipt lookup can recover the controller outcome, and new Operational evidence can settle the physical outcome even while lookup is unavailable. The checkpoint is in memory. The externally reachable interfaces remain read-only.
+
+Engine records conservative command state before entering a sink that may have
+external side effects. Controlled submission reserves `Receipt::Indeterminate`;
+controlled withdrawal reserves Requested. A sink interruption can therefore
+leave uncertainty, but it cannot expose a false unsent state, permit duplicate
+submission/withdrawal or claim that execution was prevented.
+
+M6B.1 validates that boundary against the independently running official Open-RMF Hotel simulation. A simulation-only executable under `liftassistant-rmf/examples` supplies the narrow `/lift_requests` writer because it shares the concrete RMF message transport with the existing mapper; it is guarded by a fixed gateway-free test-network check and is not linked into the production Host, HTTP API, CLI or clients. Engine still allocates the Principal, grant and Intent. The example translates an Intent into an adapter-local RMF holder, treats holder observation as receipt evidence only, and completes through canonical Operational observations. Subscriber or writer recreation does not allocate another security identity, grant or Intent and does not resend an unresolved operation. The normal RMF adapter and long-running Host remain subscription-only.
+
+## M6C external dispatch ownership boundary
+
+Dispatch ownership is independent from `Intent`. LiftAssistant-owned calls keep
+the existing path from `HallCall` through deterministic logical-car selection to
+the car-specific `ServeFloor` intent. An external-controller-owned call instead
+uses a separate internal sink carrying only its `CallId`, `HallCall` and
+configured dispatch scope. Submission records boundary-local delivery state but
+leaves the call `Pending`; it creates no placeholder car or `Intent`.
+
+Each external dispatch scope binds one configured `ControllerId`, explicit
+opaque-native-assignment-to-`CarId` mappings, and at most one current
+Principal-held dispatch grant. This grant is separate from existing per-car
+authority, is revocable/fenceable, and is required before submission. Controller
+or vendor authentication does not create it. Assignment evidence from the
+configured controller advances only `Pending -> Assigned(CarId)` after explicit
+mapping. Unknown mappings, wrong controller/scope, conflicting reassignment and
+terminal/retired calls return typed non-mutating results; identical assignment is
+idempotent.
+
+M6C.1b extends the [internal dispatch contract](M6C_DISPATCH_OWNERSHIP.md).
+Explicit retry is limited to proven non-submission. A current dispatch grant
+authorizes commands, and correlated evidence for already-sent work remains
+eligible after revocation. Receipts and withdrawal outcomes are tracked
+independently of service. Correlated serving evidence starts service for the
+already assigned car. Only fresh Operational arrival and open-door evidence
+can complete it through the existing call registry. Submission reserves
+external ownership and uncertainty before sink entry, and withdrawal reserves
+Requested before sink entry. An interruption cannot reopen either command for
+automatic or accidental resend.
+
+Proven prevention and physical completion release active external records into
+bounded terminal history. Virtual restore keeps operation identity and fences
+grants and stale observation evidence. This is an internal in-memory boundary.
+Vendor mapping, durable recovery, destination calls, production adapters and
+public write interfaces remain separate review work.
+
 ## Current composition
 
 ~~~text
@@ -45,7 +97,11 @@ The live Open-RMF adapter maps every configured native `lift_name` explicitly to
 
 Official Open-RMF Hotel validation confirms that one source/publisher may carry periodic complete snapshots for several source-native lift identities, including unchanged idle state. It also exercises adapter/source restart, old-state invalidation, new-session sequence restart, delayed-old-session rejection, and real simulation motion/door transitions through Engine-owned state. Transport discovery and DDS graph presence remain diagnostic evidence, not proof that payloads are flowing and not the sole authority for session lifecycle. Source timestamps and Open-RMF control `session_id` remain payload context; neither is promoted to LiftAssistant source generation.
 
-Freshness policy stays outside Core and is source-specific rather than derived from observation sequence or a universal timeout. The RMF adapter accepts an explicit maximum payload-silence setting with no default and arms it only after that subscription has observed payload, keeping discovery/reader startup separate from an active data plane becoming stale. A host-owned timer produces an explicit deterministic Engine invalidation action; Engine calls no wall clock. Invalidation removes current source evidence/resolved state and Operational truth while retaining the active session and its ordering watermark, so delayed or duplicate samples cannot restore stale state. A newer sample in that same adapter lifetime may rebuild evidence; a new adapter lifetime still requires an explicit new source session.
+The ingestion-lifecycle owner supplies a fresh incarnation token for every new lifetime. Engine fences input by equality with the current token and retains one current token per configured source. The production Host obtains 128 random bits per incarnation from the system RNG. Observation ordering, arrival deadlines, Host revision and diagnostic sequence each have separate state.
+
+Freshness policy stays outside Core and Engine. RMF applies the configured maximum arrival silence to both the feed and each bound car that has produced a payload. Before its first payload a car awaits data. A silent car can lose its evidence while a sibling stays current. The Host translates time into deterministic single-car or whole-source invalidation actions. Either scope preserves the active token and source-global ordering watermark. A newer same-session sample can rebuild evidence. Recreating the subscriber resets current transport discovery to subscriber-created and keeps stale payload state until actual data arrives.
+
+`BuildingTopology` provides the building-level floor universe. Each RMF lift's reported `available_floors` may cover a subset. Explicit mapping and containment keep out-of-building floors invalid. Unconfigured RMF entities produce diagnostic evidence and are ignored. Mapping failures for a configured lift revoke only that binding. Transport failure can revoke the whole source. Per-lift floor context stays on the read side.
 
 Runtime health is not one `healthy` flag. The current host keeps transport/discovery evidence, payload activity, adapter-session activity, per-car observation availability, and Engine readiness distinct. A stale Operational source revokes readiness without becoming an elevator equipment fault. A stale Auxiliary source remains visible but cannot revoke a healthy Operational authority, be promoted automatically, or supply missing fields. Last known observations remain bounded diagnostic evidence after current operational truth is revoked.
 
@@ -99,11 +155,13 @@ schema, generic messaging layer, or commitment to a future frontend technology.
 `experimental/v0` HTTP snapshot plus SSE boundary, targeting Android, Linux, and Web from one
 shared Flutter codebase with platform-specific code limited to native `dart:io` versus browser
 `fetch`/`ReadableStream` streaming. It links no LiftAssistant Rust crate, owns no elevator or
-dispatch truth, replaces its read state from complete snapshots, accepts Host-local revision
-resets across Host restarts without durable cursors or event-log replay, and exposes no write
-capability. Browser Same-Origin Policy on unauthenticated HTTP means Web deployments currently
-use same-origin hosting or reverse proxying rather than relaxing the Host's no-wildcard-CORS
-posture.
+dispatch truth, replaces its read state from complete snapshots, and accepts Host-local revision
+resets across Host restarts without durable cursors or event-log replay. Against normal
+`liftassistant-headless` Hosts it remains strictly read-only; only when connected to an
+explicitly opted-in loopback `sim-dev-server` does it expose the isolated development-only
+Simulator `ServeFloor` workflow (`/api/dev-sim/v0/*`). Browser Same-Origin Policy on
+unauthenticated HTTP means Web deployments currently use same-origin hosting or reverse proxying
+rather than relaxing the Host's no-wildcard-CORS posture.
 
 ## Determinism boundary
 
@@ -139,7 +197,10 @@ reapplies only recorded explicit session, observation, and invalidation actions.
 missing an explicit source-session action is rejected rather than inferring lifecycle from an
 observation. The JSON representation is versioned, size-bounded, create-new, and experimental;
 it is neither a public schema nor a telemetry database. Production capture is opt-in and the
-current RMF host writes at most the first configured payload-stale capsule.
+current RMF host attempts at most the first configured payload-stale capsule. A failed
+optional output attempt emits a warning and leaves the Host's observation lifecycle intact.
+The action window supports explicit single-car revocation and checks that each source
+incarnation begins at most once within the artifact.
 
 Sanitization is a separate deterministic transformation from a private capsule to a new
 create-only candidate. It applies stable pseudonyms to source/session/car identities and
@@ -251,6 +312,162 @@ LiftAssistant must never rely on its own availability for a real elevator to rem
 
 Changing the safety/authority model is a HUMAN-REVIEW boundary.
 
+## M7 production intent gateway boundary
+
+The first production-shaped write path is an Open-RMF-specific gateway process,
+not a generic adapter framework and not a public control service:
+
+~~~text
+local OS peer identity
+        -> configured PrincipalId -> fresh AuthorityGrant
+        -> Engine IntentId / admission / reconciliation
+        -> private RMF gateway transport + durable unresolved record
+        -> /lift_requests
+
+/lift_states
+        -> existing RMF mapper -> canonical Operational observations
+        -> Engine receipt correlation and physical reconciliation
+~~~
+
+Engine continues to own authority, intent and operation identity, receipt
+meaning, canonical observations and physical completion. The gateway owns RMF
+transport/session mechanics, configured logical/native mapping, backend-local
+correlation, wall-clock supervision, reconnect/readiness and a bounded private
+restart record. A durable unresolved record is committed before a potentially
+side-effecting publish. Restart never creates a replacement operation and never
+automatically resends; it restores the same operation for observation-driven
+reconciliation or remains explicitly recovery-required.
+
+Command transport and observation subscription have independent lifecycles.
+Loss of the command channel degrades write readiness without stopping state
+ingestion; stale Operational observations block admission and completion without
+inventing an Auxiliary failover. The first capability is exactly one configured
+car-specific `ServeFloor`; RMF session correlation is backend-local and is not a
+Principal, grant, `IntentId`, or observation source session. ROS publish success
+is not a receipt. Existing Headless HTTP/SSE, CLI and Flutter interfaces remain
+read-only. This boundary is authorized only for software/simulation/HIL/bench
+progression and grants no passenger or real-controller write authority.
+
+The first concrete process uses a mode-`0600` Unix socket plus kernel peer UID
+for local caller authentication. Configuration maps that UID to one
+`PrincipalId`; Engine creates a fresh process-local grant. A separate explicit
+UID/Principal mapping grants the narrow recovery permission. Recovery never
+turns that operator into the ordinary command Principal. A local advisory lease
+derived from the RMF domain and native lift prevents overlapping processes from
+covering the same control domain through different sockets; it is not a
+cross-host lock. Neither the socket, RMF participant, holder session nor durable
+file is a reusable grant. The private file retains one unresolved or
+resumption-required operation, the `IntentId` watermark and 32 recent recovery
+audit records, is committed and directory-synchronized before publication or
+recovery transitions, and fails closed on corruption, incompatible revision,
+unsafe permissions or an unreadable state. This is bounded single-operation
+recovery, not a database or exactly-once transport.
+
+RMF subscriber generations are transport resources inside one adapter source
+lifetime. A generation that discovers peers but receives no first payload is
+recreated after an explicit source-specific interval without changing
+`ObservationSessionId` or claiming stale payload before data has ever flowed.
+Once data has flowed, silence revokes Operational truth; only a real payload can
+restore it. This keeps transport discovery, current payload activity, source
+incarnation and canonical readiness distinct.
+
+M7.1b keeps uncertain crash recovery gateway-local. An authorized operator may
+retire the one durable unresolved operation only as outcome unknown; that action
+does not mark Engine completion, prove remote inactivity or restore write
+readiness. It creates a durable `ResumptionRequired` boundary. A distinct
+authorized resumption action must re-evaluate the current local control-domain
+lease, configuration revision, fresh complete Operational evidence, command
+transport, observable RMF holder/correlation and absence of active local work.
+Any accepted residual uncertainty is recorded as uncertainty in a bounded audit
+trail. Generic Engine call/receipt meanings and all public read-only interfaces
+remain unchanged.
+
+A restarted gateway may restore persisted receipt/progress into Engine only
+after a fresh observation carries the exact unresolved backend holder. Persisted
+progress plus a periodic target-floor snapshot is not causal evidence that the
+old operation completed. If the holder has already cleared, the gateway remains
+`RecoveryRequired` until the explicit operator path retires the local record as
+outcome unknown. This exact-holder fence was required by the completed official
+Hotel late-restart proof; it is gateway-local correlation policy and does not
+change Engine receipt or reconciliation semantics.
+
+
+## Development-only Simulator Operator Surface (`dev-sim/v0`)
+
+The Operator Surface Foundation slice exercises the first end-to-end Flutter-to-Engine
+`ServeFloor` workflow exclusively against the in-process `VirtualController(SimRuntime)`
+simulator without altering production authority, recovery, or public read-only API contracts:
+
+~~~text
+Flutter client (backend-agnostic UI projection)
+  -> GET  /api/experimental/v0/{snapshot,events}    (strictly read-only, unchanged)
+  -> GET  /api/dev-sim/v0/capabilities              (opt-in loopback dev-sim only)
+  -> POST /api/dev-sim/v0/serve-floor/preview       (advisory, side-effect-free)
+  -> POST /api/dev-sim/v0/serve-floor/submit        (client submission_key -> Engine admission)
+  -> GET  /api/dev-sim/v0/submissions/{key}         (read-only reconnect projection, no resend)
+        |
+        v
+sim-dev-server (liftassistant-headless example; dev-dependency only)
+        |
+        v
+Existing Engine controlled-intent path (PrincipalId, AuthorityGrant, IntentId, receipt, reconciliation)
+        |
+        v
+VirtualController(SimRuntime) -> canonical Operational observations -> Engine reconciliation
+~~~
+
+Key boundary invariants:
+
+- **Isolated Simulator-only control surface:** `sim-dev-server` is a development-only example
+  target in `liftassistant-headless` that reuses `liftassistant-sim` strictly via
+  `[dev-dependencies]` (keeping `liftassistant-headless`'s normal dependency tree free of
+  `liftassistant-sim`). Control routes under `/api/dev-sim/v0/*` are disabled by default, require
+  explicit `--enable-dev-sim-control`, refuse non-loopback bind addresses, enforce 4 KiB request
+  bounds with `deny_unknown_fields`, and cannot reach RMF, LCE, HIL, or real hardware.
+  `/api/experimental/v0/snapshot` and `/api/experimental/v0/events` remain strictly read-only GET.
+- **Single truth owner:** Engine continues to own controlled-intent admission, `PrincipalId` /
+  `AuthorityGrant`, `IntentId`, controller receipts, canonical Operational observations, and
+  physical completion/reconciliation. `sim-dev-server` mints only a process-local development
+  Principal and per-car Engine grant for the Simulator fixture; this is not a production identity
+  or multi-user authorization design.
+- **Submission correlation (`submission_key`) is not a canonical identity:** Before any possible
+  side effect, the Flutter client generates a 128-bit random `submission_key` that stays solely in
+  the `dev-sim/v0` transport/client correlation layer and never enters `liftassistant-model`,
+  `liftassistant-core`, or `liftassistant-engine`. Mapping is
+  `submission_key -> admitted submission -> Engine IntentId`. Same key plus identical immutable
+  `(car, floor)` is idempotent and never allocates a second `IntentId`; same key plus different
+  `(car, floor)` fails closed with HTTP 409 conflict; pre-side-effect rejections remain terminal
+  rejected for that key; a new `submission_key` with the same `(car, floor)` is a fresh user
+  submission evaluated by live Engine admission. The in-memory submission registry is bounded
+  (128 records) and preserves active Engine operations during eviction.
+- **Reconnect and process-restart honesty without automatic resend:** If a submission response is
+  lost after dispatch, Flutter transitions the operation to first-class `Unknown` and never
+  automatically resends. Within the same `control_instance_id` lifetime, reconnect performs
+  read-only `GET /api/dev-sim/v0/submissions/{submission_key}` to project the latest Engine
+  `IntentRecord` facts (`accepted`, `in_progress`, `completed`, `diverged`, `rejected`,
+  `not_found`, or `knowledge_unavailable`). Across a `sim-dev-server` restart, the fresh 128-bit
+  ephemeral `control_instance_id` causes queries carrying `expected_instance_id` to report
+  `knowledge_unavailable` (`control_process_restarted`) rather than claiming the request never
+  happened, and no automatic resend occurs.
+- **Distinct capability dimensions and floor legality:** Read-side capability and advisory preview
+  projections preserve `support`, `control_path_availability` (with explicit reason),
+  `authorization` (honestly reporting `dev_process_local_grant` rather than fabricating
+  multi-user `authorized = true`), and per-request `eligible` / Engine `WriteBlocker`. Preview is
+  strictly advisory and side-effect-free; submit always re-evaluates real Engine admission.
+  Target floor choices come exclusively from Engine `ExecutionCapabilities` (never from full
+  `BuildingTopology`, observation floor lists, or UI guesses). Configured-but-unavailable cars
+  without valid Operational truth cannot preview or submit, and Auxiliary bindings never restore
+  command eligibility.
+- **Scoped command surface (`State + ServeFloor` only):** Flutter remains backend-agnostic with
+  no backend-specific UI branches and no second operation lifecycle state machine. Mode control
+  (`SetMode`, Normal/OOS/FireService/Inspection/Independent/parking) and persistent
+  Setting/Parameter configuration are out of scope — persistent settings have a different
+  lifecycle from one-shot operations and are intentionally omitted.
+- **Real-backend exclusions:** Neither `sim-dev-server` nor Flutter connects to the M7 RMF
+  gateway, exposes RMF over HTTP, alters M7 durability/recovery, writes to LCE (which remains
+  `RECORDED_READONLY_PARTIAL`), or accesses any real controller, CAN/BACnet/OPC bus, HIL rig, or
+  passenger elevator. This boundary is experimental and development-only, not a frozen public
+  schema or production control API.
 
 ## Target production direction
 

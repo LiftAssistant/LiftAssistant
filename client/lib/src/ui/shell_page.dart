@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../api/control_model.dart';
 import '../api/host_url.dart';
 import '../api/read_model.dart';
 import '../state/client_controller.dart';
@@ -11,6 +14,7 @@ import 'widgets/car_card.dart';
 import 'widgets/diagnostic_panel.dart';
 import 'widgets/host_connection_dialog.dart';
 import 'widgets/semantic_badge.dart';
+import 'widgets/serve_floor_workflow.dart';
 import 'widgets/source_card.dart';
 import 'widgets/system_status_strip.dart';
 
@@ -98,6 +102,40 @@ class _ClientShellPageState extends State<ClientShellPage> {
       onDisconnect: () async {
         await widget.controller.disconnect();
       },
+    );
+  }
+
+
+  void _openServeFloorWorkflow(String carId, {bool startInStatusView = false}) {
+    unawaited(
+      showServeFloorWorkflowModal(
+        context: context,
+        controller: widget.controller,
+        carId: carId,
+        startInStatusView: startInStatusView,
+      ),
+    );
+  }
+
+  CarControlPresentation? _controlPresentationForCar(
+    ClientState state,
+    String carId,
+  ) {
+    final ControlSurfaceCapabilities? surface = state.controlCapabilities;
+    if (surface == null || surface is ControlSurfaceAbsent) {
+      return null;
+    }
+    final CarServeFloorCapability? carCap = switch (surface) {
+      ControlSurfaceAvailable() => surface.capabilityForCar(carId),
+      _ => null,
+    };
+    final TrackedServeFloorOperation? tracked =
+        state.trackedOperation?.car == carId ? state.trackedOperation : null;
+    return CarControlPresentation(
+      surface: surface,
+      carCapability: carCap,
+      trackedForCar: tracked,
+      hostLive: state.isSnapshotLive,
     );
   }
 
@@ -191,8 +229,37 @@ class _ClientShellPageState extends State<ClientShellPage> {
     final double barHeight = (54.0 * textScale.clamp(1.0, 1.35))
         .roundToDouble();
     final bool isCompactTopBar = screenWidth < 420 || textScale > 1.35;
-    final bool showReadOnlyChip =
+    final bool showModeChip =
         (isWide ? screenWidth >= 900 : screenWidth >= 620) && textScale <= 1.2;
+    final (
+      String modeLabel,
+      String modeTooltip,
+      Color modeForeground,
+      Color modeBackground,
+      IconData modeIcon,
+    ) = switch (state.controlCapabilities) {
+      ControlSurfaceAvailable() => (
+        'dev-sim control',
+        'Development-only Simulator ServeFloor control is active; experimental/v0 read API remains read-only.',
+        palette.info,
+        palette.infoContainer,
+        Icons.developer_mode_outlined,
+      ),
+      ControlSurfaceSupportUnknown(:final reason) => (
+        'control unknown',
+        'Control surface support could not be determined ($reason).',
+        palette.caution,
+        palette.cautionContainer,
+        Icons.help_outline_rounded,
+      ),
+      _ => (
+        'Read-Only',
+        'Strictly read-only experimental/v0 client; zero elevator write controls.',
+        palette.subtleText,
+        palette.elevatedSurface,
+        Icons.lock_outline_rounded,
+      ),
+    };
     final (
       String phaseLabel,
       Color phaseColor,
@@ -240,15 +307,16 @@ class _ClientShellPageState extends State<ClientShellPage> {
                             ),
                           ),
                         ],
-                        if (showReadOnlyChip) ...<Widget>[
+                        if (showModeChip) ...<Widget>[
                           const SizedBox(width: 10),
                           Flexible(
                             child: SemanticBadge(
-                              label: 'Read-Only',
-                              foreground: palette.subtleText,
-                              background: palette.elevatedSurface,
-                              icon: Icons.lock_outline_rounded,
-                              tooltip: 'Strictly read-only experimental/v0 client; zero elevator write controls.',
+                              key: const Key('topbar-mode-tag'),
+                              label: modeLabel,
+                              foreground: modeForeground,
+                              background: modeBackground,
+                              icon: modeIcon,
+                              tooltip: modeTooltip,
                             ),
                           ),
                         ],
@@ -374,6 +442,27 @@ class _ClientShellPageState extends State<ClientShellPage> {
     required double textScale,
   }) {
     final InstrumentPalette palette = context.palette;
+    final (String modeLabel, Color modeFg, Color modeBg, IconData modeIcon) =
+        switch (state.controlCapabilities) {
+      ControlSurfaceAvailable() => (
+        'dev-sim',
+        palette.info,
+        palette.infoContainer,
+        Icons.developer_mode_outlined,
+      ),
+      ControlSurfaceSupportUnknown() => (
+        'control ?',
+        palette.caution,
+        palette.cautionContainer,
+        Icons.help_outline_rounded,
+      ),
+      _ => (
+        'Read-Only',
+        palette.subtleText,
+        palette.surface,
+        Icons.lock_outline_rounded,
+      ),
+    };
     return DecoratedBox(
       decoration: BoxDecoration(
         color: palette.elevatedSurface,
@@ -388,10 +477,10 @@ class _ClientShellPageState extends State<ClientShellPage> {
             children: <Widget>[
               if (textScale <= 1.5) ...<Widget>[
                 SemanticBadge(
-                  label: 'Read-Only',
-                  foreground: palette.subtleText,
-                  background: palette.surface,
-                  icon: Icons.lock_outline_rounded,
+                  label: modeLabel,
+                  foreground: modeFg,
+                  background: modeBg,
+                  icon: modeIcon,
                   outlined: true,
                 ),
                 const SizedBox(width: 8),
@@ -475,13 +564,13 @@ class _ClientShellPageState extends State<ClientShellPage> {
                     NavigationRailDestination(
                       icon: _buildNavBadge(
                         context,
-                        count: snapshot.operationalCars.length,
+                        count: projectConfiguredOperationalCars(snapshot).totalCount,
                         selected: false,
                         child: const Icon(Icons.elevator_outlined),
                       ),
                       selectedIcon: _buildNavBadge(
                         context,
-                        count: snapshot.operationalCars.length,
+                        count: projectConfiguredOperationalCars(snapshot).totalCount,
                         selected: true,
                         child: const Icon(Icons.elevator),
                       ),
@@ -554,13 +643,13 @@ class _ClientShellPageState extends State<ClientShellPage> {
             NavigationDestination(
               icon: _buildNavBadge(
                 context,
-                count: snapshot.operationalCars.length,
+                count: projectConfiguredOperationalCars(snapshot).totalCount,
                 selected: false,
                 child: const Icon(Icons.elevator_outlined),
               ),
               selectedIcon: _buildNavBadge(
                 context,
-                count: snapshot.operationalCars.length,
+                count: projectConfiguredOperationalCars(snapshot).totalCount,
                 selected: true,
                 child: const Icon(Icons.elevator),
               ),
@@ -713,11 +802,15 @@ class _ClientShellPageState extends State<ClientShellPage> {
             onConfigureHost: () => _openHostConfig(state),
           )
         : null;
+    final ConfiguredOperationalCarsView carsView =
+        projectConfiguredOperationalCars(snapshot);
 
     final Widget content = switch (_section) {
       ClientSection.overview => _buildOverviewWorkspace(
         context,
+        state,
         snapshot,
+        carsView: carsView,
         statusStrip: overviewStatusStrip,
         pagePadding: pagePadding,
         isWide: isWide,
@@ -725,7 +818,9 @@ class _ClientShellPageState extends State<ClientShellPage> {
       ),
       ClientSection.cars => _buildCarsWorkspace(
         context,
+        state,
         snapshot,
+        carsView: carsView,
         alertBanners: alertBanners,
         pagePadding: pagePadding,
         textScale: textScale,
@@ -766,7 +861,9 @@ class _ClientShellPageState extends State<ClientShellPage> {
 
   Widget _buildOverviewWorkspace(
     BuildContext context,
+    ClientState state,
     ReadModelSnapshot snapshot, {
+    required ConfiguredOperationalCarsView carsView,
     required Widget statusStrip,
     required EdgeInsets pagePadding,
     required bool isWide,
@@ -795,6 +892,20 @@ class _ClientShellPageState extends State<ClientShellPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 statusStrip,
+                if (state.trackedOperation != null) ...<Widget>[
+                  const SizedBox(height: 14),
+                  TrackedOperationBanner(
+                    operation: state.trackedOperation!,
+                    isHostLive: state.isSnapshotLive,
+                    onInspectDetails: () => _openServeFloorWorkflow(
+                      state.trackedOperation!.car,
+                      startInStatusView: true,
+                    ),
+                    onQueryStatus: () =>
+                        unawaited(widget.controller.queryTrackedSubmission()),
+                    onDismiss: widget.controller.dismissTrackedOperation,
+                  ),
+                ],
                 const SizedBox(height: 20),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -806,13 +917,15 @@ class _ClientShellPageState extends State<ClientShellPage> {
                         children: <Widget>[
                           SectionHeader(
                             title: 'Operational Cars',
-                            count: snapshot.operationalCars.length,
+                            count: carsView.totalCount,
                             icon: Icons.elevator_outlined,
                           ),
                           const SizedBox(height: 12),
                           _buildCarsGridBox(
                             context,
+                            state,
                             snapshot,
+                            carsView: carsView,
                             textScale: textScale,
                           ),
                           const SizedBox(height: 24),
@@ -872,10 +985,24 @@ class _ClientShellPageState extends State<ClientShellPage> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     statusStrip,
+                    if (state.trackedOperation != null) ...<Widget>[
+                      const SizedBox(height: 12),
+                      TrackedOperationBanner(
+                        operation: state.trackedOperation!,
+                        isHostLive: state.isSnapshotLive,
+                        onInspectDetails: () => _openServeFloorWorkflow(
+                          state.trackedOperation!.car,
+                          startInStatusView: true,
+                        ),
+                        onQueryStatus: () =>
+                            unawaited(widget.controller.queryTrackedSubmission()),
+                        onDismiss: widget.controller.dismissTrackedOperation,
+                      ),
+                    ],
                     const SizedBox(height: 18),
                     SectionHeader(
                       title: 'Operational Cars',
-                      count: snapshot.operationalCars.length,
+                      count: carsView.totalCount,
                       icon: Icons.elevator_outlined,
                     ),
                   ],
@@ -884,7 +1011,13 @@ class _ClientShellPageState extends State<ClientShellPage> {
             ),
             SliverPadding(
               padding: EdgeInsets.symmetric(horizontal: pagePadding.left),
-              sliver: _buildCarsSliver(context, snapshot, textScale: textScale),
+              sliver: _buildCarsSliver(
+                context,
+                state,
+                snapshot,
+                carsView: carsView,
+                textScale: textScale,
+              ),
             ),
             SliverPadding(
               padding: EdgeInsets.fromLTRB(
@@ -941,25 +1074,16 @@ class _ClientShellPageState extends State<ClientShellPage> {
 
   Widget _buildCarsWorkspace(
     BuildContext context,
+    ClientState state,
     ReadModelSnapshot snapshot, {
+    required ConfiguredOperationalCarsView carsView,
     required Widget? alertBanners,
     required EdgeInsets pagePadding,
     required double textScale,
   }) {
     final InstrumentPalette palette = context.palette;
-    final int carCount = snapshot.operationalCars.length;
-    final int nonResolvedOperational = snapshot.sources.fold<int>(
-      0,
-      (int sum, SourceHealth s) =>
-          sum +
-          s.observations
-              .where(
-                (SourceObservation o) =>
-                    o.role == BindingRole.operational &&
-                    o.availability != ObservationAvailability.resolved,
-              )
-              .length,
-    );
+    final int carCount = carsView.totalCount;
+    final int nonResolvedOperational = carsView.unavailableCars.length;
     final (
       String readinessLabel,
       String readinessTip,
@@ -992,13 +1116,27 @@ class _ClientShellPageState extends State<ClientShellPage> {
                       alertBanners,
                       const SizedBox(height: 14),
                     ],
+                    if (state.trackedOperation != null) ...<Widget>[
+                      TrackedOperationBanner(
+                        operation: state.trackedOperation!,
+                        isHostLive: state.isSnapshotLive,
+                        onInspectDetails: () => _openServeFloorWorkflow(
+                          state.trackedOperation!.car,
+                          startInStatusView: true,
+                        ),
+                        onQueryStatus: () =>
+                            unawaited(widget.controller.queryTrackedSubmission()),
+                        onDismiss: widget.controller.dismissTrackedOperation,
+                      ),
+                      const SizedBox(height: 14),
+                    ],
                     DedicatedPageHeader(
                       key: const Key('cars-page-header'),
                       title: 'Operational Cars',
                       subtitle: 'Monitor current Engine-owned elevator state resolved from authoritative Operational bindings.',
                       icon: Icons.elevator_outlined,
                       countLabel:
-                          '$carCount ${carCount == 1 ? "operational car" : "operational cars"}',
+                          '$carCount ${carCount == 1 ? "configured car" : "configured cars"}',
                       countBadgeKey: const Key('cars-page-count-badge'),
                       trailingBadges: <Widget>[
                         SemanticBadge(
@@ -1013,7 +1151,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                           SemanticBadge(
                             key: const Key('cars-page-non-resolved-badge'),
                             label:
-                                '$nonResolvedOperational non-resolved ${nonResolvedOperational == 1 ? "binding" : "bindings"}',
+                                '${carsView.resolvedCars.length} resolved · $nonResolvedOperational unavailable',
                             foreground: palette.caution,
                             background: palette.cautionContainer,
                             icon: Icons.help_outline_rounded,
@@ -1034,7 +1172,13 @@ class _ClientShellPageState extends State<ClientShellPage> {
                 pagePadding.right,
                 pagePadding.bottom,
               ),
-              sliver: _buildCarsSliver(context, snapshot, textScale: textScale),
+              sliver: _buildCarsSliver(
+                context,
+                state,
+                snapshot,
+                carsView: carsView,
+                textScale: textScale,
+              ),
             ),
           ],
         ),
@@ -1232,28 +1376,31 @@ class _ClientShellPageState extends State<ClientShellPage> {
     return 3;
   }
 
+
   Widget _buildCarsGridBox(
     BuildContext context,
+    ClientState state,
     ReadModelSnapshot snapshot, {
+    required ConfiguredOperationalCarsView carsView,
     required double textScale,
   }) {
     const double spacing = 14;
-    final List<OperationalCar> cars = snapshot.operationalCars;
-    if (cars.isEmpty) {
-      return _EmptyOperationalCarsPanel(sources: snapshot.sources);
+    final List<OperationalCarSlot> slots = carsView.slots;
+    if (!carsView.hasResolvedCars) {
+      return _EmptyOperationalCarsPanel(
+        unavailableCars: carsView.unavailableCars,
+      );
     }
 
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         final double width = constraints.maxWidth;
-        if (cars.length == 1) {
-          final bool useTabularFooter = width >= 280 && textScale <= 1.35;
-          final bool compactCard = width < 400 || textScale > 1.15;
-          return OperationalCarCard(
-            car: cars.first,
-            useTabularFooter: useTabularFooter,
-            compactCard: compactCard,
+        if (slots.length == 1) {
+          return _buildCarSlotCard(
+            state,
+            slots.first,
             cardWidth: width,
+            textScale: textScale,
           );
         }
 
@@ -1261,17 +1408,15 @@ class _ClientShellPageState extends State<ClientShellPage> {
         final double cardWidth = columns == 1
             ? width
             : (width - spacing) / columns;
-        final bool useTabularFooter = cardWidth >= 280 && textScale <= 1.35;
-        final bool compactCard = cardWidth < 400 || textScale > 1.15;
-        final int rowCount = (cars.length + columns - 1) ~/ columns;
+        final int rowCount = (slots.length + columns - 1) ~/ columns;
 
         Widget buildRow(int rowIndex) {
           if (columns == 1) {
-            return OperationalCarCard(
-              car: cars[rowIndex],
-              useTabularFooter: useTabularFooter,
-              compactCard: compactCard,
+            return _buildCarSlotCard(
+              state,
+              slots[rowIndex],
               cardWidth: cardWidth,
+              textScale: textScale,
             );
           }
           final int start = rowIndex * columns;
@@ -1282,13 +1427,13 @@ class _ClientShellPageState extends State<ClientShellPage> {
                 for (int col = 0; col < columns; col++) ...<Widget>[
                   if (col > 0) const SizedBox(width: spacing),
                   Expanded(
-                    child: (start + col < cars.length)
-                        ? OperationalCarCard(
-                            car: cars[start + col],
-                            stretchToRowHeight: true,
-                            useTabularFooter: useTabularFooter,
-                            compactCard: compactCard,
+                    child: (start + col < slots.length)
+                        ? _buildCarSlotCard(
+                            state,
+                            slots[start + col],
                             cardWidth: cardWidth,
+                            textScale: textScale,
+                            stretchToRowHeight: true,
                           )
                         : const SizedBox.shrink(),
                   ),
@@ -1298,8 +1443,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
           );
         }
 
-        // Lazily virtualize when fleet size is large (> 12 cars).
-        if (cars.length > 12) {
+        if (slots.length > 12) {
           return ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 540),
             child: ListView.builder(
@@ -1330,6 +1474,39 @@ class _ClientShellPageState extends State<ClientShellPage> {
         );
       },
     );
+  }
+
+  Widget _buildCarSlotCard(
+    ClientState state,
+    OperationalCarSlot slot, {
+    required double cardWidth,
+    required double textScale,
+    bool stretchToRowHeight = false,
+  }) {
+    final bool useTabularFooter = cardWidth >= 280 && textScale <= 1.35;
+    final bool compactCard = cardWidth < 400 || textScale > 1.15;
+    return switch (slot) {
+      ResolvedCarSlot(:final car) => OperationalCarCard(
+        key: Key('operational-car-card-\${car.id}'),
+        car: car,
+        stretchToRowHeight: stretchToRowHeight,
+        useTabularFooter: useTabularFooter,
+        compactCard: compactCard,
+        cardWidth: cardWidth,
+        controlPresentation: _controlPresentationForCar(state, car.id),
+        onOpenServeFloor: () => _openServeFloorWorkflow(car.id),
+        onInspectOperation: () =>
+            _openServeFloorWorkflow(car.id, startInStatusView: true),
+      ),
+      UnavailableCarSlot(:final car) => UnavailableOperationalCarCard(
+        key: Key('unavailable-car-card-\${car.carId}'),
+        car: car,
+        stretchToRowHeight: stretchToRowHeight,
+        useTabularFooter: useTabularFooter,
+        compactCard: compactCard,
+        cardWidth: cardWidth,
+      ),
+    };
   }
 
   Widget _buildSourcesListBox(
@@ -1390,16 +1567,21 @@ class _ClientShellPageState extends State<ClientShellPage> {
     );
   }
 
+
   Widget _buildCarsSliver(
     BuildContext context,
+    ClientState state,
     ReadModelSnapshot snapshot, {
+    required ConfiguredOperationalCarsView carsView,
     required double textScale,
   }) {
     const double spacing = 14;
-    final List<OperationalCar> cars = snapshot.operationalCars;
-    if (cars.isEmpty) {
+    final List<OperationalCarSlot> slots = carsView.slots;
+    if (!carsView.hasResolvedCars) {
       return SliverToBoxAdapter(
-        child: _EmptyOperationalCarsPanel(sources: snapshot.sources),
+        child: _EmptyOperationalCarsPanel(
+          unavailableCars: carsView.unavailableCars,
+        ),
       );
     }
 
@@ -1413,26 +1595,24 @@ class _ClientShellPageState extends State<ClientShellPage> {
         );
 
         if (columns == 1) {
-          final bool useTabularFooter = width >= 280 && textScale <= 1.35;
-          final bool compactCard = width < 400 || textScale > 1.15;
-          if (cars.length == 1) {
+          if (slots.length == 1) {
             return SliverToBoxAdapter(
-              child: OperationalCarCard(
-                car: cars.first,
-                useTabularFooter: useTabularFooter,
-                compactCard: compactCard,
+              child: _buildCarSlotCard(
+                state,
+                slots.first,
                 cardWidth: width,
+                textScale: textScale,
               ),
             );
           }
           return SliverList.builder(
-            itemCount: cars.length,
+            itemCount: slots.length,
             itemBuilder: (BuildContext context, int index) {
-              final Widget card = OperationalCarCard(
-                car: cars[index],
-                useTabularFooter: useTabularFooter,
-                compactCard: compactCard,
+              final Widget card = _buildCarSlotCard(
+                state,
+                slots[index],
                 cardWidth: width,
+                textScale: textScale,
               );
               if (index == 0) {
                 return card;
@@ -1446,9 +1626,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
         }
 
         final double cardWidth = (width - (spacing * (columns - 1))) / columns;
-        final bool useTabularFooter = cardWidth >= 280 && textScale <= 1.35;
-        final bool compactCard = cardWidth < 400 || textScale > 1.15;
-        final int rowCount = (cars.length + columns - 1) ~/ columns;
+        final int rowCount = (slots.length + columns - 1) ~/ columns;
 
         return SliverList.builder(
           itemCount: rowCount,
@@ -1461,13 +1639,13 @@ class _ClientShellPageState extends State<ClientShellPage> {
                   for (int col = 0; col < columns; col++) ...<Widget>[
                     if (col > 0) const SizedBox(width: spacing),
                     Expanded(
-                      child: (start + col < cars.length)
-                          ? OperationalCarCard(
-                              car: cars[start + col],
-                              stretchToRowHeight: true,
-                              useTabularFooter: useTabularFooter,
-                              compactCard: compactCard,
+                      child: (start + col < slots.length)
+                          ? _buildCarSlotCard(
+                              state,
+                              slots[start + col],
                               cardWidth: cardWidth,
+                              textScale: textScale,
+                              stretchToRowHeight: true,
                             )
                           : const SizedBox.shrink(),
                     ),
@@ -1475,7 +1653,6 @@ class _ClientShellPageState extends State<ClientShellPage> {
                 ],
               ),
             );
-
             if (rowIndex == 0) {
               return rowWidget;
             }
@@ -1628,22 +1805,13 @@ class _TopBarIconButton extends StatelessWidget {
 }
 
 class _EmptyOperationalCarsPanel extends StatelessWidget {
-  const _EmptyOperationalCarsPanel({required this.sources});
+  const _EmptyOperationalCarsPanel({required this.unavailableCars});
 
-  final List<SourceHealth> sources;
+  final List<UnavailableOperationalCar> unavailableCars;
 
   @override
   Widget build(BuildContext context) {
     final InstrumentPalette palette = context.palette;
-    final List<
-      (String sourceId, SourceObservation obs, PayloadActivity payload)
-    >
-    pendingOperational = <(String, SourceObservation, PayloadActivity)>[
-      for (final SourceHealth src in sources)
-        for (final SourceObservation obs in src.observations)
-          if (obs.role == BindingRole.operational)
-            (src.source, obs, src.payload),
-    ];
 
     return Card(
       key: const Key('empty-operational-cars-card'),
@@ -1678,16 +1846,11 @@ class _EmptyOperationalCarsPanel extends StatelessWidget {
                 color: palette.subtleText,
               ),
             ),
-            if (pendingOperational.isNotEmpty) ...<Widget>[
+            if (unavailableCars.isNotEmpty) ...<Widget>[
               const SizedBox(height: 12),
               const Divider(height: 1),
               const SizedBox(height: 10),
-              for (final (
-                    String sourceId,
-                    SourceObservation obs,
-                    PayloadActivity payload,
-                  )
-                  in pendingOperational)
+              for (final UnavailableOperationalCar car in unavailableCars)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
                   child: Wrap(
@@ -1696,26 +1859,26 @@ class _EmptyOperationalCarsPanel extends StatelessWidget {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: <Widget>[
                       SemanticBadge(
-                        label: obs.car,
+                        label: car.carId,
                         foreground: Theme.of(context).colorScheme.onSurface,
                         background: palette.elevatedSurface,
                         icon: Icons.elevator_outlined,
                       ),
                       SemanticBadge(
-                        label: formatAvailabilityLabel(obs.availability),
+                        label: formatAvailabilityLabel(car.availability),
                         foreground: palette.caution,
                         background: palette.cautionContainer,
-                        icon: observationAvailabilityIcon(obs.availability),
+                        icon: observationAvailabilityIcon(car.availability),
                       ),
                       SemanticBadge(
-                        label: 'Source: $sourceId',
+                        label: 'Source: \${car.source}',
                         foreground: palette.subtleText,
                         background: palette.elevatedSurface,
                         icon: Icons.hub_outlined,
                       ),
                       SemanticBadge(
                         label:
-                            'Payload: ${formatPayloadActivityLabel(payload)}',
+                            'Payload: \${formatPayloadActivityLabel(car.payload)}',
                         foreground: palette.subtleText,
                         background: palette.elevatedSurface,
                         icon: Icons.sensors_rounded,

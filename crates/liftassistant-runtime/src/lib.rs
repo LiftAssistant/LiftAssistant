@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, error::Error, fmt, time::Duration};
 
 use liftassistant_model::{
     CarId, CarLocation, CarObservation, CarObservationUpdate, CarState, DoorEvidence, DoorState,
-    Floor, Intent, MotionEvidence, ObservationProvenance, ObservationSequence,
+    Floor, Intent, IntentId, MotionEvidence, ObservationProvenance, ObservationSequence,
     ObservationSessionId, ObservationSourceId, OperatingModeEvidence, PositionEvidence,
     ReportedDestination,
 };
@@ -15,6 +15,60 @@ pub enum RuntimeEvent {
     Observation(CarObservationUpdate),
     Arrived { car: CarId, floor: Floor },
     DoorStateChanged { car: CarId, state: DoorState },
+}
+
+/// Configured lower-controller identity. Vendor holder/session IDs stay inside its adapter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ControllerId(String);
+
+impl ControllerId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Submission {
+    NotSubmitted,
+    Submitted,
+    Indeterminate,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReceiptStatus {
+    Accepted,
+    Rejected,
+    Indeterminate,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct IntentReceipt {
+    pub controller: ControllerId,
+    pub intent: IntentId,
+    pub status: ReceiptStatus,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WithdrawalOutcome {
+    /// The controller can prove execution will not start.
+    Prevented,
+    /// A withdrawal was requested, but physical execution remains uncertain.
+    Requested,
+    Unsupported,
+}
+
+/// A receipt and canonical observations arrive separately from submission.
+pub trait ControlledIntentSink {
+    fn controller_id(&self) -> &ControllerId;
+    fn available(&self, car: &CarId) -> bool;
+    fn submit(&mut self, id: IntentId, intent: &Intent) -> Submission;
+    fn withdraw(&mut self, _id: IntentId) -> WithdrawalOutcome {
+        WithdrawalOutcome::Unsupported
+    }
+
+    fn receipt(&self, _id: IntentId) -> Option<IntentReceipt> {
+        None
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -129,13 +183,16 @@ impl ObservationAssembler {
             reported_destination,
         } = update;
         let stream = (provenance.source.clone(), provenance.session.clone());
-        if let Some(previous) = self.last_sequence.get(&stream)
-            && provenance.sequence <= *previous
+        if let Some(previous) = self
+            .last_sequence
+            .get(&stream)
+            .copied()
+            .filter(|previous| provenance.sequence <= *previous)
         {
             return Err(ObservationAssemblyError::NonIncreasingSequence {
                 source: provenance.source,
                 session: provenance.session,
-                previous: *previous,
+                previous,
                 received: provenance.sequence,
             });
         }
@@ -197,6 +254,17 @@ impl ObservationAssembler {
     pub fn invalidate_source_evidence(&mut self, source: &ObservationSourceId) {
         self.observations
             .retain(|(candidate, _, _), _| candidate != source);
+    }
+
+    /// Removes one car's evidence without changing the source/session watermark.
+    pub fn invalidate_car_evidence(
+        &mut self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+        car: &CarId,
+    ) {
+        self.observations
+            .remove(&(source.clone(), session.clone(), car.clone()));
     }
 }
 

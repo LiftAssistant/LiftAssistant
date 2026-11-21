@@ -1279,6 +1279,7 @@ name = "liftassistant-headless"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "getrandom 0.3.4",
  "liftassistant-engine",
  "liftassistant-model",
  "liftassistant-rmf",
@@ -1292,6 +1293,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "liftassistant-lce"
+version = "0.1.0"
+dependencies = [
+ "liftassistant-engine",
+ "liftassistant-model",
+]
+
+[[package]]
 name = "liftassistant-model"
 version = "0.1.0"
 
@@ -1300,12 +1309,17 @@ name = "liftassistant-rmf"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "getrandom 0.3.4",
  "liftassistant-engine",
  "liftassistant-model",
  "liftassistant-runtime",
  "ros2-client",
+ "rustix 0.38.44",
  "serde",
+ "serde_json",
+ "signal-hook",
  "smol",
+ "tempfile",
 ]
 
 [[package]]
@@ -2323,6 +2337,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+]
+
+[[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.4.3",
+ "once_cell",
+ "rustix 1.1.6",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
