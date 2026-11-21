@@ -22,6 +22,10 @@ jobs:
       - name: Pub get
         working-directory: client
         run: flutter pub get
+      - name: Build process-test binaries
+        run: |
+          cargo build -p liftassistant-headless
+          cargo build -p liftassistant-headless --example sim-dev-server
       - name: Analyze
         working-directory: client
         run: dart analyze
