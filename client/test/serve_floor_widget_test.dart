@@ -577,6 +577,13 @@ void main() {
         await tester.pumpAndSettle();
       }
 
+      // The custom mobile shell lazily builds Overview slivers; enter the
+      // dedicated Cars section first so this test exercises the actual
+      // operator surface rather than relying on off-screen Overview creation.
+      await tester.tap(find.text('Cars'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('cars-page-header')), findsOneWidget);
+
       // Open ServeFloor bottom sheet on narrow 320x568 + 2.0x text scale.
       await scrollAndTap(find.byKey(const Key('car-serve-floor-button-A')));
       expect(tester.takeException(), isNull);
