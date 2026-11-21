@@ -4,8 +4,15 @@
 //! diagnostic-terminal tables.
 //!
 //! This crate deliberately contains no serial transport, terminal command generation,
-//! unlock logic, controller write path, or hardware access. Its accepted input is an
-//! original synthetic fixture format that preserves the documented row/column families.
+//! unlock logic, controller write path, or hardware access. It accepts original synthetic
+//! recorded fixtures and bounded offline transcript bytes for the same native families.
+
+mod transcript;
+
+pub use transcript::{
+    DecodedLceTranscriptFrame, LceTranscriptDecoder, LceTranscriptError, LceTranscriptEvent,
+    LceTranscriptFamily,
+};
 
 use std::{collections::BTreeMap, error::Error, fmt};
 

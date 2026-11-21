@@ -244,7 +244,7 @@ safe-resumption decision. These are software/simulation facts only; HIL,
 cross-host fencing, deployment security, real controllers and passenger
 equipment remain outside the evidence and authorization.
 
-## LCE legacy recorded compatibility boundary
+## LCE legacy recorded and offline transcript compatibility boundary
 
 LCE-R0 found enough public evidence for a conservative experimental recorded
 read-only subset, but not for serial, hardware or production compatibility.
@@ -264,6 +264,18 @@ synthetic recorded tables and existing canonical observation types. Its result
 is `RECORDED_READONLY_PARTIAL`. M7.1b's HIL/bench-controller HUMAN gate remains
 unchanged, and no serial, unlock, controller, passenger-equipment, write or
 production authority follows from this research.
+
+LCE-R1 adds only a bounded offline byte-stream layer above those existing native
+records. A focused public search corroborated historical HyperTerminal text
+capture as real field practice, but found no publicly inspectable and
+redistributable raw capture file. The accepted decoder grammar is therefore an
+explicitly synthetic, normalized fallback rather than a real-firmware grammar.
+It preserves exact bounded block bytes, complete native records and conservative
+canonical projection as three separate evidence levels. Prompt/banner/echo text
+cannot become state, raw `GRP` termination is not guessed, and `CAL`, `N`, `SPB`
+and `RST` remain unsupported native/research context. The result is
+`OFFLINE_TRANSCRIPT_PARTIAL`; serial acquisition and real-controller evidence
+remain separately gated.
 
 ## License
 

@@ -372,6 +372,27 @@ The result is `RECORDED_READONLY_PARTIAL`: an original-synthetic recorded parser
 is justified, while serial transport, raw capture compatibility, hardware and
 production claims are not.
 
+### LCE-R1 community-corpus finding
+
+A bounded 2026-11-21 search covered public web/code indexes, elevator forums and
+file/document indexes. The strongest field evidence remains the
+[2013 KCM831 report](https://www.vatortrader.com/forums/ubbthreads.php?Board=1&main=913&type=thread&ubb=printthread):
+its author says HyperTerminal text capture saved real LCE parameter and LON
+output. [Later discussion](https://www.vatortrader.com/forums/ubbthreads.php?Number=37544&ubb=showflat)
+corroborates field use and private circulation of instructions. Neither page
+publishes the captured `.txt` bytes, and no independently verifiable public raw
+capture file was located.
+
+The durable distinction is `capture existence evidence != capture content
+evidence`. Historical manual samples can justify family vocabulary,
+line-oriented/paginated expectations and preservation of prompt/banner/echo
+context, but not a universal byte grammar, exact newline/echo behavior or
+variable-row termination. LCE-R1 therefore keeps its accepted three-row input
+as a LiftAssistant-authored normalized fallback, preserves raw/native/canonical
+levels separately, and leaves real-capture compatibility unclaimed. The full
+classification and projection/Core-gap matrices are in
+[`LCE_RAW_TERMINAL_COMPATIBILITY.md`](LCE_RAW_TERMINAL_COMPATIBILITY.md).
+
 
 ## M4 semantic-boundary audit findings — reported/current/desired state
 

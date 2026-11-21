@@ -265,6 +265,7 @@ crates/
   liftassistant-core/      deterministic semantic decisions
   liftassistant-engine/    shared semantic orchestration
   liftassistant-headless/  internal read-only host/lifecycle and live proofs
+  liftassistant-lce/       offline legacy-LCE recorded/transcript research
   liftassistant-rmf/       Open-RMF mapping and subscription-only adapter
   liftassistant-runtime/   semantic runtime contract
   liftassistant-sim/       deterministic reference and recorded backends

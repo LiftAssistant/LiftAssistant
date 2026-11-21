@@ -174,6 +174,51 @@ isolation, bounded-input review, secret scanning and diff/whitespace review.
 The validation uses only checked-in original synthetic fixtures and requires no
 KONE material, hardware, proprietary binary, external service or network peer.
 
+### LCE-R1 — Community-Corpus-First Offline Read-only Adapter Foundation
+
+**COMPLETE — `OFFLINE_TRANSCRIPT_PARTIAL`; HUMAN-CHECK reached.** This bounded
+offline slice does not reopen M7 or authorize the pending HIL/bench decision.
+
+The [raw-terminal compatibility record](LCE_RAW_TERMINAL_COMPATIBILITY.md)
+classifies the 2013 KCM831 HyperTerminal report as `FIELD_REPORT_ONLY`: it
+corroborates that real parameter/LON text captures existed, but neither that
+capture nor another verifiable public raw LCE transcript file was found. Later
+forum reports corroborate field terminal use without exposing corpus bytes.
+Historical manual samples remain `VENDOR_MANUAL_SAMPLE`, and all committed
+fixtures remain `LIFTASSISTANT_SYNTHETIC`; no external capture, PDF, screenshot,
+OEM binary, site data or proprietary terminal dump entered Git.
+
+`LceTranscriptDecoder` now consumes arbitrary bounded offline byte chunks and
+extracts only the existing `RecordedLceFrame` `STA`, `CMD` and `MDE` records
+from a deliberately normalized three-row fallback. Whole, bytewise and
+irregular partitions, split headers/columns/values/CRLF, LF and CRLF, multiple
+records, unknown banner/prompt/echo/help text, malformed/truncated/non-ASCII
+input, explicit line/block/chunk/line-count bounds and bounded recovery are
+covered. Raw `GRP` remains unsupported because termination is not established;
+`CAL`, `N`, `SPB` and `RST` produce no canonical evidence.
+
+Every successful event retains the exact bounded raw block and the complete
+native record. The existing R0 mapper then produces only justified canonical
+fields while source-only `ADV_POS`, `FLT_ID`, `TERM_LIM`, `LOAD`, `CORR_DRV`
+and other values remain in `LceSourceContext`. The Engine regression proves
+explicit logical-car/floor mapping, source-session fencing, no old-session
+field inheritance, reported rather than desired destination, and no implicit
+identity creation. No Core or Engine behavior/type changed, and no dependency
+was added.
+
+Closing validation passes formatting, warning-free workspace all-target
+Clippy, 221 workspace tests with one expected ignored soak child, the exact
+Rust/Cargo 1.85.0 locked all-target workspace check, all nine TUI scenarios,
+all four non-live Headless scenarios, 21 focused LCE tests, normal-dependency
+isolation, bounded-input review and diff/whitespace review. Current evidence
+does not establish real-controller grammar, firmware coverage, serial
+lifecycle, query safety or production compatibility.
+
+**Terminal boundary:** `HUMAN-CHECK — LCE-R1 offline compatibility complete;
+real-controller evidence remains gated. NO serial, LCEUIO, unlock, CPU561
+connection, active terminal query, passenger-equipment access or KONE
+write/control path is authorized.`
+
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 
 **COMPLETE (Simulator-only development slice).** This vertical slice connects

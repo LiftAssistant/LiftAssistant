@@ -130,16 +130,19 @@ Canonical `CarObservationUpdate` values enter Engine through one ingestion bound
 - `liftassistant-core`: deterministic vendor-neutral semantic decisions/state transitions.
 - `liftassistant-engine`: shared deterministic semantic orchestration, observation assembly/resolution, and operational state ownership.
 - `liftassistant-headless`: internal non-interactive read-only host/lifecycle and live integration proofs.
+- `liftassistant-lce`: bounded offline legacy-LCE recorded/transcript parsing and conservative mapping with no transport or command path.
 - `liftassistant-rmf`: shared Open-RMF semantic mapping, explicit native/logical binding adapter, and Rust-native subscription-only transport.
 - `liftassistant-runtime`: semantic execution contract and runtime events.
 - `liftassistant-sim`: deterministic active simulator, native-semantic recorded/read-only backend, and recorded BACnet mapping experiment.
 - `liftassistant-tui`: developer simulator composition, scenario runner, and UI.
 
-These nine packages reflect demonstrated ownership boundaries. The headless package
+These ten packages reflect demonstrated ownership boundaries. The headless package
 exists because Engine has a real second composition independent of the TUI. The RMF
 package exists because recorded and live paths now share protocol-specific mapping
-while transport dependencies must remain outside model, Core, and Engine. Neither
-package establishes a general service or adapter framework.
+while transport dependencies must remain outside model, Core, and Engine. The LCE
+package remains model-only in normal dependencies: its transcript decoder is offline,
+bounded, and separate from serial/terminal acquisition. None of these packages
+establishes a general service or adapter framework.
 Further packages still require real lifecycle/reuse pressure rather than speculative
 layering.
 
