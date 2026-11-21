@@ -1278,12 +1278,19 @@ void main() {
       final Rect wideCar3 = tester.getRect(
         find.byType(OperationalCarCard).at(3),
       );
+      final Rect wideUnavailable = tester.getRect(
+        find.byType(UnavailableOperationalCarCard),
+      );
       expect(wideCar0.top, equals(wideCar1.top));
       expect(wideCar1.top, equals(wideCar2.top));
       expect(wideCar0.left, lessThan(wideCar1.left));
       expect(wideCar1.left, lessThan(wideCar2.left));
-      expect(wideCar3.top, greaterThan(wideCar0.bottom));
-      expect((wideCar3.left - wideCar0.left).abs(), lessThan(1.0));
+      // Slot order is lexical across both resolved and unavailable cars:
+      // row 2 col 1 = unresolved lift-south-E, row 2 col 2 = resolved lift-west-express-C.
+      expect(wideUnavailable.top, greaterThan(wideCar0.bottom));
+      expect(wideCar3.top, equals(wideUnavailable.top));
+      expect((wideUnavailable.left - wideCar0.left).abs(), lessThan(1.0));
+      expect((wideCar3.left - wideCar1.left).abs(), lessThan(1.0));
       expect((wideCar3.width - wideCar0.width).abs(), lessThan(1.0));
 
       // 3. Wide Desktop (1560x960) — Dedicated Sources page:
@@ -1857,18 +1864,21 @@ void main() {
       expect(
         find.descendant(
           of: unavailableCard,
-          matching: find.text('rmf/site-main'),
+          matching: find.text('Source: rmf/site-main'),
         ),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: unavailableCard, matching: find.text('revoked')),
         findsOneWidget,
       );
       expect(
         find.descendant(
           of: unavailableCard,
-          matching: find.text('Source payload'),
+          matching: find.text('Availability: revoked'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: unavailableCard,
+          matching: find.text('Source payload: active'),
         ),
         findsOneWidget,
       );
