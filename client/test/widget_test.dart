@@ -1245,12 +1245,21 @@ void main() {
         find.byKey(const Key('cars-page-header')),
       );
       expect(carsPageHeaderRect.left, equals(wideOvCarsHeader.left));
-      expect(find.text('4 operational cars'), findsOneWidget);
+      // Four cars have current Operational truth; lift-south-E remains
+      // configured but unresolved, so the dedicated Cars view truthfully
+      // presents five configured slots rather than making it disappear.
+      expect(find.text('5 configured cars'), findsOneWidget);
       expect(
         find.byKey(const Key('cars-page-non-resolved-badge')),
         findsOneWidget,
       );
-      expect(find.text('1 non-resolved binding'), findsOneWidget);
+      expect(find.text('4 resolved · 1 unavailable'), findsOneWidget);
+      expect(find.byType(OperationalCarCard), findsNWidgets(4));
+      expect(find.byType(UnavailableOperationalCarCard), findsOneWidget);
+      expect(
+        find.byKey(const Key('unavailable-car-card-lift-south-E')),
+        findsOneWidget,
+      );
       expect(
         find.byKey(const Key('stale-retained-snapshot-banner')),
         findsOneWidget,
@@ -1800,8 +1809,8 @@ void main() {
         findsNothing,
       );
 
-      // Desktop section header distinguishes total configured vs resolved/unavailable.
-      expect(find.text('1 resolved · 1 unavailable'), findsOneWidget);
+      // The Overview keeps the cards compact; the dedicated Cars page owns
+      // the resolved/unavailable summary badge and is covered separately.
 
       // Side-by-side resolved + unavailable cards share the same M3 grid row
       // height; the unavailable card retains its explicit semantic badge.
