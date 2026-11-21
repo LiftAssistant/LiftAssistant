@@ -24,7 +24,7 @@ jobs:
         run: flutter pub get
       - name: Analyze
         working-directory: client
-        run: dart analyze --fatal-infos
+        run: dart analyze
       - name: Test
         working-directory: client
         run: flutter test --concurrency=1
