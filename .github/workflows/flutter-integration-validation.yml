@@ -1,0 +1,36 @@
+name: Flutter integration validation
+
+on:
+  push:
+    branches:
+      - integration/flutter-ui-main-20261121
+
+permissions:
+  contents: read
+
+jobs:
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Flutter toolchain
+        run: flutter --version
+      - name: Pub get
+        working-directory: client
+        run: flutter pub get
+      - name: Format
+        working-directory: client
+        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Analyze
+        working-directory: client
+        run: dart analyze --fatal-infos
+      - name: Test
+        working-directory: client
+        run: flutter test --concurrency=1
+      - name: Build web
+        working-directory: client
+        run: flutter build web --no-web-resources-cdn
