@@ -295,6 +295,13 @@ session to available. A configured locked/unavailable interface fails before
 query generation. The connector contains no LCEUIO algorithm, counter reset,
 unlock sequence or license/tool bypass.
 
+Capture format v2 distinguishes that live state from construction-time
+evidence metadata. `initial_interface_state` is exactly the caller's knowledge
+when the session/capture is created and is never rewritten. The existing
+`KnownBoundary` marker records a later observed boundary that changes the live
+session to `Available`; no redundant final-state field or second transition
+history is stored.
+
 ## R2 session and evidence lifecycle
 
 The synchronous session represents:
@@ -327,14 +334,20 @@ caller supplies a per-session monotonic relative clock beginning at zero.
 
 Every session owns a bounded internal evidence recorder containing:
 
-- format version, session ID, capture origin, interface state and profile;
+- format version, session ID, capture origin, initial interface state and profile;
 - monotonic relative microsecond offsets;
 - exact TX/RX byte entries with typed query correlation;
 - structured session/parser markers;
 - explicit completion/disconnect/fail-closed reason;
 - SHA-256 over the canonical capture body.
 
-The internal JSON envelope is versioned and experimental. Limits are 128 bytes
+The internal JSON envelope is versioned and experimental. R2.1 bumps it to v2
+because `interface_state` was renamed to the semantically precise
+`initial_interface_state`. The repository has no real v1 field corpus, so v1
+is rejected rather than migrated or silently interpreted as v2. A recomputed
+checksum cannot legitimize impossible history: artifact loading requires a
+prior `KnownBoundary` before any `QueryIssued` marker or TX bytes, and a
+locked/unavailable initial state cannot claim that boundary. Limits are 128 bytes
 for session identity, 4,096 entries, 64 KiB per raw entry, 1 MiB aggregate raw
 bytes and 5 MiB serialized form. Deserialization revalidates version, profile,
 timestamps, TX/query correlation, cardinality, sizes and SHA-256. Replay feeds
@@ -361,9 +374,9 @@ artifact integrity. No async runtime, daemon, SDK or adapter framework was
 introduced.
 
 Closing validation passes formatting, warning-free workspace all-target
-Clippy, 237 workspace tests with one expected ignored soak child, the exact
+Clippy, 238 workspace tests with one expected ignored soak child, the exact
 Rust/Cargo 1.85.0 locked all-target workspace check, all nine TUI scenarios,
-all four non-live Headless scenarios, 34 focused LCE unit tests, two Linux PTY
+all four non-live Headless scenarios, 35 focused LCE unit tests, two Linux PTY
 integration tests and the compile-fail public-API regression. No live RMF,
 Podman, serial device, CPU561, XDB1, LCEUIO or external peer was used.
 

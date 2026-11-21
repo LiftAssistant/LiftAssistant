@@ -9,7 +9,7 @@ use crate::{
     transcript::MAX_INPUT_CHUNK_BYTES,
 };
 
-pub const LCE_CAPTURE_FORMAT_VERSION: u16 = 1;
+pub const LCE_CAPTURE_FORMAT_VERSION: u16 = 2;
 
 const MAX_CAPTURE_SESSION_ID_BYTES: usize = 128;
 const MAX_CAPTURE_ENTRIES: usize = 4096;
@@ -97,7 +97,7 @@ struct LceEvidenceCaptureBody {
     format_version: u16,
     session_id: String,
     origin: LceCaptureOrigin,
-    interface_state: LceInterfaceState,
+    initial_interface_state: LceInterfaceState,
     profile: LceRuntimeTerminalProfile,
     entries: Vec<LceCaptureEntry>,
     ended_at_micros: u64,
@@ -128,8 +128,10 @@ impl FinalizedLceEvidenceCapture {
         self.body.origin
     }
 
-    pub const fn interface_state(&self) -> LceInterfaceState {
-        self.body.interface_state
+    /// Interface knowledge supplied by the caller when the session was
+    /// constructed. Later availability evidence remains in capture markers.
+    pub const fn initial_interface_state(&self) -> LceInterfaceState {
+        self.body.initial_interface_state
     }
 
     pub const fn profile(&self) -> LceRuntimeTerminalProfile {
@@ -265,7 +267,7 @@ impl LceEvidenceRecorder {
     pub(crate) fn new(
         session_id: &str,
         origin: LceCaptureOrigin,
-        interface_state: LceInterfaceState,
+        initial_interface_state: LceInterfaceState,
         profile: LceRuntimeTerminalProfile,
     ) -> Result<Self, LceCaptureError> {
         if session_id.len() > MAX_CAPTURE_SESSION_ID_BYTES {
@@ -278,7 +280,7 @@ impl LceEvidenceRecorder {
                 format_version: LCE_CAPTURE_FORMAT_VERSION,
                 session_id: session_id.to_owned(),
                 origin,
-                interface_state,
+                initial_interface_state,
                 profile,
                 entries: Vec::new(),
                 ended_at_micros: 0,
@@ -411,6 +413,7 @@ fn validate_body(body: &LceEvidenceCaptureBody) -> Result<(), LceCaptureError> {
     }
     let mut previous = 0;
     let mut total = 0usize;
+    let mut known_boundary_seen = false;
     for entry in &body.entries {
         if entry.offset_micros < previous || entry.offset_micros > body.ended_at_micros {
             return Err(LceCaptureError::InvalidCapture(
@@ -418,6 +421,24 @@ fn validate_body(body: &LceEvidenceCaptureBody) -> Result<(), LceCaptureError> {
             ));
         }
         previous = entry.offset_micros;
+        if let LceCapturePayload::Marker { marker } = &entry.payload {
+            match marker {
+                LceCaptureMarker::KnownBoundary => {
+                    if body.initial_interface_state == LceInterfaceState::LockedOrUnavailable {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "a locked/unavailable initial interface cannot observe a known boundary",
+                        ));
+                    }
+                    known_boundary_seen = true;
+                }
+                LceCaptureMarker::QueryIssued { .. } if !known_boundary_seen => {
+                    return Err(LceCaptureError::InvalidCapture(
+                        "query issued before a known boundary",
+                    ));
+                }
+                _ => {}
+            }
+        }
         if let LceCapturePayload::Bytes { direction, bytes } = &entry.payload {
             if bytes.len() > MAX_CAPTURE_ENTRY_BYTES {
                 return Err(LceCaptureError::EntryTooLarge { bytes: bytes.len() });
@@ -431,6 +452,11 @@ fn validate_body(body: &LceEvidenceCaptureBody) -> Result<(), LceCaptureError> {
                 ));
             }
             if matches!(direction, LceCaptureDirection::Tx) {
+                if !known_boundary_seen {
+                    return Err(LceCaptureError::InvalidCapture(
+                        "TX bytes precede a known boundary",
+                    ));
+                }
                 let query = entry.query.expect("TX query presence checked above");
                 if bytes.as_slice() != query.command() {
                     return Err(LceCaptureError::InvalidCapture(
@@ -461,7 +487,7 @@ mod tests {
         let mut recorder = LceEvidenceRecorder::new(
             "fixture-session",
             LceCaptureOrigin::LiftAssistantSynthetic,
-            LceInterfaceState::Available,
+            LceInterfaceState::Unknown,
             LceRuntimeTerminalProfile::historical_9600_8n1(),
         )
         .unwrap();
@@ -469,11 +495,34 @@ mod tests {
             .record_marker(Duration::ZERO, None, LceCaptureMarker::SessionStarted)
             .unwrap();
         recorder
+            .record_marker(
+                Duration::from_micros(1),
+                None,
+                LceCaptureMarker::TransportReady,
+            )
+            .unwrap();
+        recorder
+            .record_marker(
+                Duration::from_micros(2),
+                None,
+                LceCaptureMarker::KnownBoundary,
+            )
+            .unwrap();
+        recorder
             .record_bytes(
                 Duration::from_millis(1),
                 Some(LceReadOnlyQuery::Status),
                 LceCaptureDirection::Tx,
                 b"STA\r",
+            )
+            .unwrap();
+        recorder
+            .record_marker(
+                Duration::from_millis(1),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureMarker::QueryIssued {
+                    query: LceReadOnlyQuery::Status,
+                },
             )
             .unwrap();
         recorder
@@ -489,15 +538,30 @@ mod tests {
             .unwrap();
         assert_eq!(capture.sha256().len(), 64);
         assert_eq!(capture.origin(), LceCaptureOrigin::LiftAssistantSynthetic);
-        assert_eq!(capture.interface_state(), LceInterfaceState::Available);
+        assert_eq!(
+            capture.initial_interface_state(),
+            LceInterfaceState::Unknown
+        );
         assert_eq!(
             capture.profile(),
             LceRuntimeTerminalProfile::historical_9600_8n1()
         );
         assert_eq!(capture.end_reason(), LceCaptureEndReason::Completed);
         let encoded = capture.to_json_bytes().unwrap();
+        let encoded_text = std::str::from_utf8(&encoded).unwrap();
+        assert!(encoded_text.contains("\"format_version\": 2"));
+        assert!(encoded_text.contains("\"initial_interface_state\": \"UNKNOWN\""));
+        assert!(!encoded_text.contains("\"interface_state\":"));
         let decoded = super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded).unwrap();
         assert_eq!(capture, decoded);
+
+        let mut wrong_version = serde_json::from_slice::<serde_json::Value>(&encoded).unwrap();
+        wrong_version["capture"]["format_version"] = serde_json::json!(1);
+        let wrong_version = serde_json::to_vec(&wrong_version).unwrap();
+        assert!(matches!(
+            super::FinalizedLceEvidenceCapture::from_json_bytes(&wrong_version),
+            Err(LceCaptureError::UnsupportedVersion { version: 1 })
+        ));
 
         let mut tampered = encoded;
         let marker = b"\"sha256\": \"";
@@ -527,6 +591,9 @@ mod tests {
         )
         .unwrap();
         recorder
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
+            .unwrap();
+        recorder
             .record_bytes(
                 Duration::ZERO,
                 Some(LceReadOnlyQuery::Status),
@@ -538,6 +605,122 @@ mod tests {
             recorder.finalize(Duration::ZERO, LceCaptureEndReason::Completed),
             Err(LceCaptureError::InvalidCapture(
                 "TX bytes do not match the associated typed query"
+            ))
+        ));
+    }
+
+    #[test]
+    fn capture_validation_requires_a_prior_known_boundary_for_queries_and_tx() {
+        fn encoded_artifact(
+            initial_interface_state: LceInterfaceState,
+            entries: Vec<super::LceCaptureEntry>,
+        ) -> Vec<u8> {
+            let body = super::LceEvidenceCaptureBody {
+                format_version: super::LCE_CAPTURE_FORMAT_VERSION,
+                session_id: "fixture-session".to_owned(),
+                origin: LceCaptureOrigin::LiftAssistantSynthetic,
+                initial_interface_state,
+                profile: LceRuntimeTerminalProfile::historical_9600_8n1(),
+                entries,
+                ended_at_micros: 4,
+                end_reason: LceCaptureEndReason::Completed,
+            };
+            let sha256 = super::body_sha256(&body).unwrap();
+            serde_json::to_vec(&super::LceEvidenceCaptureEnvelope {
+                capture: body,
+                sha256,
+            })
+            .unwrap()
+        }
+
+        fn marker(
+            offset_micros: u64,
+            query: Option<LceReadOnlyQuery>,
+            marker: LceCaptureMarker,
+        ) -> super::LceCaptureEntry {
+            super::LceCaptureEntry {
+                offset_micros,
+                query,
+                payload: super::LceCapturePayload::Marker { marker },
+            }
+        }
+
+        fn tx(offset_micros: u64) -> super::LceCaptureEntry {
+            super::LceCaptureEntry {
+                offset_micros,
+                query: Some(LceReadOnlyQuery::Status),
+                payload: super::LceCapturePayload::Bytes {
+                    direction: LceCaptureDirection::Tx,
+                    bytes: b"STA\r".to_vec(),
+                },
+            }
+        }
+
+        let prefix = vec![
+            marker(0, None, LceCaptureMarker::SessionStarted),
+            marker(1, None, LceCaptureMarker::TransportReady),
+        ];
+        let mut invalid_query = prefix.clone();
+        invalid_query.push(marker(
+            2,
+            Some(LceReadOnlyQuery::Status),
+            LceCaptureMarker::QueryIssued {
+                query: LceReadOnlyQuery::Status,
+            },
+        ));
+        invalid_query.push(tx(3));
+        assert!(matches!(
+            super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded_artifact(
+                LceInterfaceState::Unknown,
+                invalid_query,
+            )),
+            Err(LceCaptureError::InvalidCapture(
+                "query issued before a known boundary"
+            ))
+        ));
+
+        let mut invalid_tx = prefix.clone();
+        invalid_tx.push(tx(2));
+        assert!(matches!(
+            super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded_artifact(
+                LceInterfaceState::Unknown,
+                invalid_tx,
+            )),
+            Err(LceCaptureError::InvalidCapture(
+                "TX bytes precede a known boundary"
+            ))
+        ));
+
+        let mut valid = prefix;
+        valid.push(marker(2, None, LceCaptureMarker::KnownBoundary));
+        valid.push(marker(
+            3,
+            Some(LceReadOnlyQuery::Status),
+            LceCaptureMarker::QueryIssued {
+                query: LceReadOnlyQuery::Status,
+            },
+        ));
+        valid.push(tx(4));
+        assert!(
+            super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded_artifact(
+                LceInterfaceState::Unknown,
+                valid,
+            ))
+            .is_ok()
+        );
+
+        let mut impossible_locked = vec![
+            marker(0, None, LceCaptureMarker::SessionStarted),
+            marker(1, None, LceCaptureMarker::TransportReady),
+        ];
+        impossible_locked.push(marker(2, None, LceCaptureMarker::KnownBoundary));
+        assert!(matches!(
+            super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded_artifact(
+                LceInterfaceState::LockedOrUnavailable,
+                impossible_locked,
+            )),
+            Err(LceCaptureError::InvalidCapture(
+                "a locked/unavailable initial interface cannot observe a known boundary"
             ))
         ));
     }

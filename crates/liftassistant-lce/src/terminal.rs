@@ -854,10 +854,10 @@ mod tests {
     };
 
     use crate::{
-        LceCaptureDirection, LceCaptureOrigin, LceCapturePayload, LceDisconnectReason,
-        LceInterfaceState, LceReadOnlyQuery, LceRuntimeTerminalProfile, LceTerminalFailureKind,
-        LceTerminalSession, LceTerminalSessionEvent, LceTerminalSessionState, RecordedLceFrame,
-        map_cmd_record, map_mde_record, map_sta_record,
+        LceCaptureDirection, LceCaptureMarker, LceCaptureOrigin, LceCapturePayload,
+        LceDisconnectReason, LceInterfaceState, LceReadOnlyQuery, LceRuntimeTerminalProfile,
+        LceTerminalFailureKind, LceTerminalSession, LceTerminalSessionEvent,
+        LceTerminalSessionState, RecordedLceFrame, map_cmd_record, map_mde_record, map_sta_record,
     };
 
     const STATUS: &[u8] = b"STA STATUS_OF_LIFT 02\r\nADV_POS SPD DIR SRV FLT_ID DOOR LVL_NO AT_DZN TERM_LIM SPDA_VID SPDB_VID LOAD CORR_DRV CC_PREFF AT_LEVEL\r\n03 0 0 0 0 3 03 1 0 1 2 0 0 0 FF\r\n";
@@ -1012,6 +1012,18 @@ mod tests {
                 .issue_query(LceReadOnlyQuery::Status, Duration::from_millis(1))
                 .is_err()
         );
+        let capture = session.finalize_capture(Duration::from_millis(1)).unwrap();
+        assert_eq!(
+            capture.initial_interface_state(),
+            LceInterfaceState::LockedOrUnavailable
+        );
+        assert!(!capture.entries().iter().any(|entry| matches!(
+            entry.payload(),
+            LceCapturePayload::Bytes {
+                direction: LceCaptureDirection::Tx,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -1129,6 +1141,16 @@ mod tests {
             )
             .unwrap();
         let capture = session.finalize_capture(Duration::from_millis(5)).unwrap();
+        assert_eq!(
+            capture.initial_interface_state(),
+            LceInterfaceState::Unknown
+        );
+        assert!(capture.entries().iter().any(|entry| matches!(
+            entry.payload(),
+            LceCapturePayload::Marker {
+                marker: LceCaptureMarker::KnownBoundary
+            }
+        )));
         let encoded = capture.to_json_bytes().unwrap();
         let decoded = crate::FinalizedLceEvidenceCapture::from_json_bytes(&encoded).unwrap();
         assert_eq!(capture.sha256(), decoded.sha256());

@@ -271,6 +271,37 @@ run or claimed.
 LCEUIO, unlock, controller probing/TX, live serial, passenger equipment or KONE
 write/control path was used or authorized.`
 
+### LCE-R2.1 — Evidence Metadata Consistency Fix
+
+**COMPLETE — `EVIDENCE_METADATA_CONSISTENT`; HUMAN-CHECK reached.** The
+experimental capture schema is now v2. Its top-level
+`initial_interface_state` means only caller-supplied construction-time
+knowledge; it is neither final state nor inferred state and is never rewritten.
+The existing `KnownBoundary` marker remains the sole recorded evidence that an
+initially unknown live R2 session later became `Available`, avoiding a redundant
+state-transition model.
+
+Artifact loading now rejects a `QueryIssued` marker or TX bytes without a prior
+`KnownBoundary`, even when an artificial artifact has a newly computed SHA-256.
+It also rejects a known-boundary claim from a locked/unavailable initial state.
+The old v1 field name is not aliased or migrated because all existing artifacts
+are synthetic and the format remains internal/experimental. Focused regressions
+preserve unknown and locked initial truth, marker evidence, exact typed TX,
+checksum/round-trip behavior and the PTY live-state-versus-capture-metadata
+distinction.
+
+Closing validation passes formatting, warning-free locked workspace all-target
+Clippy, 238 workspace tests with one expected ignored soak child, exact
+Rust/Cargo 1.85.0 locked all-target check, nine TUI scenarios, four non-live
+Headless scenarios, 35 focused LCE unit tests, two Linux PTY integration tests
+and the compile-fail public-API regression. No dependency, Core/Engine source,
+terminal query, hardware path or authority changed. R2 remains
+`PTY_READONLY_CONNECTOR_PARTIAL`; R3 remains separately HUMAN-gated.
+
+**Terminal boundary:** `HUMAN-CHECK — NO /dev/tty*, USB-RS232, CPU561, XDB1,
+LCEUIO, unlock, controller probing/TX, live serial, passenger equipment or KONE
+write/control path was used or authorized.`
+
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 
 **COMPLETE (Simulator-only development slice).** This vertical slice connects

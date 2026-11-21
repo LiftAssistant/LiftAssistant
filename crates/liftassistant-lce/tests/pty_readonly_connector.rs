@@ -119,6 +119,7 @@ fn real_pty_runs_only_typed_queries_and_replays_exact_evidence() {
             .any(|event| matches!(event, LceTerminalSessionEvent::KnownBoundary))
     );
     assert_eq!(session.state(), &LceTerminalSessionState::IdleOrReady);
+    assert_eq!(session.interface_state(), LceInterfaceState::Available);
 
     let fixtures = [
         (LceReadOnlyQuery::Status, STATUS, true, vec![1]),
@@ -180,6 +181,16 @@ fn real_pty_runs_only_typed_queries_and_replays_exact_evidence() {
     let capture = session
         .finalize_capture(Duration::from_micros(clock + 1))
         .unwrap();
+    assert_eq!(
+        capture.initial_interface_state(),
+        LceInterfaceState::Unknown
+    );
+    assert!(capture.entries().iter().any(|entry| matches!(
+        entry.payload(),
+        LceCapturePayload::Marker {
+            marker: liftassistant_lce::LceCaptureMarker::KnownBoundary
+        }
+    )));
     let tx_bytes = capture
         .entries()
         .iter()

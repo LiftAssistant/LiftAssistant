@@ -147,6 +147,13 @@ allowlist and accepts no arbitrary TX bytes. There is no real serial backend,
 device enumeration, LCEUIO/unlock behavior, bootloader profile or controller
 control path. None of these packages establishes a general service or adapter
 framework.
+
+The internal LCE evidence artifact keeps construction-time interface knowledge
+as `initial_interface_state`; it is not a final or inferred state. A later
+`KnownBoundary` marker is the evidence that moves the live R2 session to
+`Available`. Capture format v2 preserves that distinction and rejects query/TX
+history that precedes a known boundary instead of maintaining a second
+interface-state timeline.
 Further packages still require real lifecycle/reuse pressure rather than speculative
 layering.
 

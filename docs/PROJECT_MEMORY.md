@@ -296,6 +296,15 @@ normal code has no serial/USB dependency or device enumeration. The result is
 serial compatibility. First real read-only evidence acquisition remains a
 separate HUMAN gate.
 
+LCE-R2.1 corrects the internal capture metadata before any field acquisition:
+format v2 names construction-time caller knowledge
+`initial_interface_state`, while the existing `KnownBoundary` marker records
+later evidence that makes the live session available. The initial field is
+never silently rewritten. Artifact loading rejects query markers or TX before
+a known boundary; v1 synthetic captures are not migrated or treated as v2.
+This adds no second lifecycle model, protocol behavior, dependency, hardware
+path or authority.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.
