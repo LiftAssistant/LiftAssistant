@@ -8,11 +8,16 @@ publish.workspace = true
 
 [dependencies]
 futures = "0.3"
+getrandom = "0.3"
+liftassistant-engine = { path = "../liftassistant-engine" }
 liftassistant-model = { path = "../liftassistant-model" }
+liftassistant-runtime = { path = "../liftassistant-runtime" }
 ros2-client = "=0.8.2"
+rustix = { version = "0.38.44", features = ["fs", "net", "process"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+signal-hook = "0.3"
 smol = "2"
 
 [dev-dependencies]
-liftassistant-engine = { path = "../liftassistant-engine" }
-liftassistant-runtime = { path = "../liftassistant-runtime" }
+tempfile = "3"

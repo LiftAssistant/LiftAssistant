@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::fmt;
+use std::{collections::BTreeSet, fmt};
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct CarId(String);
@@ -204,14 +204,24 @@ impl fmt::Display for ReportedDestination {
 pub struct ExecutionCapabilities {
     pub serve_floor: bool,
     pub park: bool,
+    floors: BTreeSet<Floor>,
 }
 
 impl ExecutionCapabilities {
-    pub const fn reference_defaults() -> Self {
+    pub fn new(serve_floor: bool, park: bool, floors: impl IntoIterator<Item = Floor>) -> Self {
         Self {
-            serve_floor: true,
-            park: true,
+            serve_floor,
+            park,
+            floors: floors.into_iter().collect(),
         }
+    }
+
+    pub fn supports_floor(&self, floor: Floor) -> bool {
+        self.floors.contains(&floor)
+    }
+
+    pub fn reference_defaults() -> Self {
+        Self::new(true, true, (1..=8).map(Floor::new))
     }
 }
 
@@ -272,6 +282,7 @@ impl fmt::Display for ObservationSourceId {
 }
 
 /// Identifies one explicitly activated lifetime of an observation source.
+/// The lifecycle owner supplies a fresh token for each new incarnation.
 ///
 /// Session values are opaque and comparable only for identity. They carry no ordering,
 /// freshness, or wall-clock meaning.
@@ -468,6 +479,34 @@ pub struct CallRecord {
 pub enum Intent {
     ServeFloor { car: CarId, floor: Floor },
     ParkAt { car: CarId, floor: Floor },
+}
+
+impl Intent {
+    pub fn car(&self) -> &CarId {
+        match self {
+            Self::ServeFloor { car, .. } | Self::ParkAt { car, .. } => car,
+        }
+    }
+
+    pub const fn floor(&self) -> Floor {
+        match self {
+            Self::ServeFloor { floor, .. } | Self::ParkAt { floor, .. } => *floor,
+        }
+    }
+}
+
+/// Logical operation identity, independent of the hall call and the controller receipt.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct IntentId(u64);
+
+impl IntentId {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub const fn value(self) -> u64 {
+        self.0
+    }
 }
 
 #[cfg(test)]

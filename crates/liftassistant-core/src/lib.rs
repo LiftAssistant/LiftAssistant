@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use liftassistant_model::{
     BuildingTopology, CallId, CallRecord, CallState, CarId, CarLocation, CarState, Direction,
@@ -42,24 +42,24 @@ pub enum CallRegistration {
 pub struct CallRegistry {
     next_id: u64,
     calls: BTreeMap<CallId, CallRecord>,
+    completed: VecDeque<CallRecord>,
     arrived: BTreeSet<CallId>,
 }
+
+const COMPLETED_CALL_CAPACITY: usize = 128;
 
 impl CallRegistry {
     pub fn new() -> Self {
         Self {
             next_id: 1,
             calls: BTreeMap::new(),
+            completed: VecDeque::new(),
             arrived: BTreeSet::new(),
         }
     }
 
     pub fn register(&mut self, call: HallCall) -> CallRegistration {
-        if let Some(existing) = self
-            .calls
-            .values()
-            .find(|existing| existing.call == call && existing.state.is_active())
-        {
+        if let Some(existing) = self.calls.values().find(|existing| existing.call == call) {
             return CallRegistration::Duplicate(existing.id);
         }
 
@@ -80,10 +80,18 @@ impl CallRegistry {
     }
 
     pub fn get(&self, id: CallId) -> Option<&CallRecord> {
-        self.calls.get(&id)
+        self.calls
+            .get(&id)
+            .or_else(|| self.completed.iter().find(|record| record.id == id))
     }
 
     pub fn calls(&self) -> impl Iterator<Item = &CallRecord> {
+        let mut records: Vec<_> = self.calls.values().chain(self.completed.iter()).collect();
+        records.sort_unstable_by_key(|record| record.id);
+        records.into_iter()
+    }
+
+    pub fn active_calls(&self) -> impl Iterator<Item = &CallRecord> {
         self.calls.values()
     }
 
@@ -109,8 +117,17 @@ impl CallRegistry {
 
     pub fn note_arrival(&mut self, car: &CarId, floor: Floor) -> Option<CallId> {
         let id = self.serving_call(car, floor)?;
+        self.note_call_arrival(id, car, floor).then_some(id)
+    }
+
+    pub fn note_call_arrival(&mut self, id: CallId, car: &CarId, floor: Floor) -> bool {
+        if !self.calls.get(&id).is_some_and(|record| {
+            record.call.floor == floor && record.state == CallState::Serving(car.clone())
+        }) {
+            return false;
+        }
         self.arrived.insert(id);
-        Some(id)
+        true
     }
 
     pub fn complete_open_call(&mut self, car: &CarId) -> Option<CallId> {
@@ -119,7 +136,11 @@ impl CallRegistry {
                 |record| matches!(&record.state, CallState::Serving(assigned) if assigned == car),
             )
         })?;
-        self.complete(id, car).then_some(id)
+        self.complete_arrived_call(id, car).then_some(id)
+    }
+
+    pub fn complete_arrived_call(&mut self, id: CallId, car: &CarId) -> bool {
+        self.arrived.contains(&id) && self.complete(id, car)
     }
 
     pub fn occupied_cars(&self) -> BTreeSet<CarId> {
@@ -154,15 +175,30 @@ impl CallRegistry {
         true
     }
 
-    pub fn complete(&mut self, id: CallId, car: &CarId) -> bool {
-        let Some(record) = self.calls.get_mut(&id) else {
-            return false;
-        };
-        if record.state != CallState::Serving(car.clone()) {
+    /// Remove work whose execution was prevented before service began.
+    pub fn remove_unstarted(&mut self, id: CallId) -> bool {
+        if !self.calls.get(&id).is_some_and(|record| {
+            matches!(record.state, CallState::Pending | CallState::Assigned(_))
+        }) {
             return false;
         }
+        self.calls.remove(&id);
+        true
+    }
+
+    pub fn complete(&mut self, id: CallId, car: &CarId) -> bool {
+        if !self.calls.get(&id).is_some_and(
+            |record| matches!(&record.state, CallState::Serving(assigned) if assigned == car),
+        ) {
+            return false;
+        }
+        let mut record = self.calls.remove(&id).expect("validated serving call");
         record.state = CallState::Completed;
         self.arrived.remove(&id);
+        if self.completed.len() == COMPLETED_CALL_CAPACITY {
+            self.completed.pop_front();
+        }
+        self.completed.push_back(record);
         true
     }
 }
@@ -179,6 +215,7 @@ pub enum DispatchRejection {
     Busy,
     CapabilitiesUnavailable,
     ServeFloorUnsupported,
+    UnsupportedFloor(Floor),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -247,11 +284,16 @@ pub fn dispatch(
             if busy {
                 rejections.push(DispatchRejection::Busy);
             }
-            let serve_floor = capabilities.get(&car.id).map(|caps| caps.serve_floor);
-            match serve_floor {
+            let execution = capabilities.get(&car.id);
+            match execution {
                 None => rejections.push(DispatchRejection::CapabilitiesUnavailable),
-                Some(false) => rejections.push(DispatchRejection::ServeFloorUnsupported),
-                Some(true) => {}
+                Some(caps) if !caps.serve_floor => {
+                    rejections.push(DispatchRejection::ServeFloorUnsupported)
+                }
+                Some(caps) if !caps.supports_floor(call.floor) => {
+                    rejections.push(DispatchRejection::UnsupportedFloor(call.floor))
+                }
+                Some(_) => {}
             }
             let location_floor_position = match car.location {
                 CarLocation::Floor(floor) => f64::from(floor.index()),
@@ -261,7 +303,7 @@ pub fn dispatch(
                 car: car.id.clone(),
                 mode: car.mode,
                 busy,
-                serve_floor,
+                serve_floor: execution.map(|caps| caps.serve_floor),
                 distance_floors: (location_floor_position - f64::from(call.floor.index())).abs(),
                 rejections,
             }
@@ -319,6 +361,55 @@ mod tests {
     use super::*;
     use liftassistant_model::{Direction, Floor, Position};
 
+    #[test]
+    fn completed_calls_leave_active_state_and_recent_history_is_bounded() {
+        let mut registry = CallRegistry::new();
+        let call = HallCall {
+            floor: Floor::new(5),
+            direction: Direction::Up,
+        };
+        let car = CarId::new("A");
+        for number in 1..=1_024 {
+            let id = CallId::new(number);
+            assert_eq!(registry.register(call), CallRegistration::Created(id));
+            assert_eq!(registry.register(call), CallRegistration::Duplicate(id));
+            assert!(registry.assign(id, car.clone()));
+            assert!(registry.mark_serving(id, &car));
+            assert_eq!(registry.note_arrival(&car, call.floor), Some(id));
+            assert_eq!(registry.complete_open_call(&car), Some(id));
+            assert_eq!(registry.active_calls().count(), 0);
+            assert!(registry.occupied_cars().is_empty());
+        }
+        assert_eq!(registry.calls().count(), COMPLETED_CALL_CAPACITY);
+        assert!(registry.get(CallId::new(1)).is_none());
+        assert_eq!(
+            registry.get(CallId::new(1_024)).map(|call| &call.state),
+            Some(&CallState::Completed)
+        );
+    }
+
+    #[test]
+    fn nearer_car_excluded_when_target_is_outside_its_execution_floors() {
+        let a = CarState::new("A", Floor::new(1));
+        let b = CarState::new("B", Floor::new(8));
+        let capabilities = BTreeMap::from([
+            (
+                a.id.clone(),
+                ExecutionCapabilities::new(true, true, (1..=10).map(Floor::new)),
+            ),
+            (b.id.clone(), ExecutionCapabilities::reference_defaults()),
+        ]);
+        let call = HallCall {
+            floor: Floor::new(9),
+            direction: Direction::Down,
+        };
+        let decision = dispatch(&call, &[a, b], &capabilities, &BTreeSet::new());
+        assert_eq!(decision.selection.unwrap().car, CarId::new("A"));
+        assert_eq!(
+            decision.candidates[1].rejections,
+            [DispatchRejection::UnsupportedFloor(call.floor)]
+        );
+    }
     fn capabilities(cars: &[CarState]) -> BTreeMap<CarId, ExecutionCapabilities> {
         cars.iter()
             .map(|car| (car.id.clone(), ExecutionCapabilities::reference_defaults()))

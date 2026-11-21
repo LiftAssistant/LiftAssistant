@@ -9,6 +9,8 @@ class SemanticBadge extends StatelessWidget {
     required this.foreground,
     required this.background,
     this.icon,
+    this.dotColor,
+    this.hollowDot = false,
     this.monospace = false,
     this.outlined = false,
     this.compact = false,
@@ -19,6 +21,14 @@ class SemanticBadge extends StatelessWidget {
   final Color foreground;
   final Color background;
   final IconData? icon;
+
+  // Compatibility-only presentation hints used by the Operator Surface code
+  // inherited from main. The custom Material 3 UI intentionally does not
+  // render status dots; semantic state remains conveyed by label, tonal color,
+  // optional icon, outline, and tooltip.
+  final Color? dotColor;
+  final bool hollowDot;
+
   final bool monospace;
   final bool outlined;
   final bool compact;

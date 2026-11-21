@@ -6,9 +6,20 @@ The long-term goal is to make elevator controllers, protocols, capabilities, pol
 
 LiftAssistant is an early semantic-core and simulation project. **It is not approved for controlling passenger elevators or any safety-critical equipment.**
 
-## Current target: M5 — Production read-only platform
+## Current milestone — M7 software/simulation gateway
 
 M1 Interactive Simulator is implemented and human-accepted.
+
+M5 is complete at its read-only milestone boundary and M6's controlled intent
+laboratory is HUMAN-accepted and complete. M7.0 + M7.1a are HUMAN-accepted, and
+M7.1b completes the private, process-isolated Open-RMF `ServeFloor` gateway's
+software/simulation recovery boundary. Outcome-unknown retirement remains
+separate from explicit safe resumption, and the official Hotel proof confirms
+that neither a late target-floor snapshot nor retirement alone restores write
+readiness. The project is stopped for a HUMAN HIL/bench-controller environment
+decision. This is not a public write API: Headless HTTP/SSE, CLI and Flutter
+remain read-only, and no passenger elevator, real controller cabinet, CAN/OEM
+network or OPC installation is authorized.
 
 The current working vertical path is:
 
@@ -88,6 +99,33 @@ cargo run -p liftassistant-tui -- --scenario adapter-validation-profiles
 
 The scenario applies one bounded checklist to the concrete Open-RMF adapter and recorded BACnet mapper: explicit native-to-logical identity, Engine binding, source sessions, source-global sequence, ambiguity preservation, restart invalidation, canonical Engine ownership, and an observation-only path. Its report keeps RMF's official live-plus-recorded evidence separate from BACnet's recorded-only evidence. These are deterministic engineering checks, not certification, conformance, safety validation, or evidence of a live BACnet endpoint.
 
+Run the M6A virtual write-adapter profile without a TTY:
+
+```bash
+cargo run -p liftassistant-tui -- --scenario m6a-write-adapter-profile
+```
+
+The profile checks the simulated `ServeFloor` and `ParkAt` boundary for controller binding, per-car execution floors, readiness, grant fencing, IntentId idempotency, correlated receipts, canonical observation reconciliation, cancellation, and restart without resend. It includes the deterministic fault matrix and bounded diagnostic replay. Its evidence applies to VirtualController and SimRuntime inside this process. The headless API and its clients continue to expose read-only observations.
+
+M6B.1 additionally challenges that contract with the independently running official Open-RMF Hotel simulation. The simulation-only `liftassistant-rmf` `hotel_intent_probe` example is intentionally not a normal Host command: it refuses to publish outside its fixed gateway-free test network and is absent from the read-only Host, API and clients. The executable validation cases and their evidence limits are recorded in [`docs/M6B1_OPEN_RMF_VALIDATION.md`](docs/M6B1_OPEN_RMF_VALIDATION.md). A Hotel pass is simulator semantic evidence, not real-elevator, hardware, safety, OEM, CAN/CANopen, production or certification evidence.
+
+M7.1a adds the separate `liftassistant-rmf-gateway` binary. It has a local-only,
+kernel-peer-authenticated Unix socket, one explicit logical/native car and floor
+mapping, a fresh Engine grant, a bounded durable unresolved-operation record,
+and no automatic resend after restart. Run it only with a private operator-owned
+configuration:
+
+```bash
+cargo run -p liftassistant-rmf --bin liftassistant-rmf-gateway -- \
+  --config /private/path/rmf-gateway.json
+```
+
+The configuration shape, failure/recovery contract, explicit private recovery
+operations and completed official Hotel evidence are documented in
+[`docs/M7_RMF_GATEWAY.md`](docs/M7_RMF_GATEWAY.md). This binary is an
+experimental software/simulation gateway, not a passenger-production service
+or a general-purpose command interface.
+
 Inspect bounded diagnostic capture and deterministic incident replay:
 
 ~~~bash
@@ -102,7 +140,7 @@ Exercise the internal versioned incident-capsule path, including a fresh replay 
 cargo run -p liftassistant-headless -- --scenario headless-incident-capsule-replay
 ~~~
 
-The production RMF command may additionally receive `--incident-capsule-out <path>` to create one bounded capsule at the first payload-stale trigger. Files are created without overwriting an existing path and can be replayed with `liftassistant-headless --replay-incident-capsule <path>`. The JSON wire representation is private, experimental, size-bounded, and explicitly versioned; it is not a stable/public schema or an unbounded telemetry archive.
+The production RMF command may additionally receive `--incident-capsule-out <path>` to attempt one bounded capsule at the first feed-wide payload-stale trigger. A failed attempt warns and observation continues. Files are created exclusively and can be replayed with `liftassistant-headless --replay-incident-capsule <path>`. The JSON format is private, experimental, size-bounded and versioned.
 
 Create a separately written candidate for manual review with `liftassistant-headless --sanitize-incident-capsule <private.json> <candidate.json>`. The deterministic private profile pseudonymizes source/session/car identities and remaps floor relationships, then requires the candidate to reproduce the same trigger in a fresh host before writing it. The source file is never modified. The candidate embeds `manual_review_required=true`; this path does not claim perfect anonymization, security certification, or permission to upload/publish the result.
 
@@ -147,7 +185,17 @@ cd client
 flutter run -d linux
 ~~~
 
-The graphical client connects to an explicitly configured `http://host:port`, loads a complete `experimental/v0` snapshot, subscribes to continuous SSE `snapshot` events, recovers across disconnects and Host restarts (including Host-local revision resets), and remains strictly read-only. Because `liftassistant-headless` intentionally omits wildcard CORS headers on unauthenticated HTTP, browser deployments should serve `flutter build web --no-web-resources-cdn` from the same origin (for example behind a local/LAN reverse proxy forwarding `/api/experimental/v0/*`).
+The graphical client connects to an explicitly configured `http://host:port`, loads a complete `experimental/v0` snapshot, subscribes to continuous SSE `snapshot` events, recovers across disconnects and Host restarts (including Host-local revision resets), and remains strictly read-only against normal `liftassistant-headless` Hosts. Because `liftassistant-headless` intentionally omits wildcard CORS headers on unauthenticated HTTP, browser deployments should serve `flutter build web --no-web-resources-cdn` from the same origin (for example behind a local/LAN reverse proxy forwarding `/api/experimental/v0/*`).
+
+For local development only, an isolated Simulator server example can expose the same read-only `experimental/v0` snapshot/SSE endpoints together with an explicitly opted-in, loopback-only Simulator `ServeFloor` workflow (`/api/dev-sim/v0/*`):
+
+~~~bash
+cargo run -p liftassistant-headless --example sim-dev-server -- \
+  --listen 127.0.0.1:8080 \
+  --enable-dev-sim-control
+~~~
+
+Without `--enable-dev-sim-control`, the example serves only read-only `experimental/v0`. When enabled on loopback, `client/` exercises preview, transaction-bound review, client-correlated submission, Engine admission/`IntentId` execution against `VirtualController(SimRuntime)`, canonical observation reconciliation, reconnect status query without automatic resend, and honest process-restart knowledge loss. This example is strictly Simulator-only and development-only: `/api/experimental/v0/*` stays read-only, RMF/LCE/real hardware are unreachable, mode control and settings/parameters are absent, and no public/production control API or real-elevator write path is claimed.
 
 Exercise the live Open-RMF subscription proof against an independently running official Hotel simulation:
 
@@ -180,6 +228,8 @@ cargo run -p liftassistant-headless -- --run-rmf-read-only \
   --api-listen 127.0.0.1:8080 \
   --agv-as-normal
 ~~~
+
+The configured floors define the building universe. Each RMF lift may report a different subset. `--max-silence-ms` applies to the feed and individually to each bound lift after its first payload. A silent or malformed lift can lose its own read-side state while other lifts continue updating.
 
 The host creates an adapter-owned source session, reports lifecycle/readiness changes, revokes stale operational truth, reconnects for same-session recovery, and handles SIGINT/SIGTERM cooperatively even before the first payload arrives. Every floor, native-to-logical binding, binding role, interaction-mode projection, and freshness duration is explicit. The API is disabled when `--api-listen` is omitted. Binding a non-loopback address is allowed only as an explicit operator choice and emits a warning because this experimental read-only API has no authentication, TLS, or RBAC; it also does not enable wildcard CORS. This CLI and wire format are internal/experimental rather than stable public contracts, and the host remains subscription-only.
 

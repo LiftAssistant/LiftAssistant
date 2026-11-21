@@ -28,6 +28,7 @@ extension type _JSRequestInit._(JSObject _) implements JSObject {
   external factory _JSRequestInit({
     JSString method,
     JSObject headers,
+    JSString? body,
     JSString cache,
     JSString redirect,
     JSObject signal,
@@ -68,7 +69,7 @@ HostTransport createHostTransport({
   );
 }
 
-final class WebHostTransport implements HostTransport {
+final class WebHostTransport implements HostTransport, DevControlTransport {
   WebHostTransport({
     this.requestTimeout = const Duration(seconds: 8),
     this.streamInactivityTimeout = const Duration(seconds: 40),
@@ -89,10 +90,7 @@ final class WebHostTransport implements HostTransport {
     return pageUri.origin != endpoint.origin;
   }
 
-  HostUnreachableException _mapFetchError(
-    HostEndpoint endpoint,
-    Object error,
-  ) {
+  HostUnreachableException _mapFetchError(HostEndpoint endpoint, Object error) {
     if (_isCrossOrigin(endpoint)) {
       return HostUnreachableException(
         'Browser could not reach ${endpoint.origin} from web origin ${Uri.base.origin}. '
@@ -149,10 +147,12 @@ final class WebHostTransport implements HostTransport {
         );
       }
 
-      final String? contentLengthRaw =
-          response.headers.get('content-length'.toJS)?.toDart;
-      final int? contentLength =
-          contentLengthRaw == null ? null : int.tryParse(contentLengthRaw);
+      final String? contentLengthRaw = response.headers
+          .get('content-length'.toJS)
+          ?.toDart;
+      final int? contentLength = contentLengthRaw == null
+          ? null
+          : int.tryParse(contentLengthRaw);
       if (contentLength != null && contentLength > maxPayloadBytes) {
         abortController.abort();
         throw SnapshotTooLargeException(limitBytes: maxPayloadBytes);
@@ -193,8 +193,9 @@ final class WebHostTransport implements HostTransport {
         }
       }
 
-      final JSString bodyText =
-          await response.text().toDart.timeout(requestTimeout);
+      final JSString bodyText = await response.text().toDart.timeout(
+        requestTimeout,
+      );
       final String dartText = bodyText.toDart;
       if (utf8.encode(dartText).length > maxPayloadBytes) {
         throw SnapshotTooLargeException(limitBytes: maxPayloadBytes);
@@ -306,9 +307,7 @@ final class WebHostTransport implements HostTransport {
         );
         abortController.abort();
         _activeControllers.remove(abortController);
-        unawaited(
-          reader.cancel().toDart.then<void>((_) {}, onError: (_) {}),
-        );
+        unawaited(reader.cancel().toDart.then<void>((_) {}, onError: (_) {}));
         unawaited(parsedSubscription?.cancel());
         if (!byteController.isClosed) {
           unawaited(byteController.close());
@@ -377,57 +376,58 @@ final class WebHostTransport implements HostTransport {
     outputController = StreamController<String>(
       onListen: () {
         resetWatchdog();
-        parsedSubscription = parseSseSnapshotStream(
-          byteController.stream,
-          onByteActivity: resetWatchdog,
-          maxEventBytes: maxPayloadBytes,
-        ).listen(
-          (String payload) {
-            if (!outputController.isClosed) {
-              outputController.add(payload);
-            }
-          },
-          onError: (Object error, StackTrace stackTrace) {
-            if (closedLocally || outputController.isClosed) {
-              return;
-            }
-            closedLocally = true;
-            watchdog?.cancel();
-            abortController.abort();
-            _activeControllers.remove(abortController);
-            unawaited(
-              reader.cancel().toDart.then<void>((_) {}, onError: (_) {}),
-            );
-            unawaited(parsedSubscription?.cancel());
-            if (!byteController.isClosed) {
-              unawaited(byteController.close());
-            }
-            outputController.addError(
-              error is HostTransportException
-                  ? error
-                  : HostStreamDisconnectedException(
-                      'SSE stream interrupted: $error',
+        parsedSubscription =
+            parseSseSnapshotStream(
+              byteController.stream,
+              onByteActivity: resetWatchdog,
+              maxEventBytes: maxPayloadBytes,
+            ).listen(
+              (String payload) {
+                if (!outputController.isClosed) {
+                  outputController.add(payload);
+                }
+              },
+              onError: (Object error, StackTrace stackTrace) {
+                if (closedLocally || outputController.isClosed) {
+                  return;
+                }
+                closedLocally = true;
+                watchdog?.cancel();
+                abortController.abort();
+                _activeControllers.remove(abortController);
+                unawaited(
+                  reader.cancel().toDart.then<void>((_) {}, onError: (_) {}),
+                );
+                unawaited(parsedSubscription?.cancel());
+                if (!byteController.isClosed) {
+                  unawaited(byteController.close());
+                }
+                outputController.addError(
+                  error is HostTransportException
+                      ? error
+                      : HostStreamDisconnectedException(
+                          'SSE stream interrupted: $error',
+                        ),
+                  stackTrace,
+                );
+                unawaited(outputController.close());
+              },
+              onDone: () {
+                watchdog?.cancel();
+                _activeControllers.remove(abortController);
+                if (!closedLocally && !outputController.isClosed) {
+                  outputController.addError(
+                    const HostStreamDisconnectedException(
+                      'Host closed the SSE stream.',
                     ),
-              stackTrace,
+                  );
+                }
+                if (!outputController.isClosed) {
+                  unawaited(outputController.close());
+                }
+              },
+              cancelOnError: false,
             );
-            unawaited(outputController.close());
-          },
-          onDone: () {
-            watchdog?.cancel();
-            _activeControllers.remove(abortController);
-            if (!closedLocally && !outputController.isClosed) {
-              outputController.addError(
-                const HostStreamDisconnectedException(
-                  'Host closed the SSE stream.',
-                ),
-              );
-            }
-            if (!outputController.isClosed) {
-              unawaited(outputController.close());
-            }
-          },
-          cancelOnError: false,
-        );
         unawaited(pumpReader());
       },
       onCancel: closeConnection,
@@ -436,6 +436,193 @@ final class WebHostTransport implements HostTransport {
     return HostSseConnection(
       snapshots: outputController.stream,
       onClose: closeConnection,
+    );
+  }
+
+  Future<ControlHttpResponse> _sendControlRequest(
+    HostEndpoint endpoint, {
+    required String method,
+    required Uri uri,
+    String? jsonBody,
+  }) async {
+    if (_disposed) {
+      throw const HostUnreachableException('Transport has been disposed.');
+    }
+    final int byteLimit = maxPayloadBytes < maxControlResponseBytes
+        ? maxPayloadBytes
+        : maxControlResponseBytes;
+    final _JSAbortController abortController = _JSAbortController();
+    _activeControllers.add(abortController);
+    final Timer timeoutTimer = Timer(
+      requestTimeout,
+      () => abortController.abort(),
+    );
+
+    try {
+      final _JSHeaders headers = _JSHeaders()
+        ..set('Accept'.toJS, 'application/json'.toJS);
+      if (jsonBody != null) {
+        headers.set(
+          'Content-Type'.toJS,
+          'application/json; charset=utf-8'.toJS,
+        );
+      }
+      final _JSRequestInit init = jsonBody != null
+          ? _JSRequestInit(
+              method: method.toJS,
+              headers: headers,
+              body: jsonBody.toJS,
+              cache: 'no-store'.toJS,
+              redirect: 'error'.toJS,
+              signal: abortController.signal,
+            )
+          : _JSRequestInit(
+              method: method.toJS,
+              headers: headers,
+              cache: 'no-store'.toJS,
+              redirect: 'error'.toJS,
+              signal: abortController.signal,
+            );
+      final _JSResponse response = await _jsFetch(
+        uri.toString().toJS,
+        init,
+      ).toDart.timeout(requestTimeout);
+
+      final int status = response.status;
+      if (status >= 300 && status < 400) {
+        throw HostHttpStatusException(
+          statusCode: status,
+          operation: 'Control $method',
+        );
+      }
+
+      final String contentType =
+          response.headers.get('content-type'.toJS)?.toDart ?? '';
+      final String? contentLengthRaw = response.headers
+          .get('content-length'.toJS)
+          ?.toDart;
+      final int? contentLength = contentLengthRaw == null
+          ? null
+          : int.tryParse(contentLengthRaw);
+      if (contentLength != null && contentLength > byteLimit) {
+        abortController.abort();
+        throw SnapshotTooLargeException(limitBytes: byteLimit);
+      }
+
+      final _JSReadableStream? body = response.body;
+      if (body != null) {
+        final _JSReadableStreamDefaultReader reader = body.getReader();
+        final BytesBuilder builder = BytesBuilder(copy: false);
+        try {
+          await (() async {
+            while (true) {
+              final _JSReadResult chunk = await reader.read().toDart;
+              if (chunk.done) {
+                break;
+              }
+              final JSUint8Array? bytes = chunk.value;
+              if (bytes != null) {
+                final Uint8List dartBytes = bytes.toDart;
+                if (builder.length + dartBytes.length > byteLimit) {
+                  abortController.abort();
+                  unawaited(
+                    reader.cancel().toDart.then<void>((_) {}, onError: (_) {}),
+                  );
+                  throw SnapshotTooLargeException(limitBytes: byteLimit);
+                }
+                if (dartBytes.isNotEmpty) {
+                  builder.add(dartBytes);
+                }
+              }
+            }
+          })().timeout(requestTimeout);
+          return ControlHttpResponse(
+            statusCode: status,
+            body: utf8.decode(builder.takeBytes()),
+            contentType: contentType,
+          );
+        } on FormatException catch (error) {
+          throw HostUnreachableException(
+            'Invalid UTF-8 control response from ${endpoint.origin}: ${error.message}',
+          );
+        }
+      }
+
+      final JSString bodyText = await response.text().toDart.timeout(
+        requestTimeout,
+      );
+      final String dartText = bodyText.toDart;
+      if (utf8.encode(dartText).length > byteLimit) {
+        throw SnapshotTooLargeException(limitBytes: byteLimit);
+      }
+      return ControlHttpResponse(
+        statusCode: status,
+        body: dartText,
+        contentType: contentType,
+      );
+    } on HostTransportException {
+      rethrow;
+    } on TimeoutException {
+      abortController.abort();
+      throw HostUnreachableException(
+        'Timed out communicating with control surface at ${endpoint.origin}.',
+      );
+    } catch (error) {
+      throw _mapFetchError(endpoint, error);
+    } finally {
+      timeoutTimer.cancel();
+      _activeControllers.remove(abortController);
+    }
+  }
+
+  @override
+  Future<ControlHttpResponse> fetchControlCapabilities(HostEndpoint endpoint) {
+    return _sendControlRequest(
+      endpoint,
+      method: 'GET',
+      uri: endpoint.devControlCapabilitiesUri,
+    );
+  }
+
+  @override
+  Future<ControlHttpResponse> postServeFloorPreview(
+    HostEndpoint endpoint,
+    String jsonBody,
+  ) {
+    return _sendControlRequest(
+      endpoint,
+      method: 'POST',
+      uri: endpoint.devControlServeFloorPreviewUri,
+      jsonBody: jsonBody,
+    );
+  }
+
+  @override
+  Future<ControlHttpResponse> postServeFloorSubmit(
+    HostEndpoint endpoint,
+    String jsonBody,
+  ) {
+    return _sendControlRequest(
+      endpoint,
+      method: 'POST',
+      uri: endpoint.devControlServeFloorSubmitUri,
+      jsonBody: jsonBody,
+    );
+  }
+
+  @override
+  Future<ControlHttpResponse> fetchSubmissionStatus(
+    HostEndpoint endpoint,
+    String submissionKey, {
+    String? expectedInstanceId,
+  }) {
+    return _sendControlRequest(
+      endpoint,
+      method: 'GET',
+      uri: endpoint.devControlSubmissionUri(
+        submissionKey,
+        expectedInstanceId: expectedInstanceId,
+      ),
     );
   }
 

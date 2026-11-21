@@ -1,5 +1,64 @@
 # Prior art and research policy
 
+## M6A controlled intent semantics
+
+CiA's [417 application profile](https://can-cia.org/can-knowledge/cia-417-series-profile-for-lift-control-systems) and the implementer's [CANoopEn demonstration](https://xyntos.ch/en/canopen/configuration/) distinguish a landing call from its acknowledgement. [ASHRAE BACnet Lift](https://bacnet.org/wp-content/uploads/sites/4/2022/08/Add-135-2012aq.pdf) separates call registration, assignment, car position and door-side properties. [Open-RMF LiftRequest](https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftRequest.msg) carries a requested floor and requester session and [LiftState](https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg) reports a lift's available floors and observed progress. These support separate call and operation identities, typed receipts, explicit execution coverage, and observation-based satisfaction.
+
+| Reviewed interface | Request and holder | Arrival, cancellation, failure and recovery implications |
+| --- | --- | --- |
+| [CiA 417 / CANoopEnDemo](https://github.com/xyntos-ch/CANoopEnDemo) | Panel call and separate call-controller acknowledgement | The demonstration confirms acknowledgement independently from arrival. The example provides no generic holder, retry or restart contract to import. |
+| [Open-RMF](https://osrf.github.io/ros2multirobotbook/integration_lifts.html) | Supervisor mediates shared requests. LiftRequest carries session, destination and release | LiftState is separate observed evidence. Mode and door semantics remain adapter context. The message contract supplies no generic per-operation deduplication or restart proof. |
+| [Octa LCI](https://github.com/octarobotics/lci-rmf-adapter) | RMF shared session and adapter-local origin/destination representation | Arrival uses floor and door evidence. Front/rear suffixes and backend ride encoding vary. Portable retry/recovery guarantees were not established. |
+| [QuikSync](https://github.com/quikbot/open-rmf-adapters-quiksync/tree/main/packages/lift_adapter_quiksync) | Per-lift session occupant lock, request execution identifier and conflicting-session rejection | Server report reconciles the adapter's holder view. Release and lock TTL belong to the controller integration. No blanket safe-resend claim follows from owning a session. |
+| [Plynth](https://github.com/plynthbuild/plynth-robot-kit/tree/main/plynth-ros2/src/plynth_rmf_adapter) | Passage ID and robot-specific decisions | Same-ID retries, observed arrival, and distinct cancel-before-boarding versus exited handling. Heartbeat period and passage wire fields stay local. |
+| [KONE RMF OPC integration](https://github.com/chart-sg/lift_kone_opccontroller) | Controller holder session, per-lift floor and door-side configuration | Configured I/O timeouts and separate status publication support treating failed delivery separately from physical outcome. No controller restart guarantee was established. |
+
+[Kafka protocol fencing](https://kafka.apache.org/35/design/protocol/) is supporting evidence for stable retry identity and a bounded active generation. [AWS Device Shadow](https://docs.aws.amazon.com/iot/latest/developerguide/iot-device-shadows.html) provides a separate desired/reported pattern. The virtual lab adopts typed correlation, authority fencing and observation reconciliation. Vendor topic names, physical safety actions, door encoding/holding, service registration, timeouts, offline/emergency policy, transport response codes and production restart guarantees stay outside the canonical vocabulary.
+
+[Kafka's message format](https://kafka.apache.org/21/implementation/message-format/) retains producer sequence information for partition duplicate checking. The analogous local scope is the controlled car. Its execution watermark can fence retired operation IDs without coupling admission across independent cars.
+
+## M6C dispatch-ownership finding
+
+The accepted M6B.3 KONE Sandbox evidence demonstrated a group-owned
+source/destination request with no car selector and later
+`allocated_lift_deck` evidence, but no proven mapping from that value to a
+LiftAssistant `CarId`. In contrast, official Open-RMF
+[`LiftRequest`](https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftRequest.msg)
+names a lift before execution and reports progress separately through
+[`LiftState`](https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg).
+The [KABAM/CHART KONE RMF adapter](https://github.com/KABAM-Robotics/lift_kone_adapter)
+is implementation evidence that a multi-lift KONE group can be translated into
+that named-lift interface; it does not make its adapter-local translation a
+vendor-neutral rule. The separate
+[KONE OPC integration](https://github.com/chart-sg/lift_kone_opccontroller)
+is car-specific evidence, so capability follows the configured backend rather
+than the vendor name.
+
+[Octa LCI](https://github.com/octarobotics/lci-rmf-adapter) retains explicit
+lift/requester context and adapter-local origin/destination translation while
+separating requests from observed results. [QuikSync](https://github.com/quikbot/open-rmf-adapters-quiksync)
+uses explicit session/execution correlation and performs vendor translation
+behind its connector. These reinforce correlation and boundary separation, but
+their transport, retry, locking, platform and lifecycle policies are not Core
+semantics.
+
+Together the evidence supports dispatch ownership as a real independent axis:
+LiftAssistant-owned selection produces the existing car-specific `Intent`,
+whereas an external owner receives a car-free service request and may provide a
+mapped assignment later. LiftAssistant therefore reuses its `Pending ->
+Assigned(CarId)` call lifecycle, requires explicit native-to-logical mapping and
+uses a separate dispatch-scope authority grant. Vendor identity, credentials,
+transport acknowledgement, assignment and physical completion remain distinct.
+This M6C decision is internal and reversible.
+
+## M5 read-only lifecycle corrections
+
+- [Kubernetes object UIDs](https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#uids) and [systemd invocation IDs](https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html) distinguish stable names from individual lifetimes. [Kafka producer fencing](https://kafka.apache.org/35/design/protocol/) rejects superseded producers using current identity/epoch. LiftAssistant takes the fresh opaque incarnation and current-token fence. Its token carries no numeric epoch or event order. Bounded replay artifacts can check uniqueness separately.
+- [DDS 1.4 deadline and liveliness QoS](https://www.omg.org/spec/DDS/1.4/PDF) distinguish an instance update contract from writer liveliness. [ROS 2 QoS](https://raw.githubusercontent.com/ros2/ros2_documentation/kilted/source/Concepts/Intermediate/About-Quality-of-Service-Settings.rst) also separates deadline, liveliness and connection matching. In the observed Hotel feed, one subscription carries multiple lifts. An application arrival timer keyed by explicit lift binding can revoke one car while the feed still receives data. Discovery evidence belongs to the current subscriber. Recreating that subscriber leaves the adapter incarnation and existing ordering intact.
+- [Kubernetes controllers](https://kubernetes.io/docs/concepts/architecture/controller/) scope reconciliation to linked entities. [Open-RMF LiftState](https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg) identifies a lift and supplies its own floor list. LiftAssistant scopes mapping faults to the configured entity and treats unbound names as diagnostic evidence. Feed transport and impossible adapter failures retain their wider scope.
+- [Open-RMF LiftState](https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftState.msg) supplies available floors per lift. [ASHRAE BACnet Lift object](https://bacnet.org/wp-content/uploads/sites/4/2022/08/Add-135-2012aq.pdf) describes individual lift and door/landing characteristics. An observed RMF floor set can therefore fit inside the configured building floor universe without defining execution capability.
+- [OpenTelemetry error handling](https://opentelemetry.io/docs/specs/otel/error-handling/) isolates observability failures from application work. An optional Capsule write is a one-shot diagnostic side effect after semantic invalidation. The Host reports a write error and continues according to source/transport disposition.
+
 This file is a compact research index for semantic and interface design. It is not a specification and must not become a substitute for implementation.
 
 Verified/reviewed: 2026-11-16
@@ -67,6 +126,28 @@ research enough to avoid reinvention
 -> only then deepen research if the implementation exposes ambiguity
 ~~~
 
+## M6B.2 isolated CANopen/CiA 417 validation findings
+
+The M6B.2 prior-art pass deliberately separates normative profile material, executable peers, Linux transport behavior, and test-evidence practice.
+
+- **Normative baseline.** CiA states that CANopen Lift CiA 417 version 2.0.0 was published in 2011 and can be downloaded free of charge. The revised 2026 draft proposal series (including 2.4.0 parts and the 2.3.0 pre-defined-PDO part currently listed by CiA) is member-only. M6B.2 therefore freezes 2.0.0 as the default normative baseline and requires exact part/version/checksum provenance before profile-specific implementation. A future legally available edition requires a separate HUMAN decision rather than silent drift.
+  - https://www.can-cia.org/can-knowledge/cia-417-series-profile-for-lift-control-systems
+  - https://www.can-cia.org/news/pr-english?tx_news_pi1%5Baction%5D=detail&tx_news_pi1%5Bcontroller%5D=News&tx_news_pi1%5Bnews%5D=295
+- **Virtual transport.** Linux documents `vcan` as a virtual local CAN interface that transmits and receives CAN frames without CAN controller hardware. CANopenNode/CANopenLinux explicitly supports SocketCAN and documents testing without a real CAN interface through Linux virtual CAN. This supports an isolated protocol experiment, not any conclusion about electrical timing or controller/transceiver behavior.
+  - https://docs.kernel.org/networking/can.html
+  - https://github.com/CANopenNode/CANopenLinux
+- **Independent CiA 417 peer.** Xyntos CANoopEn/CANoopEnDemo provides Apache-2.0 Linux/SocketCAN CiA 417 examples, including a lift hall-call panel and lift call-controller sample. This makes it useful as an independently running executable peer. Its constants, mappings and behavior remain implementation evidence, not the normative definition of CiA 417.
+  - https://github.com/xyntos-ch/CANoopEn
+  - https://github.com/xyntos-ch/CANoopEnDemo
+  - https://xyntos.ch/en/canopen/samples/
+  - https://xyntos.ch/en/canopen/configuration/
+- **Evidence practice.** PX4 bench testing treats simulation and hardware as different evidence layers, requires bounded timeouts and explicit PASS/FAIL outcomes, and retains timestamped raw evidence. Zephyr Twister separates terminal test status from structured recordings and can preserve nested JSON records alongside ordinary logs. M6B.2 borrows only these test-evidence disciplines: bounded waits, provenance, structured verdicts and raw-artifact separation. It does not import either project's runtime architecture.
+  - https://docs.px4.io/main/en/test_and_ci/bench_testing
+  - https://docs.zephyrproject.org/latest/develop/twister/twister_statuses.html
+  - https://docs.zephyrproject.org/latest/develop/twister/harness/console.html
+
+LiftAssistant deliberately does **not** infer that a CAN socket write is application acknowledgement, that a CiA 417 acknowledgement is physical completion, or that a source-native CAN identifier is a LiftAssistant identity/authority token. It also does not add a general CANopen framework merely because the isolated validation needs an external peer.
+
 ## Current elevator-domain references
 
 ### CiA 417 — CANopen application profile for lift control systems
@@ -107,6 +188,10 @@ https://github.com/open-rmf/rmf_internal_msgs/blob/main/rmf_lift_msgs/msg/LiftRe
 Use it as prior art for how an upper-layer system requests lift service, identifies sessions/requesters, specifies destination floors, and separates requester semantics from lift implementation.
 
 Open-RMF is robotics/building-infrastructure middleware, not the target architecture for LiftAssistant. Reuse concepts only where they fit.
+
+The official Hotel lift plugin provides reliable `lift_requests` input and separate reliable `lift_states` output. Its granted requester session remains in reported state, and releasing that holder is a distinct `REQUEST_END_SESSION` request. The plugin rejects an unavailable floor with a simulator warning rather than a typed per-request rejection message. M6B.1 therefore keeps the holder as adapter-local correlation, uses independent observed state for physical reconciliation, performs an explicit session release before a second same-floor lifecycle, and treats a request with neither acceptance nor completion evidence as indeterminate at a host-owned deadline. It does not manufacture a rejection receipt or reinterpret the holder as a LiftAssistant Principal, grant, Intent, or source session.
+
+Official plugin source: https://github.com/open-rmf/rmf_simulation/blob/main/rmf_building_sim_gz_plugins/src/lift.cpp
 
 ### Redfish — architectural prior art, not lift-domain semantics
 
@@ -236,6 +321,56 @@ https://opentelemetry.io/docs/specs/semconv/general/semantic-convention-groups/
 Useful idea: semantic groups progress through explicit maturity/stability levels and stable groups are not casually broken. This is prior art for future LiftAssistant semantic maturity/versioning.
 
 Additional production patterns such as diagnostic registries, integration quality profiles, process sandboxing, update rollback and sanitized diagnostic bundles should be researched only when their implementation milestone becomes READY.
+
+## M7 RMF gateway implementation review
+
+M7.0 reviewed the 2026-11-20 current source of five concrete elevator integrations before freezing the first process boundary. These projects are implementation prior art, not normative authorities:
+
+- Open-RMF `lift_adapter_template` (`ca5445ad14a7b38fa6f7333bcee0bb586406baba`) owns one lift API, accepts only requests for its configured lift, rejects unsupported floors, polls state independently, and reports the granted RMF session through `LiftState`. Its template deliberately leaves controller connectivity and command semantics to the integrator; it has no durable operation record and its synchronous API calls can share the ROS executor path.
+- KABAM/CHART `lift_kone_adapter` (`9bc3a87a01eea66c606e0a256e1cd8a8c60bc596`) owns KONE token renewal, topology discovery, WebSocket state monitoring and request IDs. It demonstrates that one adapter can own shared building/group transport for several cars. It also logs credential material and uses wall-clock/reconnect loops without a durable command identity, so its credential handling, retry constants and outcome claims are explicit anti-patterns for LiftAssistant.
+- Octa `lci-rmf-adapter` (`a91b2ada76e98d763809621e5b5ca2638369edf7`) separates MQTT receive activity, availability and command contexts, uses locks/conditions and monotonic elapsed time, and keeps state publication alive through a dedicated receiving path. Its device-specific availability/session behavior is not evidence for LiftAssistant authority, receipt or retry semantics.
+- QuikSync `open-rmf-adapters-quiksync` (`e4d797c500664526ae51858156ce757f124c3680`) has one process manage multiple lifts, separates background WebSocket state pumps from request routing, reads secrets from a file, refreshes tokens, bounds reconnect/backoff, and supplies an explicit execution ID to a server that documents idempotent deduplication. LiftAssistant reuses the separation and explicit-correlation lessons, but does not copy its HTTP API, Auth0/session-manager authorization or retries because plain RMF topic publication provides no equivalent deduplication proof.
+- CHART `lift_kone_opccontroller` (`158b5925544e1d9f7270c1fceb552aad1d65e1f8`) keeps configured per-lift floors and uses OPC acknowledgement/state reads after writes, with command work moved to per-request threads while periodic state polling continues. Its blocking tag sequences, process-local busy/session flags and lack of crash recovery are not sufficient production operation ownership.
+
+The compatible common denominator is narrow: the gateway owns backend transport, credentials, reconnect, native correlation and backend readiness; observation ingestion continues independently of command-channel work; unsupported mappings fail explicitly; and retries are allowed only when that backend proves idempotency or non-submission. Transport identity and credentials do not grant LiftAssistant authority. M7 therefore keeps Principal/grant, `IntentId`, receipt, canonical observations and physical reconciliation in Engine, records unresolved work durably before an RMF publish, and never automatically resends it after restart. A ROS publish remains local delivery evidence, not a controller receipt or physical completion.
+
+Source repositories:
+
+- https://github.com/open-rmf/lift_adapter_template
+- https://github.com/KABAM-Robotics/lift_kone_adapter
+- https://github.com/octarobotics/lci-rmf-adapter
+- https://github.com/quikbot/open-rmf-adapters-quiksync
+- https://github.com/chart-sg/lift_kone_opccontroller
+
+## LCE legacy recorded/read-only compatibility
+
+Reviewed 2026-11-20 for the independent LCE-R0 research slice. The KONE-origin
+*LCEUIO Dongle User Manual* (EDMS 884634en.A.2, first issue 2006) establishes
+the LCECPU/LOPCB diagnostic-interface and lock boundary and places LCETERM
+behind that boundary; it does not establish terminal table grammar. Current
+ELFIN eleon S1 installation material and EDNL Sense documentation independently
+show commercial monitoring over KONE LCE diagnostic/RS232 paths. ELFIN's MQTT
+Consumer API 4.0.0 exposes normalized floor, movement, door, status and error
+information, but that normalization is interoperability evidence rather than a
+description of the LCE wire format.
+
+The weaker-provenance historical *LCE Terminal Using Instructions* documents
+read families `STA`, `CMD`, `CAL`, `GRP`, `MDE`, and `N`. It also documents
+active call, memory and parameter operations, so availability of read tables
+does not imply write authority. The durable mapping lessons are narrow:
+
+- level, advance-position and destination fields have distinct meanings;
+- speed and direction must agree before motion is known;
+- controller calls and fault identifiers are context, not LiftAssistant calls,
+  equipment diagnosis or operating mode;
+- group lift and node identifiers require explicit logical-car binding;
+- commercial normalized output cannot fill gaps in historical table semantics.
+
+The focused evidence matrix, source URLs and exact implementation limits are in
+[`LCE_RECORDED_READONLY_COMPATIBILITY.md`](LCE_RECORDED_READONLY_COMPATIBILITY.md).
+The result is `RECORDED_READONLY_PARTIAL`: an original-synthetic recorded parser
+is justified, while serial transport, raw capture compatibility, hardware and
+production claims are not.
 
 
 ## M4 semantic-boundary audit findings — reported/current/desired state

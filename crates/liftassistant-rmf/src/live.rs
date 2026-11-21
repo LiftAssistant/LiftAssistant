@@ -7,7 +7,7 @@ use std::{
 use futures::StreamExt;
 use ros2_client::{
     Context, ContextOptions, Message, MessageTypeName, Name, Node, NodeName, NodeOptions,
-    Subscription, ros2,
+    Publisher, Subscription, builtin_interfaces::Time, ros2,
 };
 use serde::{Deserialize, Serialize};
 
@@ -30,6 +30,26 @@ struct RmfLiftStateMessage {
 }
 
 impl Message for RmfLiftStateMessage {}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct RmfLiftRequestMessage {
+    lift_name: String,
+    request_time: Time,
+    session_id: String,
+    request_type: u8,
+    destination_floor: String,
+    door_state: u8,
+}
+
+impl Message for RmfLiftRequestMessage {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RmfLiftCommand {
+    pub lift_name: String,
+    pub request_time_nanos: i64,
+    pub session_id: String,
+    pub destination_floor: String,
+}
 
 impl RmfLiftStateMessage {
     fn into_payload(self) -> RmfLivePayload {
@@ -105,6 +125,7 @@ impl Error for RmfFreshnessPolicyError {}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RmfReceiveOutcome {
     HandlerStopped,
+    AwaitingPayloadTimeout { max_wait: Duration },
     PayloadStale { max_silence: Duration },
     ShutdownRequested,
 }
@@ -113,6 +134,7 @@ pub enum RmfReceiveOutcome {
 pub enum RmfTransportError {
     Create(String),
     Receive(String),
+    Publish(String),
 }
 
 impl fmt::Display for RmfTransportError {
@@ -120,11 +142,80 @@ impl fmt::Display for RmfTransportError {
         match self {
             Self::Create(message) => write!(f, "failed to create Open-RMF subscription: {message}"),
             Self::Receive(message) => write!(f, "Open-RMF subscription receive failed: {message}"),
+            Self::Publish(message) => write!(f, "Open-RMF request publish failed: {message}"),
         }
     }
 }
 
 impl Error for RmfTransportError {}
+
+/// Open-RMF `/lift_requests` publisher used only by the private M7 gateway process.
+pub struct RmfLiftRequestPublisher {
+    node: Node,
+    publisher: Publisher<RmfLiftRequestMessage>,
+}
+
+impl RmfLiftRequestPublisher {
+    pub fn connect(domain_id: u16, node_name: &str) -> Result<Self, RmfTransportError> {
+        if domain_id > MAX_DDS_DOMAIN_ID {
+            return Err(RmfTransportError::Create(format!(
+                "ROS 2 DDS domain ID {domain_id} exceeds the maximum {MAX_DDS_DOMAIN_ID}"
+            )));
+        }
+        let context = Context::with_options(ContextOptions::new().domain_id(domain_id))
+            .map_err(|error| RmfTransportError::Create(error.to_string()))?;
+        let mut node = context
+            .new_node(
+                NodeName::new("/liftassistant", node_name)
+                    .map_err(|error| RmfTransportError::Create(error.to_string()))?,
+                NodeOptions::new(),
+            )
+            .map_err(|error| RmfTransportError::Create(error.to_string()))?;
+        let qos = ros2::QosPolicyBuilder::new()
+            .history(ros2::policy::History::KeepLast { depth: 1 })
+            .reliability(ros2::policy::Reliability::Reliable {
+                max_blocking_time: ros2::Duration::from_millis(100),
+            })
+            .durability(ros2::policy::Durability::Volatile)
+            .build();
+        let topic = node
+            .create_topic(
+                &Name::new("/", "lift_requests")
+                    .map_err(|error| RmfTransportError::Create(error.to_string()))?,
+                MessageTypeName::new("rmf_lift_msgs", "LiftRequest"),
+                &qos,
+            )
+            .map_err(|error| RmfTransportError::Create(error.to_string()))?;
+        let publisher = node
+            .create_publisher(&topic, Some(qos))
+            .map_err(|error| RmfTransportError::Create(error.to_string()))?;
+        let spinner = node
+            .spinner()
+            .map_err(|error| RmfTransportError::Create(error.to_string()))?;
+        smol::spawn(async move {
+            let _ = spinner.spin().await;
+        })
+        .detach();
+        Ok(Self { node, publisher })
+    }
+
+    pub fn has_subscriber(&self) -> bool {
+        self.publisher.get_subscription_count(&self.node) > 0
+    }
+
+    pub fn publish(&self, command: RmfLiftCommand) -> Result<(), RmfTransportError> {
+        self.publisher
+            .publish(RmfLiftRequestMessage {
+                lift_name: command.lift_name,
+                request_time: Time::from_nanos(command.request_time_nanos),
+                session_id: command.session_id,
+                request_type: 1, // REQUEST_AGV_MODE
+                destination_floor: command.destination_floor,
+                door_state: 2, // DOOR_OPEN
+            })
+            .map_err(|error| RmfTransportError::Publish(format!("{error:?}")))
+    }
+}
 
 /// Read-only Open-RMF `/lift_states` subscriber.
 ///
@@ -172,11 +263,15 @@ impl RmfLiveSubscriber {
 
     pub fn receive_until(
         self,
-        handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+        mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
     ) -> Result<(), RmfTransportError> {
-        match self.receive(None, None, None, handler)? {
+        match self.receive(None, None, None, None, |payload| {
+            payload.map_or(RmfReceiveControl::Continue, &mut handler)
+        })? {
             RmfReceiveOutcome::HandlerStopped => Ok(()),
-            RmfReceiveOutcome::PayloadStale { .. } | RmfReceiveOutcome::ShutdownRequested => {
+            RmfReceiveOutcome::AwaitingPayloadTimeout { .. }
+            | RmfReceiveOutcome::PayloadStale { .. }
+            | RmfReceiveOutcome::ShutdownRequested => {
                 unreachable!("receive_until has no payload-silence policy")
             }
         }
@@ -190,21 +285,23 @@ impl RmfLiveSubscriber {
     pub fn receive_until_stale(
         self,
         policy: RmfFreshnessPolicy,
-        handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+        mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
     ) -> Result<RmfReceiveOutcome, RmfTransportError> {
-        self.receive(Some(policy), None, None, handler)
+        self.receive(Some(policy), None, None, None, |payload| {
+            payload.map_or(RmfReceiveControl::Continue, &mut handler)
+        })
     }
 
     /// Receives payloads with freshness and cooperative process-shutdown supervision.
     ///
-    /// `shutdown_poll_interval` controls only how quickly the host notices its own shutdown
-    /// flag. It does not affect source freshness and must be nonzero.
+    /// The nonzero poll interval bounds idle supervision ticks. The handler receives
+    /// `None` on a tick and `Some` when a payload arrives.
     pub fn receive_until_stale_or_shutdown(
         self,
         policy: RmfFreshnessPolicy,
         shutdown_poll_interval: Duration,
         mut should_shutdown: impl FnMut() -> bool,
-        handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+        handler: impl FnMut(Option<RmfLivePayload>) -> RmfReceiveControl,
     ) -> Result<RmfReceiveOutcome, RmfTransportError> {
         if shutdown_poll_interval.is_zero() {
             return Err(RmfTransportError::Create(
@@ -213,6 +310,34 @@ impl RmfLiveSubscriber {
         }
         self.receive(
             Some(policy),
+            None,
+            Some(shutdown_poll_interval),
+            Some(&mut should_shutdown),
+            handler,
+        )
+    }
+
+    /// Supervises one concrete subscriber generation as well as active payload freshness.
+    ///
+    /// A generation timing out before its first payload is not a source-stale claim. It lets an
+    /// adapter recreate a DDS subscriber whose graph discovery did not produce a data plane,
+    /// while keeping the adapter's source session and sequence domain unchanged.
+    pub fn receive_supervised(
+        self,
+        policy: RmfFreshnessPolicy,
+        initial_payload_wait: Duration,
+        shutdown_poll_interval: Duration,
+        mut should_shutdown: impl FnMut() -> bool,
+        handler: impl FnMut(Option<RmfLivePayload>) -> RmfReceiveControl,
+    ) -> Result<RmfReceiveOutcome, RmfTransportError> {
+        if initial_payload_wait.is_zero() || shutdown_poll_interval.is_zero() {
+            return Err(RmfTransportError::Create(
+                "Open-RMF supervision intervals must be greater than zero".into(),
+            ));
+        }
+        self.receive(
+            Some(policy),
+            Some(initial_payload_wait),
             Some(shutdown_poll_interval),
             Some(&mut should_shutdown),
             handler,
@@ -222,9 +347,10 @@ impl RmfLiveSubscriber {
     fn receive(
         mut self,
         freshness: Option<RmfFreshnessPolicy>,
+        initial_payload_wait: Option<Duration>,
         shutdown_poll_interval: Option<Duration>,
         mut should_shutdown: Option<&mut dyn FnMut() -> bool>,
-        mut handler: impl FnMut(RmfLivePayload) -> RmfReceiveControl,
+        mut handler: impl FnMut(Option<RmfLivePayload>) -> RmfReceiveControl,
     ) -> Result<RmfReceiveOutcome, RmfTransportError> {
         let spinner = self
             .node
@@ -234,6 +360,7 @@ impl RmfLiveSubscriber {
             let stream = self.subscription.async_stream();
             futures::pin_mut!(stream);
             let mut last_payload_at = None;
+            let generation_started_at = Instant::now();
             loop {
                 if should_shutdown.as_mut().is_some_and(|check| check()) {
                     return Ok(RmfReceiveOutcome::ShutdownRequested);
@@ -242,7 +369,17 @@ impl RmfLiveSubscriber {
                     freshness
                         .map(|policy| policy.max_payload_silence().saturating_sub(last.elapsed()))
                 });
-                let wait = match (freshness_remaining, shutdown_poll_interval) {
+                let initial_remaining = if last_payload_at.is_none() {
+                    initial_payload_wait
+                        .map(|limit| limit.saturating_sub(generation_started_at.elapsed()))
+                } else {
+                    None
+                };
+                let supervised_remaining = match (freshness_remaining, initial_remaining) {
+                    (Some(freshness), _) => Some(freshness),
+                    (None, initial) => initial,
+                };
+                let wait = match (supervised_remaining, shutdown_poll_interval) {
                     (Some(freshness), Some(shutdown)) => Some(freshness.min(shutdown)),
                     (Some(freshness), None) => Some(freshness),
                     (None, Some(shutdown)) => Some(shutdown),
@@ -261,12 +398,23 @@ impl RmfLiveSubscriber {
                     if should_shutdown.as_mut().is_some_and(|check| check()) {
                         return Ok(RmfReceiveOutcome::ShutdownRequested);
                     }
-                    if let (Some(policy), Some(last)) = (freshness, last_payload_at)
-                        && last.elapsed() >= policy.max_payload_silence()
+                    if let Some((policy, _)) = freshness
+                        .zip(last_payload_at)
+                        .filter(|(policy, last)| last.elapsed() >= policy.max_payload_silence())
                     {
                         return Ok(RmfReceiveOutcome::PayloadStale {
                             max_silence: policy.max_payload_silence(),
                         });
+                    }
+                    if let Some(limit) = initial_payload_wait {
+                        if last_payload_at.is_none() && generation_started_at.elapsed() >= limit {
+                            return Ok(RmfReceiveOutcome::AwaitingPayloadTimeout {
+                                max_wait: limit,
+                            });
+                        }
+                    }
+                    if handler(None) == RmfReceiveControl::Stop {
+                        return Ok(RmfReceiveOutcome::HandlerStopped);
                     }
                     continue;
                 };
@@ -278,7 +426,7 @@ impl RmfLiveSubscriber {
                 let (message, _) =
                     result.map_err(|error| RmfTransportError::Receive(error.to_string()))?;
                 last_payload_at = Some(Instant::now());
-                if handler(message.into_payload()) == RmfReceiveControl::Stop {
+                if handler(Some(message.into_payload())) == RmfReceiveControl::Stop {
                     return Ok(RmfReceiveOutcome::HandlerStopped);
                 }
             }

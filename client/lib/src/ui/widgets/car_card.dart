@@ -1,8 +1,192 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../api/control_model.dart';
 import '../../api/read_model.dart';
 import '../theme/instrument_theme.dart';
 import 'semantic_badge.dart';
+import 'serve_floor_workflow.dart';
+
+/// A logical car with an explicit `Operational` observation binding in the
+/// current snapshot that has no currently resolved entry in `operational_cars`.
+///
+/// This represents current observation availability only — never an elevator
+/// equipment fault, `OutOfService` mode, timeout inference, or Auxiliary fallback.
+@immutable
+final class UnavailableOperationalCar {
+  const UnavailableOperationalCar({
+    required this.carId,
+    required this.source,
+    required this.session,
+    required this.availability,
+    required this.payload,
+  });
+
+  final String carId;
+  final String source;
+  final SourceSession session;
+  final ObservationAvailability availability;
+  final PayloadActivity payload;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is UnavailableOperationalCar &&
+          other.carId == carId &&
+          other.source == source &&
+          other.session == session &&
+          other.availability == availability &&
+          other.payload == payload);
+
+  @override
+  int get hashCode =>
+      Object.hash(carId, source, session, availability, payload);
+}
+
+@immutable
+sealed class OperationalCarSlot {
+  const OperationalCarSlot();
+
+  String get carId;
+}
+
+@immutable
+final class ResolvedCarSlot extends OperationalCarSlot {
+  const ResolvedCarSlot(this.car);
+
+  final OperationalCar car;
+
+  @override
+  String get carId => car.id;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) || (other is ResolvedCarSlot && other.car == car);
+
+  @override
+  int get hashCode => Object.hash(ResolvedCarSlot, car);
+}
+
+@immutable
+final class UnavailableCarSlot extends OperationalCarSlot {
+  const UnavailableCarSlot(this.car);
+
+  final UnavailableOperationalCar car;
+
+  @override
+  String get carId => car.carId;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is UnavailableCarSlot && other.car == car);
+
+  @override
+  int get hashCode => Object.hash(UnavailableCarSlot, car);
+}
+
+@immutable
+final class ConfiguredOperationalCarsView {
+  const ConfiguredOperationalCarsView({
+    required this.resolvedCars,
+    required this.unavailableCars,
+    required this.slots,
+  });
+
+  final List<OperationalCar> resolvedCars;
+  final List<UnavailableOperationalCar> unavailableCars;
+  final List<OperationalCarSlot> slots;
+
+  bool get hasResolvedCars => resolvedCars.isNotEmpty;
+  int get totalCount => slots.length;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ConfiguredOperationalCarsView &&
+          listEquals(other.resolvedCars, resolvedCars) &&
+          listEquals(other.unavailableCars, unavailableCars) &&
+          listEquals(other.slots, slots));
+
+  @override
+  int get hashCode => Object.hash(
+    Object.hashAll(resolvedCars),
+    Object.hashAll(unavailableCars),
+    Object.hashAll(slots),
+  );
+}
+
+/// Projects the Cars display list strictly from the current [ReadModelSnapshot]:
+///
+/// - Deduplicates resolved cars by logical [OperationalCar.id].
+/// - Computes `configured Operational-bound logical cars MINUS current operational_cars`.
+/// - Ignores `Auxiliary` bindings completely (never promotes Auxiliary to operational
+///   truth or fallback, and never introduces Auxiliary-only cars into Cars).
+/// - Deduplicates unavailable cars by logical `car` identity.
+ConfiguredOperationalCarsView projectConfiguredOperationalCars(
+  ReadModelSnapshot snapshot,
+) {
+  final List<OperationalCar> resolvedCars = <OperationalCar>[];
+  final Set<String> resolvedIds = <String>{};
+  for (final OperationalCar car in snapshot.operationalCars) {
+    if (resolvedIds.add(car.id)) {
+      resolvedCars.add(car);
+    }
+  }
+
+  final Map<String, UnavailableOperationalCar> unavailableByCarId =
+      <String, UnavailableOperationalCar>{};
+  for (final SourceHealth src in snapshot.sources) {
+    for (final SourceObservation obs in src.observations) {
+      if (obs.role != BindingRole.operational) {
+        continue;
+      }
+      if (resolvedIds.contains(obs.car)) {
+        continue;
+      }
+      unavailableByCarId.putIfAbsent(
+        obs.car,
+        () => UnavailableOperationalCar(
+          carId: obs.car,
+          source: src.source,
+          session: src.session,
+          availability: obs.availability,
+          payload: src.payload,
+        ),
+      );
+    }
+  }
+
+  final List<UnavailableOperationalCar> unavailableCars =
+      unavailableByCarId.values.toList()
+        ..sort((UnavailableOperationalCar a, UnavailableOperationalCar b) {
+          return a.carId.compareTo(b.carId);
+        });
+
+  final List<OperationalCarSlot> slots;
+  if (unavailableCars.isEmpty) {
+    slots = <OperationalCarSlot>[
+      for (final OperationalCar car in resolvedCars) ResolvedCarSlot(car),
+    ];
+  } else {
+    slots =
+        <OperationalCarSlot>[
+          for (final OperationalCar car in resolvedCars) ResolvedCarSlot(car),
+          for (final UnavailableOperationalCar car in unavailableCars)
+            UnavailableCarSlot(car),
+        ]..sort((OperationalCarSlot a, OperationalCarSlot b) {
+          return a.carId.compareTo(b.carId);
+        });
+  }
+
+  return ConfiguredOperationalCarsView(
+    resolvedCars: List<OperationalCar>.unmodifiable(resolvedCars),
+    unavailableCars: List<UnavailableOperationalCar>.unmodifiable(
+      unavailableCars,
+    ),
+    slots: List<OperationalCarSlot>.unmodifiable(slots),
+  );
+}
 
 class OperationalCarCard extends StatelessWidget {
   const OperationalCarCard({
@@ -12,6 +196,9 @@ class OperationalCarCard extends StatelessWidget {
     this.useTabularFooter = true,
     this.compactCard = false,
     this.cardWidth,
+    this.controlPresentation,
+    this.onOpenServeFloor,
+    this.onInspectOperation,
   });
 
   final OperationalCar car;
@@ -19,6 +206,9 @@ class OperationalCarCard extends StatelessWidget {
   final bool useTabularFooter;
   final bool compactCard;
   final double? cardWidth;
+  final CarControlPresentation? controlPresentation;
+  final VoidCallback? onOpenServeFloor;
+  final VoidCallback? onInspectOperation;
 
   (Color iconFg, Color iconBg) _avatarColors(InstrumentPalette palette) {
     if (car.operatingMode == CarOperatingMode.fireService ||
@@ -124,9 +314,162 @@ class OperationalCarCard extends StatelessWidget {
                 useTabularColumns: useTabularFooter,
                 compactCard: compactCard || effectiveWidth < 400,
               ),
+              if (controlPresentation != null)
+                _CarControlBar(
+                  carId: car.id,
+                  presentation: controlPresentation!,
+                  onOpenServeFloor: onOpenServeFloor,
+                  onInspectOperation: onInspectOperation,
+                ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _CarControlBar extends StatelessWidget {
+  const _CarControlBar({
+    required this.carId,
+    required this.presentation,
+    this.onOpenServeFloor,
+    this.onInspectOperation,
+  });
+
+  final String carId;
+  final CarControlPresentation presentation;
+  final VoidCallback? onOpenServeFloor;
+  final VoidCallback? onInspectOperation;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final ControlSurfaceCapabilities surface = presentation.surface;
+    final CarServeFloorCapability? cap = presentation.carCapability;
+    final tracked = presentation.trackedForCar;
+
+    Widget leadingControl;
+    if (surface is ControlSurfaceSupportUnknown) {
+      leadingControl = Tooltip(
+        message: surface.reason,
+        child: Text(
+          'ServeFloor: support unknown',
+          key: Key('car-control-status-$carId'),
+          style: instrumentMonoStyle(
+            context,
+            fontSize: 11,
+            color: palette.caution,
+          ),
+        ),
+      );
+    } else if (cap == null || cap.support == OperationSupport.unknown) {
+      final String reasonSuffix = cap?.controlPathReason != null
+          ? ' (${cap!.controlPathReason})'
+          : '';
+      leadingControl = Text(
+        'ServeFloor: support unknown$reasonSuffix',
+        key: Key('car-control-status-$carId'),
+        style: instrumentMonoStyle(
+          context,
+          fontSize: 11,
+          color: palette.caution,
+        ),
+      );
+    } else if (cap.support == OperationSupport.unsupported) {
+      final String reasonSuffix = cap.controlPathReason != null
+          ? ' (${cap.controlPathReason})'
+          : '';
+      leadingControl = Text(
+        'ServeFloor: unsupported$reasonSuffix',
+        key: Key('car-control-status-$carId'),
+        style: instrumentMonoStyle(
+          context,
+          fontSize: 11,
+          color: palette.mutedText,
+        ),
+      );
+    } else if (cap.controlPathAvailability ==
+        ControlPathAvailability.unavailable) {
+      final String reasonSuffix = cap.controlPathReason != null
+          ? ' (${cap.controlPathReason})'
+          : '';
+      leadingControl = Text(
+        'ServeFloor: unavailable$reasonSuffix',
+        key: Key('car-control-status-$carId'),
+        style: instrumentMonoStyle(
+          context,
+          fontSize: 11,
+          color: palette.caution,
+        ),
+      );
+    } else {
+      leadingControl = OutlinedButton.icon(
+        key: Key('car-serve-floor-button-$carId'),
+        onPressed: presentation.hostLive ? onOpenServeFloor : null,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 28),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          textStyle: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        icon: const Icon(Icons.elevator_outlined, size: 14),
+        label: const Text('Serve floor'),
+      );
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: palette.surface,
+        border: Border(top: BorderSide(color: palette.border)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          alignment: WrapAlignment.spaceBetween,
+          children: <Widget>[
+            leadingControl,
+            if (tracked != null) ...<Widget>[
+              Builder(
+                builder: (BuildContext context) {
+                  final (
+                    String label,
+                    Color fg,
+                    Color bg,
+                    Color dotColor,
+                    bool hollowDot,
+                  ) = describeProjectedOperationStatus(
+                    tracked,
+                    palette,
+                  );
+                  final String intentSuffix =
+                      tracked.projection?.intentId != null
+                      ? ' #${tracked.projection!.intentId}'
+                      : '';
+                  return InkWell(
+                    key: Key('car-operation-status-pill-$carId'),
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: onInspectOperation,
+                    child: SemanticBadge(
+                      label: '$label$intentSuffix',
+                      foreground: fg,
+                      background: bg,
+                      dotColor: dotColor,
+                      hollowDot: hollowDot,
+                      outlined: true,
+                    ),
+                  );
+                },
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -1027,6 +1370,312 @@ class _CompactFooterMetric extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class UnavailableOperationalCarCard extends StatelessWidget {
+  const UnavailableOperationalCarCard({
+    super.key,
+    required this.car,
+    this.stretchToRowHeight = false,
+    this.useTabularFooter = true,
+    this.compactCard = false,
+    this.cardWidth,
+  });
+
+  final UnavailableOperationalCar car;
+  final bool stretchToRowHeight;
+  final bool useTabularFooter;
+  final bool compactCard;
+  final double? cardWidth;
+
+  String _detailSummary() {
+    return switch (car.availability) {
+      ObservationAvailability.awaiting =>
+        'Configured Operational binding; awaiting observation state.',
+      ObservationAvailability.incomplete =>
+        'Configured Operational binding; partial evidence only.',
+      ObservationAvailability.unresolved =>
+        'Configured Operational binding; observation unresolved.',
+      ObservationAvailability.revoked =>
+        'Configured Operational binding; observation revoked.',
+      ObservationAvailability.resolved =>
+        'Configured Operational binding; no current operational state.',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final double effectiveWidth = cardWidth ?? MediaQuery.sizeOf(context).width;
+    final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+    final bool compact = compactCard || effectiveWidth < 400 || textScale > 1.35;
+    final Color accent = car.availability == ObservationAvailability.awaiting
+        ? palette.neutral
+        : palette.caution;
+
+    return Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: stretchToRowHeight ? MainAxisSize.max : MainAxisSize.min,
+        mainAxisAlignment: stretchToRowHeight
+            ? MainAxisAlignment.spaceBetween
+            : MainAxisAlignment.start,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    CircleAvatar(
+                      radius: 17,
+                      backgroundColor: accent.withValues(alpha: 0.14),
+                      foregroundColor: accent,
+                      child: const Icon(Icons.visibility_off_outlined, size: 18),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Tooltip(
+                        message: 'Logical CarId: ${car.carId}',
+                        child: Text(
+                          car.carId,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: instrumentTabularStyle(
+                            context,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _UnavailableAvailabilityBadge(
+                      availability: car.availability,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: <Widget>[
+                    Container(
+                      width: compact ? 58 : 72,
+                      height: compact ? 64 : 80,
+                      decoration: BoxDecoration(
+                        color: palette.elevatedSurface,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.elevator_outlined,
+                        size: compact ? 27 : 32,
+                        color: palette.mutedText,
+                      ),
+                    ),
+                    SizedBox(width: compact ? 12 : 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Text(
+                            'Current observation unavailable',
+                            style: TextStyle(
+                              fontSize: compact ? 13.5 : 15,
+                              fontWeight: FontWeight.w700,
+                              color: Theme.of(context).colorScheme.onSurface,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            _detailSummary(),
+                            style: TextStyle(
+                              fontSize: 12,
+                              height: 1.35,
+                              color: palette.subtleText,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          _UnavailableContextFooter(
+            car: car,
+            useTabularColumns: useTabularFooter,
+            compactCard: compact,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UnavailableAvailabilityBadge extends StatelessWidget {
+  const _UnavailableAvailabilityBadge({required this.availability});
+
+  final ObservationAvailability availability;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final (String label, Color fg, Color bg, IconData icon) =
+        switch (availability) {
+      ObservationAvailability.awaiting => (
+        'Awaiting',
+        palette.subtleText,
+        palette.neutralContainer,
+        Icons.hourglass_top_rounded,
+      ),
+      ObservationAvailability.incomplete => (
+        'Incomplete',
+        palette.caution,
+        palette.cautionContainer,
+        Icons.warning_amber_rounded,
+      ),
+      ObservationAvailability.unresolved => (
+        'Unresolved',
+        palette.caution,
+        palette.cautionContainer,
+        Icons.help_outline_rounded,
+      ),
+      ObservationAvailability.revoked => (
+        'Revoked',
+        palette.caution,
+        palette.cautionContainer,
+        Icons.visibility_off_outlined,
+      ),
+      ObservationAvailability.resolved => (
+        'Unavailable',
+        palette.caution,
+        palette.cautionContainer,
+        Icons.warning_amber_rounded,
+      ),
+    };
+
+    return SemanticBadge(
+      label: label,
+      foreground: fg,
+      background: bg,
+      icon: icon,
+      tooltip:
+          'Observation availability (${availability.wireValue}) describes LiftAssistant evidence state only — NOT an elevator fault or OutOfService mode.',
+    );
+  }
+}
+
+class _UnavailableContextFooter extends StatelessWidget {
+  const _UnavailableContextFooter({
+    required this.car,
+    required this.useTabularColumns,
+    required this.compactCard,
+  });
+
+  final UnavailableOperationalCar car;
+  final bool useTabularColumns;
+  final bool compactCard;
+
+  @override
+  Widget build(BuildContext context) {
+    final InstrumentPalette palette = context.palette;
+    final Color availabilityColor =
+        car.availability == ObservationAvailability.awaiting
+        ? palette.subtleText
+        : palette.caution;
+    final Color payloadColor = car.payload == PayloadActivity.active
+        ? palette.subtleText
+        : palette.caution;
+
+    if (useTabularColumns && !compactCard) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              flex: 10,
+              child: _FooterMetricTile(
+                icon: Icons.hub_outlined,
+                label: 'Source',
+                value: car.source,
+                valueColor: palette.subtleText,
+                emphasize: false,
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 26,
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              color: palette.border,
+            ),
+            Expanded(
+              flex: 8,
+              child: _FooterMetricTile(
+                icon: Icons.fact_check_outlined,
+                label: 'Availability',
+                value: car.availability.wireValue,
+                valueColor: availabilityColor,
+                emphasize: true,
+              ),
+            ),
+            Container(
+              width: 1,
+              height: 26,
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              color: palette.border,
+            ),
+            Expanded(
+              flex: 8,
+              child: _FooterMetricTile(
+                icon: Icons.sensors_rounded,
+                label: 'Source payload',
+                value: car.payload.wireValue,
+                valueColor: payloadColor,
+                emphasize: car.payload != PayloadActivity.active,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 8,
+        children: <Widget>[
+          _CompactFooterMetric(
+            icon: Icons.hub_outlined,
+            label: 'Source',
+            value: car.source,
+            valueColor: palette.subtleText,
+            emphasize: false,
+          ),
+          _CompactFooterMetric(
+            icon: Icons.fact_check_outlined,
+            label: 'Availability',
+            value: car.availability.wireValue,
+            valueColor: availabilityColor,
+            emphasize: true,
+          ),
+          _CompactFooterMetric(
+            icon: Icons.sensors_rounded,
+            label: 'Source payload',
+            value: car.payload.wireValue,
+            valueColor: payloadColor,
+            emphasize: car.payload != PayloadActivity.active,
+          ),
+        ],
+      ),
     );
   }
 }

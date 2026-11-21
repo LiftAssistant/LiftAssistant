@@ -1,16 +1,404 @@
 # Project status
 
-Updated: 2026-11-18
+Updated: 2026-11-21
 
 ## Current milestone
 
-**M5 — Production Read-only Platform**
+**M6 is HUMAN-ACCEPTED and COMPLETE. M7.0 + M7.1a are HUMAN-ACCEPTED and
+COMPLETE. M7.1b is COMPLETE: explicit recovery, outcome-unknown retirement and
+safe resumption passed deterministic, process-crash and official Hotel
+validation. Work is stopped at the separate HUMAN HIL/bench-controller
+environment decision.**
+
+M6C.2 is HUMAN-ACCEPTED with its `PARTIAL_MAPPING` result and negative evidence
+unchanged. The [full implementation-backed audit](M6_COMPLETION_AUDIT.md)
+found no remaining M6 blocker after fixing interrupted controlled submission
+and controlled/external withdrawal fencing. M6C.3 is not required: another
+equivalent KONE run would not test a distinct generic hypothesis. Missing
+positive vendor lifecycle mappings remain backend-specific/future evidence.
+
+The HUMAN milestone decision accepted the audit on 2026-11-20. It preserves
+M6B.3 `SEMANTIC_MISMATCH`, M6C.2 `PARTIAL_MAPPING`, the private Evidence v0
+retention boundary and every backend-specific/future-evidence limitation.
+M6C.3 is not required without a new falsifiable hypothesis. M7 authorization is
+limited to software, simulation, HIL and bench-oriented work; no passenger
+operation, real controller/CAN/OEM/OPC access or public write API is authorized.
+
+M7.0 keeps Engine as the owner of Principal/grant, `IntentId`, receipt,
+reconciliation, canonical observation authority and physical completion. The
+RMF gateway process owns only its backend transport/session, native correlation,
+deadlines, reconnect, readiness and bounded durable unresolved-operation state.
+M7.1a is limited to one explicitly mapped logical car, car-specific
+`ServeFloor`, a local private Unix-domain ingress authenticated by OS peer
+identity, and the official Hotel simulation as the only external peer. Existing
+Headless HTTP/SSE, CLI and Flutter surfaces remain read-only.
+
+The concrete [`liftassistant-rmf-gateway`](M7_RMF_GATEWAY.md) maps one
+kernel-authenticated local UID to one configured Principal and a fresh
+process-local Engine grant. It supports only one car-specific `ServeFloor`,
+commits one bounded unresolved operation before RMF publication, preserves the
+same `IntentId` across restart and never automatically resends. Configuration,
+state version/revision/permissions, caller, authority, floor, capability,
+backend availability and current Operational evidence all fail closed. A local
+advisory lock prevents overlapping processes at the configured socket.
+
+Deterministic tests cover the required A--E crash analysis, including an
+independent child killed after a possible send and a successor that recovers
+`IntentId(1)`, reconciles through canonical observations and leaves the send log
+at exactly one entry. Withdrawal window E is explicitly unsupported, so this
+slice exposes no withdrawal command. Persistence contains only a version,
+configuration revision, `IntentId` watermark and at most one unresolved record;
+grants, credentials, ROS identities and observation incarnations are not stored.
+
+The official Hotel simulation supplied the external successful path from local
+caller through grant, durable operation and real `/lift_requests` publication to
+correlated `/lift_states`, Engine reconciliation and durable cleanup. A real
+gateway `SIGKILL` after correlated progress restarted `RecoveryRequired`, did
+not republish, recovered the same operation from new canonical observations and
+advanced the next accepted identity to `IntentId(2)`. A deliberately late
+restart retained unresolved work because holder/progress evidence was no longer
+observable; target-floor state alone was not treated as completion. Pausing and
+resuming Hotel also reproduced DDS discovery without a first payload and proved
+bounded subscriber-generation recreation without changing SourceSession. The
+proof used only the official simulator and accessed no real lift, controller,
+CAN/OEM/OPC endpoint, passenger equipment or site network.
+
+Closing local validation passed formatting, locked workspace all-target Clippy,
+179 workspace tests with one expected ignored test, the exact Rust/Cargo 1.85.0
+all-target check, all nine TUI scenarios and all four non-live Headless
+scenarios. Focused RMF tests include 22 unit and two independent-process tests.
+Model/Core/Engine dependency boundaries, bounded queues/state, private ingress,
+read-only public surfaces and secret patterns were re-audited. A final resource
+review replaced an unbounded historical set of unknown RMF names with one
+process-bounded diagnostic latch. HUMAN accepted M7.0 + M7.1a, including the
+late-restart negative evidence, without converting target-floor state into
+completion or remote-inactivity proof. M7.1b has now closed that explicit
+operator recovery path; no later M7/HIL item is READY without another HUMAN
+decision.
+Hosted [CI run 44699464154](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44699464154)
+passed Stable format/Clippy/test and the Rust 1.85 workspace check on the M7
+implementation and documentation commit.
+
+M6C.0, M6C.1a, M6C.1b and M6C.2 are HUMAN-ACCEPTED. M6C.1b implements the
+[frozen internal lifecycle and recovery contract](M6C_DISPATCH_OWNERSHIP.md#m6c1b-external-dispatch-lifecycle-and-recovery).
+Only proven non-submission permits explicit retry of the same CallId. Correlated
+receipts and serving evidence retain their own meanings. Revoked grants fence
+commands while remote evidence remains eligible. Proven prevention retires the
+unstarted operation. Fresh Operational observations complete serving calls
+through the shared call registry. The virtual checkpoint preserves active and
+recent retired work, revokes grants and invalidates physical evidence.
+
+Local validation passed formatting, locked workspace all-target Clippy, 163
+workspace tests with one expected ignored test, the exact Rust/Cargo 1.85.0
+all-target check, nine TUI scenarios and four non-live Headless scenarios. The
+deterministic retirement regression exercises 129 physical completions and 129
+preventions, with zero active records and 128 retained tombstones of each kind
+at the end. The implementation uses in-memory fixtures and existing crate
+dependencies.
+
+The [M6C.2 validation contract and executed matrix](M6C2_KONE_LANDING_VALIDATION.md#executed-official-sandbox-validation)
+completed its official-Sandbox-only two-normal-call budget. All five current
+inventory candidates exposed direct enabled LandingCall UP/DOWN actions. The
+same nine-lift logical fixture class won deterministic ranking; configured
+floor/side plus the live action descriptors mapped one landing to HallCall
+`2F UP` and `2F DOWN` without guessed resource identities.
+
+Both requests were reserved by the real M6C Engine sink before WebSocket send,
+then recorded Submitted. Both native responses returned correlated
+`success: true` plus a call session, but no explicit controller-acceptance
+disposition, so receipt remained Indeterminate (`NO_RECEIPT_MAPPING`). Call A
+was not resubmitted across controlled session resume. No correlated call-state,
+allocation, Serving or terminal event arrived in the 8 + 90 second Call A
+windows. Independent monitoring retained 22 position and 40 door messages,
+including one uncorrelated door cycle, but supplied no authority to invent a
+`CarId` or physical completion. Call B delete was sent once; no correlated
+acknowledgement arrived in 20 seconds and no terminal event arrived in the
+following 30 seconds, so withdrawal correctly remained Requested.
+
+The terminal A--L matrix is PASS for A/B/C/H/I/J/K/L and PARTIAL for D/E/F/G.
+Overall result is `PARTIAL_MAPPING`, not a generic semantic mismatch. Private
+Evidence v0 remains outside Git with seven files, 52 causal events, 88 sanitized
+protocol messages and zero drops; credential/token scans passed. The focused
+recorded regression preserves Submitted + Indeterminate + Pending, no resume
+resend and Requested withdrawal through actual Engine APIs.
+
+**M7.1b governing invariant:** retiring a local unresolved operation does not
+prove physical completion, does not prove the remote operation stopped, and
+does not by itself authorize another write. Retirement must enter a durable
+`ResumptionRequired` boundary. A separately authorized, audited safe-resumption
+decision must recheck current control-domain ownership, configuration,
+Operational evidence, command transport, holder/correlation compatibility and
+local activity before write readiness can return. Residual uncertainty may be
+accepted explicitly and durably, but it remains uncertainty.
+
+**Current terminal status:** `M7.1b COMPLETE — explicit recovery, retirement and safe-resumption boundary validated. Awaiting HUMAN HIL/bench-controller environment decision. No real controller or passenger-equipment write path authorized.`
+
+### LCE-R0 — Recorded Read-only Compatibility Probe
+
+**COMPLETE — `RECORDED_READONLY_PARTIAL`; awaiting HUMAN review.** This is an
+independent research slice and does not reopen M7 or make any HIL/serial item
+READY.
+
+The [focused evidence matrix](LCE_RECORDED_READONLY_COMPATIBILITY.md) separates
+KONE-origin interface/lock evidence, current independent commercial monitoring
+evidence, weaker historical terminal-table semantics and community anecdotes.
+The sources support a conservative recorded subset of `STA`, `CMD`, `MDE` and
+`GRP` without changing canonical semantics. They do not establish a production
+parser across LCE software generations, raw framing, lifecycle/freshness,
+hardware access, or write safety.
+
+The new model-only `liftassistant-lce` crate parses bounded original-synthetic
+row/column fixtures and maps only justified evidence through the existing
+`CarObservationUpdate` and Engine binding/session path. Level requires stopped,
+door-zone and at-level evidence; advance position remains context; motion needs
+consistent speed/direction; exact simple door states map while composite values
+remain unknown; only normal/fire/out-of-service MDE modes have strong canonical
+equivalents; CMD/GRP destinations are reported observations; native group/lift
+identities require explicit configuration. `CAL` calls, fault IDs and `N` nodes
+do not become canonical calls, equipment faults, modes or car identities.
+
+Focused regressions cover stationary/moving/ambiguous evidence, supported and
+source-specific/unknown modes, known/unknown/unmapped destinations, configured
+and unconfigured group rows, malformed/truncated/bounded input, incremental
+assembly, explicit unknown replacement, omitted-field preservation, unbound
+rejection and session fencing. No serial dependency, terminal emulator,
+command generator, LCEUIO/unlock logic, hardware fixture, real KONE endpoint,
+controller/elevator access, write surface, M7 authority change or public schema
+was added.
+
+Closing validation passes formatting, locked warning-free workspace/all-target
+Clippy, 199 workspace tests with one expected ignored test, the exact
+Rust/Cargo 1.85.0 locked all-target workspace check, all nine TUI scenarios,
+all four non-live Headless scenarios, ten focused LCE tests, normal-dependency
+isolation, bounded-input review, secret scanning and diff/whitespace review.
+The validation uses only checked-in original synthetic fixtures and requires no
+KONE material, hardware, proprietary binary, external service or network peer.
+
+### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
+
+**COMPLETE (Simulator-only development slice).** This vertical slice connects
+existing LiftAssistant canonical observations, Engine controlled-intent
+admission (`PrincipalId`, `AuthorityGrant`, `IntentId`, receipt, reconciliation),
+`VirtualController(SimRuntime)`, and the independent Flutter client into the
+first real executable `ServeFloor` workflow without altering M7 authority or
+recovery, freezing a public control schema, or touching RMF, LCE, HIL, or real
+hardware.
+
+Implemented behavior and invariants:
+
+- **Isolated Simulator-only control surface (`sim-dev-server`):** added as an
+  `[[example]]` target in `liftassistant-headless` consuming `liftassistant-sim`
+  exclusively through `[dev-dependencies]` (keeping `liftassistant-headless`'s
+  normal dependency tree free of `liftassistant-sim` and leaving
+  `crates/liftassistant-headless/src/*` untouched). `/api/experimental/v0/snapshot`
+  and `/api/experimental/v0/events` remain strictly read-only GET (405 on
+  POST/PATCH). `/api/dev-sim/v0/*` (`capabilities`, `serve-floor/preview`,
+  `serve-floor/submit`, `submissions/{submission_key}`) is disabled by default,
+  requires explicit `--enable-dev-sim-control`, refuses non-loopback bind
+  addresses, enforces 4 KiB request bounds and `deny_unknown_fields`, and
+  returns `Cache-Control: no-store` with no wildcard CORS.
+- **Single truth owner:** `liftassistant-engine` gained only side-effect-free
+  read-only inspection (`PrincipalId::as_str`, `Engine::controlled_controller`,
+  `Engine::active_intent`, and `Engine::preview_write_readiness`, which
+  `Engine::write_readiness` delegates to). Engine remains the sole owner of
+  controlled-intent admission, `IntentId`, receipt, reconciliation, and
+  canonical Operational observations; `sim-dev-server` uses only a process-local
+  development Principal (`dev-sim-operator`) and per-car Engine grants.
+- **Submission correlation (`submission_key`) separate from `IntentId`:**
+  Flutter mints a 128-bit random `submission_key` before any possible side
+  effect. It stays outside `liftassistant-model`, `liftassistant-core`, and
+  `liftassistant-engine`, mapping `submission_key -> admitted submission ->
+  Engine IntentId`. Same key + identical `(car, floor)` is idempotent without
+  creating a second `IntentId`; same key + different `(car, floor)` returns HTTP
+  409 conflict; pre-side-effect rejections remain terminal rejected for that
+  key; a fresh key + same `(car, floor)` is a new user submission evaluated by
+  live Engine admission. Server memory is bounded (128 submission records) while
+  preserving active Engine operations during eviction.
+- **Reconnect and process-restart honesty without automatic resend:** transport
+  or response loss after submit enters first-class `Unknown` (`response_lost`)
+  with zero automatic resend. Within the same ephemeral `control_instance_id`
+  lifetime, reconnect queries read-only
+  `GET /api/dev-sim/v0/submissions/{submission_key}` to project latest Engine
+  `IntentRecord` facts (`accepted`, `in_progress`, `completed`, `diverged`,
+  `rejected`, `not_found`, `knowledge_unavailable`). Across a `sim-dev-server`
+  restart, a mismatched `expected_instance_id` returns `knowledge_unavailable`
+  (`control_process_restarted`) — and restarting without `--enable-dev-sim-control`
+  (HTTP 404) transitions tracked state to `knowledge_unavailable`
+  (`control_surface_unavailable`) — rather than claiming the request never
+  happened or retaining stale active badges, and never automatically resends.
+- **Backend-agnostic Flutter Operator workflow (`State + ServeFloor` only):**
+  keeps `support`, `control_path_availability`, `authorization` (honestly
+  `dev_process_local_grant`, never fabricated multi-user `authorized = true`),
+  and advisory `eligible` / `WriteBlocker` distinct; populates target floors
+  exclusively from Engine `ExecutionCapabilities`; enforces floor select ->
+  advisory server preview -> transaction-bound review -> submit -> projected
+  operation status; disables controls on configured-but-unavailable cars
+  (preserving the A–H matrix and Auxiliary non-eligibility); omits control UI on
+  normal read-only Hosts; and includes zero backend-specific Flutter switches,
+  mode controls, or Setting/Parameter surfaces.
+
+Validation: `cargo fmt --all -- --check`, warning-free locked workspace
+all-target Clippy, 210 Rust workspace tests passing with 1 expected ignored test
+(including 43 `liftassistant-engine` tests and 10 `sim-dev-server` unit/HTTP
+tests including barrier-synchronized concurrent duplicate/conflict submits),
+exact Rust/Cargo 1.85.0 locked all-target check, TUI/Headless scenarios
+(`m2-call-lifecycle`, `m6a-write-adapter-profile`,
+`headless-read-only-lifecycle`, `headless-experimental-read-model`), live
+`liftassistant-cli snapshot` and HTTP 405/404/loopback proofs, `dart format`,
+`dart analyze --fatal-infos` (0 issues), all 47 Flutter tests passing (including
+real multi-process `sim-dev-server` + TCP fault-injected response-loss proxy +
+process-restart and read-only 404 restart proofs, in-flight SSE query coalescing,
+oversized response abort, and narrow `320x568` + `2.0x` text scaling), and
+`flutter build web --no-web-resources-cdn` (including Wasm dry run).
+
+**M7.1b — COMPLETE; HUMAN HIL/bench environment decision pending.** The
+private gateway now distinguishes an explicit recovery UID/Principal from the
+ordinary caller, exposes private inspection, durably retires an unresolved
+operation only as outcome unknown, enters restart-stable `ResumptionRequired`,
+and requires a second authorized decision with fresh compatible Operational
+evidence, available command transport, an empty current RMF holder, the current
+local control-domain lease and explicit residual-uncertainty acceptance. The
+retirement fences the old ordinary grant; restart creates a normal fresh process
+grant without skipping resumption. No Engine CallState/receipt semantics or
+public read-only surface changed.
+
+Durable state v2 keeps one unresolved or resumption-required operation, the
+monotonic Intent watermark and 32 recent recovery audit records; v1 state is
+read conservatively. Configuration/native mapping is rechecked, commissioning
+requires current observed floor compatibility, and a local lock keyed by RMF
+domain plus native lift fences the same control domain across different socket
+paths. Queue overload atomically revokes Operational evidence before command
+admission and recovers only on a fresh compatible payload. Focused validation
+passes 30 RMF library tests, one gateway queue test and three
+independent-process tests.
+
+The final official-Hotel rerun killed the real gateway after `IntentId(1)` had
+become correlated and recorded progress, then allowed Hotel to reach L2 and
+clear the holder before starting an independent successor. The successor stayed
+`RecoveryRequired` through repeated L2/stopped/empty-holder snapshots, and an
+independent 14-second `/lift_requests` listener observed no resend. Missing and
+ordinary Principals were rejected; authorized inspection preserved the same
+identity, correlation and progress without claiming completion. Authorized
+retirement recorded outcome unknown and entered `ResumptionRequired`; an
+ordinary command remained blocked, and another process restart preserved that
+gate. Resumption rejected an ordinary Principal and rejected a recovery
+Principal that had not explicitly accepted residual uncertainty. Only current
+complete Operational evidence, compatible commissioning, available transport,
+the local control-domain lease, empty current holder, a fresh command grant and
+explicit uncertainty acceptance restored `Ready`. The next request was
+`IntentId(2)` with RMF holder `liftassistant-m7-2`; Hotel completed it naturally.
+
+The first late-rerun attempt exposed a concrete defect before the successful
+matrix: persisted progress plus a periodic target-floor snapshot could restore
+Engine state and falsely clear the old operation after the backend holder had
+already disappeared. The fix requires the successor to observe the exact old
+holder before restoring persisted progress. A focused regression preserves the
+negative case, and the successful rerun above confirms the gateway now leaves
+that uncertainty for explicit operator handling.
+
+Closing validation passed formatting, locked all-target Clippy with warnings
+denied, 189 workspace tests with one expected ignored test, the actual
+Rust/Cargo 1.85.0 all-target check, all nine TUI scenarios and all four non-live
+Headless scenarios. Resource/dependency/public-surface/secret/diff audits pass.
+Hosted [CI run 44709641539](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44709641539)
+passed Stable and Rust 1.85 on the final code fix; the documentation closeout is
+validated separately before handoff. The official image was pinned at
+`sha256:601a6bb7c04d559fb9ec654d9b7a41650918990e35712036d836f072a6430db5`.
+The rootless Hotel container did not exit on SIGTERM within 10 seconds and was
+therefore killed by Podman during cleanup; the named container, image and test
+temporary directories were removed without pruning or touching unrelated
+resources.
+
+### M6B.3, M6C.0 and M6C.1a evidence
+
+The [M6B.3 live Sandbox run](M6B3_KONE_SANDBOX_VALIDATION.md#executed-live-sandbox-validation) completed the frozen A–K matrix with two bounded normal destination calls. All five official-inventory candidates passed read-only topology/actions audit. The deterministic ranking selected the only nine-lift group; its chosen normal route had three common eligible lifts. Exact group scope was sufficient.
+
+The evidence establishes a semantic mismatch rather than a failed experiment. KONE accepted `group + source + destination` without a car selector and later exposed `allocated_lift_deck`; the observed Sandbox stream contained no field named `liftId`. LiftAssistant `Intent::ServeFloor` names a car before admission. Call A separated construction, socket send, successful action response, `being_served`, simulated position/door evidence and `served`. Official session resume returned `ok`/201, but the requested 30-second latest-state window produced no replay in the bounded observation; re-subscribing then produced `served`. Call B's immediate delete received an adjacent 201 acknowledgement, while no correlated typed cancellation or terminal event arrived in the bounded window. No call resubmission or idempotency claim was made.
+
+Private Evidence v0 remains outside Git and passed credential/token-bearing URL/header scans. An earlier candidate-audit PTY attempt locally echoed the already supplied inputs before formal validation enabled terminal echo suppression; no credential value was committed or retained in Evidence v0. The final run used hidden standard input. No production KONE adapter, Core/public semantic change, write route, real installation, M7 work or production claim was introduced.
+
+Closing local validation passed formatting, locked all-target Clippy, all 144 workspace tests with one expected ignored test, the actual Rust/Cargo 1.85.0 all-target check, nine TUI scenarios and four non-live headless scenarios. Secret-free hosted [CI run 44575372614](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44575372614) passed its Stable and Rust 1.85 jobs on the evidence commit.
+
+M6B.3 is **HUMAN-ACCEPTED** as bounded validation evidence. Its result remains
+`SEMANTIC_MISMATCH`: group-owned submission and late native allocation do not fit
+the existing car-specific controlled-intent admission path. HUMAN acceptance did
+not turn `allocated_lift_deck` into `CarId`, `served` into physical
+`Reconciliation::Satisfied`, or delete acknowledgement into proven
+cancellation.
+
+The [M6C dispatch-ownership contract](M6C_DISPATCH_OWNERSHIP.md) freezes the
+smallest additive response. Existing car-specific intents and per-car authority
+stay unchanged. An internal external-owned path starts from `HallCall`/`CallId`,
+remains pending after submission, requires separate dispatch-scope authority and
+may assign a logical car only through explicit native identity mapping. M6C.1a
+is limited to a deterministic in-memory proof through `Assigned(CarId)`; serving,
+completion, receipt, cancellation, reconciliation, live KONE and M7 remain out
+of scope.
+
+M6C.1a adds a separate Engine-owned external-dispatch scope, sink and delivery
+record without modifying `Intent` or `ControlledIntentSink`. A scope binds one
+configured controller, explicit native-assignment-to-`CarId` mappings and one
+current Principal-held grant. Revocation and replacement fence old grants. An
+external call remains `Pending` after submission; only valid assignment evidence
+from the configured controller advances it to `Assigned(CarId)`. Unknown mapping,
+wrong controller/scope, duplicate, conflicting and terminal/retired assignment
+cases are typed and non-destructive. External pending calls are excluded from
+LiftAssistant retry dispatch, and car-specific runtime feedback cannot advance
+them to `Serving` or `Completed`.
+
+The ten focused tests cover all fourteen required contract regressions, including
+unchanged LiftAssistant-owned `ServeFloor` behavior, no external Intent, pending
+submission, mapped assignment, no implicit identity, idempotent duplicate,
+preserved conflict, late terminal evidence, controller/authority fencing,
+per-car/vendor non-authority and no assignment-to-completion promotion. Closing
+local validation passed formatting, locked all-target Clippy, 153 workspace tests
+with one expected ignored test, the exact Rust/Cargo 1.85.0 all-target check, all
+nine TUI scenarios and all four non-live headless scenarios. Core/model/runtime
+dependencies did not change; Engine gained no transport, wall clock, filesystem,
+HTTP or vendor dependency. Secret-free hosted
+[CI run 44600147449](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44600147449)
+passed both Stable format/Clippy/test and Rust 1.85 jobs on the final code commit.
+
+M6C.0 and M6C.1a subsequently passed that HUMAN review and authorized M6C.1b.
 
 M1 Interactive Simulator is closed and human-accepted.
 
 M4 is COMPLETE. M4.10 HUMAN-CHECK was accepted on 2026-11-17 after all four slices and the live-evidence-exposed dispatch regression passed review.
 
-M5.1 through M5.11 are implemented. HUMAN accepted M5.8 at the second-source architecture-validation boundary on 2026-11-17; second-family live production validation remains `EXTERNAL_VALIDATION_PENDING`. **Completion mode: HUMAN-CHECK.** M5.11 LiftAssistant Client first version is implemented and runtime-validated against the real Host across Android, Linux, and Web; further milestone progression awaits HUMAN review.
+M5 and M6A remain complete within their read-only and virtual scopes. Second-family live validation remains `EXTERNAL_VALIDATION_PENDING`. M6B.1 was HUMAN-accepted on 2026-11-19 after the official Open-RMF Hotel simulation completed the frozen A-H semantic validation matrix without changing M6A public semantics or production write surfaces.
+
+### M6B.2 completion audit
+
+M6B.2 is COMPLETE and HUMAN-accepted. HUMAN accepted the result under the [M6B.2 CiA 417 / CANopen over Linux vcan validation contract](M6B2_CIA417_VCAN_VALIDATION.md), including the unmodified peer's encoding differences and the limits of wire-level correlation.
+
+M6B.2 is limited to a version-pinned, source-backed protocol subset on a positively identified virtual CAN interface with an independent peer process. It does not authorize real CAN hardware, controller cabinets, OEM networks, passenger equipment, production write routes, or M7 work. Evidence v0 is an experimental validation artifact only; it is not a public schema or new infrastructure platform.
+
+The four HUMAN-supplied CiA 417 2.0.0 PAS documents passed SHA-256 verification. The [Hall Call Up matrix](M6B2_CIA417_VCAN_VALIDATION.md#executed-hall-call-up-matrix) passed A–I against the pinned independent panel and Call Controller after two documented fixture encoding adjustments. The unmodified CANoopEnDemo negative control remains FAIL for D and has no validation as a CiA 417 2.0.0 reference. The [normative audit](M6B2_CIA417_VCAN_VALIDATION.md#pinned-peer-comparison) records that Part 3-1 Table 84 and Part 2 Table 11 give different request receiver mapping references. The tested Hall Call Up wire exchange carries neither a LiftAssistant operation ID nor an incarnation ID. Old-evidence fencing in this proof relies on harness/runtime provenance.
+
+Closing validation passed formatting, locked all-target Clippy, 144 workspace tests, the exact Rust 1.85.0 workspace check, nine TUI scenarios and four non-live headless scenarios. [Hosted CI](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44487952786) passed Stable and Rust 1.85 on the implementation commit. The fixture introduced no product runtime changes. Real CAN, controllers, physical motion, passenger safety, OEM compatibility, conformance and production operation remain unverified. M7 and real hardware require separate HUMAN authorization.
+
+### M6B.1 completion audit
+
+- **External system and isolation.** The official ROS 2 Kilted Hotel image was pinned by digest and ran independently from the Rust probe. Both processes were confined to a temporary rootless Podman container on a gateway-free internal subnet. The probe verifies that isolation before it can publish. No real lift, controller, CAN interface, OEM endpoint or site network was contacted.
+- **Lifecycle and physical evidence.** A Lift1 L1-to-L2 trip separated Engine admission, local publication, holder observation, accepted receipt and a later stopped-at-L2 physical outcome. Ten Engine retries did not resubmit. An identical transport republish produced no second trip. Accepted never implied Satisfied.
+- **Stale state and restart.** A first Intent reached L2, its RMF holder was explicitly released, and the adapter began a new LiftAssistant source session. Replaying the old completion did not restore operational state. A different IntentId for L2 remained pending until a new holder produced a new closed-to-open door cycle. Separate proofs restarted before dispatch and after dispatch, withheld observations for 20 seconds while Hotel reached L3, then reconciled the original operation from new-session evidence without resubmission.
+- **Failure and mapping.** Requesting L2 while fault-injecting an L3 native target produced explicit divergence. Hotel rejected a nonexistent floor in its own log but supplies no typed rejection receipt, so the operation stayed physically Pending and its delivery became Indeterminate at the adapter deadline. Lift1 maps explicitly to A and Lift2 to B; Lift2 is rejected by an adapter configured only for Lift1, with no implicit `CarId` creation.
+- **Identity and authority.** Principal, grant and Intent identities remain Engine-owned. RMF lift names, holder strings, source clocks and message/session context remain adapter-local. Transport recreation and source-session restart do not grant authority, create a Principal, allocate a replacement Intent or imply physical completion. Core and Engine gained no RMF, ROS, network, wall-clock or filesystem dependency. The normal Host/API/CLI/Flutter surfaces remain read-only.
+- **Software safety boundary.** Hotel supplied normal AGV semantics, not credible emergency behavior. A focused Engine regression proves OutOfService Operational state blocks controlled admission before submission; mapper regressions retain exceptional-mode distinctions. This is `SIMULATED SOFTWARE SEMANTICS ONLY`, not safety validation.
+- **Negative evidence.** Some first RustDDS reader or writer generations did not see the peer even while the official topic existed. Bounded transport recreation recovered without changing the source session, authority or operation. This reinforces that discovery is not payload, acceptance or completion evidence. Intermediate harness assertions also exposed the need to release an RMF holder before testing a distinct same-floor lifecycle; those failures were not erased by the final passing run.
+- **Validation.** Local gates passed: formatting; locked all-target workspace Clippy with warnings denied; 144 workspace tests; all nine TUI scenarios; four non-live headless scenarios; and the actual Rust/Cargo 1.85.0 all-target workspace check. Hosted [CI run 44438524440](https://github.com/LiftAssistant/LiftAssistant/actions/runs/44438524440) passed both stable format/Clippy/test and Rust 1.85 jobs on the implementation commit.
+- **Limits.** Real elevator behavior, hardware, field safety, CAN/CANopen/CiA 417, KONE/LCI/OEM compatibility, production readiness, process-crash durability and certification remain NOT VERIFIED. No raw simulator log or temporary container state is part of the repository evidence.
+
+### M6A completion audit
+
+- **Identity and retry.** `CallId` identifies the hall call and `IntentId` identifies one lower operation. Ten same-ID retries send once. Changed intent or call binding conflicts even after terminal eviction. A retained result can be queried. An evicted request remains fenced. A newer request for one car leaves an unsubmitted request for a different car eligible when its observations recover.
+- **Authority and readiness.** A controlled car needs an explicit controller and one current writer grant. Revocation and restore fence old grants. A controller connection or vendor holder is independent of the Principal. Current Operational evidence, acceptable mode and occupancy, availability, supported operation and configured execution floors gate execution. Lost Operational evidence blocks new work. Auxiliary evidence cannot complete an intent.
+- **Receipt and physical outcome.** An Accepted receipt leaves reconciliation pending. A lost receipt can remain indeterminate while a fresh physical outcome settles the operation. A late uncertainty notification preserves a definitive receipt. Changed reported destinations do not change desired work. Wrong targets produce bounded divergence evidence. A still-queued same-floor intent cannot be settled by an unchanged idle snapshot.
+- **Withdrawal and recovery.** A queued operation can be prevented by the supporting virtual controller. Unknown or underway execution stays conflict-fenced until evidence resolves it. Cancel and expiry do not fabricate a stop. A consume-and-restore checkpoint fences old grants and stale evidence and preserves unresolved identities. The matrix verifies both recovery by receipt lookup and observation-only recovery while the command link remains disconnected.
+- **Bounds and failure isolation.** One unresolved intent per controlled car. The 1,024-operation churn retains 128 recent terminal outcomes in each of Engine and the virtual controller. A separate 1,024-call run leaves zero active calls after completion and retains 128 recent completions. A stalled car leaves another configured car eligible. Flight Recorder and its incident windows capture identity conflict, unexpected and inconsistent receipts, divergence, authority rejection and readiness loss. Detector replay reproduces the incident classifications, and the executable delivery scenario reproduces its Engine outcomes from fresh instances.
+- **Dependencies and evidence.** Core depends on model only. Engine adds no clock, transport, hardware, filesystem or vendor dependency. The executable write-adapter profile validates typed `ServeFloor` and `ParkAt` against the virtual composition. Headless HTTP remains GET-only and has no simulated controller dependency. M6A introduces no external write interface or new infrastructure.
+
+Validation on the closing implementation includes formatting, locked workspace Clippy, 143 passing workspace tests, the actual Rust 1.85.0 workspace check, nine TUI scenarios, and four non-live headless proofs. The separate-process HTTP/SSE soak also passed, including slow-peer shutdown and same-port restart. Official Hotel live proofs were not re-run. External correlation, hardware/sandbox behavior, and production process-crash durability remain outside this evidence.
 
 ## Validated baseline
 
@@ -937,4 +1325,45 @@ Platform build and runtime validation against real `liftassistant-headless`:
 
 Validation: `cargo fmt --all -- --check`, warning-free workspace all-target `cargo clippy`, all 126 Rust workspace tests, `dart analyze --fatal-infos` (zero issues), all 28 Flutter VM tests plus 21 Chrome-platform tests, and real process-level runtime proofs on Linux, Web (Chrome JS & Wasm), and Android Emulator pass. All test processes, listeners, temporary Chrome profiles, and Android emulator instances were cleaned up.
 
-Stop at `HUMAN-CHECK` after M5.11 first-version delivery and real three-platform Host validation.
+The M5.11 first-version checkpoint was accepted for backend progression on 2026-11-18. Its three-platform evidence applies to the validated client, Host and test environment.
+
+### M5.12 — HA/BMS Observation Integration
+
+**DEFERRED / CONDITIONAL.** Outside the M5 completion gate.
+
+### M5.13 — Failure / Soak Matrix
+
+**IMPLEMENTED.** Corrections A–F and the failure/soak matrix rerun passed.
+
+- **Rust 1.85.0:** The actual compiler initially rejected let chains in the existing workspace. Equivalent 1.85-compatible conditions restore a passing local `cargo check --workspace --all-targets --locked`. The CI workflow now runs that command with Rust 1.85.0 alongside its existing stable job.
+- **Source/session and data plane:** The synthetic matrix passed 32 rounds each at 4 cars / 2 sources, 32 / 8 and 128 / 16. Interleaved cars preserve source-global order across same-session staleness and sequence restart across explicit session changes. Late retired observations leave current evidence unchanged. Existing Host policy records Operational late samples as degradation until a valid current-session update. Conflicting healthy Auxiliary evidence neither fills missing Operational door evidence nor keeps a stale Operational source ready. Transport failure is diagnostic evidence; explicit invalidation revokes operational state while preserving the active session and discovery evidence. The compacted stale capsule replayed at each scale.
+- **Retention finding (original matrix).** At 1,024 activations, the already-fixed Flight Recorder detector retained one active watermark and the former retired-identity ledger grew to 1,023 entries. Correction A supersedes that ledger and transfers the uniqueness contract to the ingestion-lifecycle owner.
+- **Correction A.** The Host now obtains 128 random bits from the system RNG for each ingestion lifetime. Engine fences on the current token and retains one active slot per source. The 2,048-activation regression verifies active state and detector cardinality and fences delayed samples. The bounded Capsule validation rejects reused begin tokens.
+- **Corrections B–D.** RMF supervises arrival deadlines per configured car on payloads and idle ticks, alongside feed-wide silence. A bound car can lose evidence while its sibling and source session stay active. Newer samples rebuild under one source-global watermark. Unconfigured lifts are diagnosed and ignored, while mapping and floor membership errors revoke only the mapped car. Different in-building floor subsets pass. The bounded Capsule records, compacts, replays and sanitizes single-car invalidations without reviving stale evidence or resetting ordering.
+- **Correction E.** Optional run-time capsule output consumes the one-shot request on the first attempt. A create/write/serialization error emits a warning and leaves observation recovery or the original transport disposition intact.
+- **Correction F.** A new RMF subscriber reports `SubscriberCreated` even after the previous reader saw discovery. Payload can stay stale until data arrives. The adapter incarnation and source-global ordering continue through reader recreation.
+- **API shutdown:** A loopback SSE peer that stopped reading with a pending socket write reproduced an indefinite graceful drain. The API first attempts graceful shutdown, then closes remaining connections after a two-second drain deadline. The same stalled-peer regression now finishes while the peer is still open and verifies listener release.
+- **API/client churn.** The real RMF Host on an idle domain reported subscriber-created, payload-awaiting and NotReady through five independently started CLI subscribers. SIGTERM closed an active SSE response and the listener. The separate synthetic Host process served all static profiles, kept authoritative state independent of client churn, and delivered the newest complete snapshot to both a fast client and a paused client after a 192-publication burst. The paused client received 36 post-initial snapshots. Both connections closed on shutdown. Restart on the same endpoint reset revision from 1707 to the same fresh-fixture value of 411.
+- **Resource soak.** A 45.44-second Linux loopback run used five waves of 20 SSE clients at a target 20 Hz, 900 publications and five Auxiliary stale/failure/session rollovers. Host RSS started at 11,964 KiB and ranged from 17,040 to 17,304 KiB at the post-wave idle samples. At 20 clients the Host held 27 FDs and 21 sockets, returning to seven FDs and one listener every wave. Thread count stayed at 19. The rolling watch channel retained its latest value, Host diagnostics capped at 256, Engine Flight Recorder entries at 128 and incidents at eight. The Host recorder uses a 128-action rolling window with a compacted baseline; stale capsules at all three profiles replayed within the existing format bounds.
+- **Performance.** On Linux x86-64 with an unoptimized Rust build, warm snapshots for 4/2, 32/8 and 128/16 measured 47,896, 57,110 and 86,500 bytes. Compact JSON serialization p95 was 2.476, 2.677 and 4.628 ms, respectively, from 15 samples per profile. The 32/8 run crossed 1, 5 and 20 clients with target rates of 1, 10 and 20 Hz and observed 0.99–19.88 Hz. Update through publish p95 was 0.605–1.066 ms, publish to localhost receipt 6.498–32.725 ms and Python client JSON parse 1.205–1.784 ms. At 20 clients and 20 Hz Host process CPU was about 3.13 core-equivalents. Each SSE connection encodes its own complete snapshots. These are local measurements with no production capacity or latency guarantee.
+
+Reproduce the synthetic Linux process proof with `python3 crates/liftassistant-headless/tests/m5_soak.py` from the repository root. After A–F, formatting, locked all-target workspace Clippy, 135 workspace tests, all seven TUI scenarios, four non-live headless scenarios and the actual Rust 1.85.0 workspace check passed. The separate-process rerun exercised all three scale profiles, all nine combinations of clients/rates, a 192-publication slow-peer burst and same-port restart (revision 1707 to 411). The 46.48-second soak returned to seven FDs, 19 threads and one listener after each wave. Post-wave RSS was 15,500–16,504 KiB after an 11,948 KiB starting sample. Three real idle-domain Host starts produced distinct incarnations. Fifteen independent CLI connections preserved Awaiting/NotReady and SIGTERM ended the live HTTP streams. Official Hotel live payload and timing proofs were **NOT RE-RUN IN THIS PASS**. No new second-family live evidence was supplied.
+
+### M5.14 — M5 Completion Audit
+
+**PASS.** The corrections and M5.13 rerun close the read-only correctness and lifecycle gates. No unresolved M5-scope defect was found in this audit.
+
+- **Dependency ownership.** Normal dependency trees and source inspection confirm Core depends on model only, Engine composes model/Core/runtime, RMF owns ROS/DDS, and the Host owns entropy, clock policy, filesystem output and HTTP serving. The CLI and Flutter reach the Host through the read API.
+- **Identity and lifecycle.** Logical car, configured source and randomly issued incarnation have distinct roles. Ingestion sequence orders one source incarnation, Host revision versions projected client state, and diagnostic sequence orders a bounded diagnostic stream. RMF controller session, source timestamp and reader recreation do not assign incarnation identity.
+- **Freshness.** Discovery, feed payload activity, per-car evidence availability and readiness are separate. Deterministic regressions cover multiplexed expiry, no false stale before first payload, and same-session recovery without resetting the watermark.
+- **Topology and capabilities.** Building floors bound the valid evidence universe. Recorded and live RMF mapping carries the per-lift floor list as source context. It creates no execution capability or per-car dispatch eligibility rule.
+- **Authority.** A logical car has at most one Operational observation authority. Auxiliary evidence stays isolated. Host and clients expose observations only, without field fill, automatic failover or command submission.
+- **Resource retention.** Engine and Host active maps follow configured sources and cars. Source activation clears stale observation stream state. Diagnostics and replay windows are bounded, and SSE stores latest values with active connection tasks that release on shutdown. Completed calls and pending generated-intent correlation belong to the future intent workload.
+- **Diagnostics.** Capsule output errors consume a one-shot request and warn. Audit also reproduced a production Host panic on a broken stdout pipe. A small fix makes Host status and API lifecycle logs best effort. A real idle-domain Host with both output pipes closed served snapshot/SSE and exited successfully on SIGTERM. Diagnostic failures carry no equipment-fault implication.
+- **External contracts.** HTTP remains optional and read-only at `experimental/v0`. Capsule and sanitized candidate formats, diagnostic IDs, and adapter validation profiles remain internal or experimental. The additive car-invalidation action has replay and sanitization coverage. Prior capsule fixtures still replay on the new reader.
+- **Evidence.** The 136 workspace tests, all-target locked Clippy, formatting, actual Rust 1.85.0 check, executable scenarios and process proofs support the M5 result. Official Hotel evidence belongs to the earlier live runs. The current RMF timing/fault matrix uses deterministic input. BACnet evidence is recorded. The first Flutter runtime result remains scoped to its previously validated builds/environments.
+- **Scope and documentation.** No generic lifecycle, health, adapter or messaging framework was introduced. The audit reconciled current gates and durable architecture in their owning documents. M5.12 stays conditional and deferred.
+
+**M6 entry gates from the M5 audit.** The virtual call retention, identity, receipt, expiry/cancellation, write-readiness, authority, recovery and execution-floor checks are closed in M6A. External lower-controller guarantees and any controlled supersession design require separate evidence and review.
+
+**M8 hardening debt.** External RMF string/array bounds, CLI HTTP/SSE payload bounds, Flutter reconnect jitter, HTTP connection/rate limits, remote deployment security (TLS/auth and explicit CORS policy), and stable API compatibility remain deferred. Second-family live production validation stays `EXTERNAL_VALIDATION_PENDING`.

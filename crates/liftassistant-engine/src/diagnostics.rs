@@ -1,12 +1,15 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use liftassistant_model::{
-    CarId, CarObservationUpdate, Intent, ObservationSequence, ObservationSessionId,
+    CarId, CarObservationUpdate, Intent, IntentId, ObservationSequence, ObservationSessionId,
     ObservationSourceId,
 };
 use liftassistant_runtime::RuntimeEvent;
 
-use crate::{EngineEvent, ObservationBindingRole};
+use crate::{
+    Admission, ControlledEvent, EngineEvent, ObservationBindingRole, ReceiptResult, Reconciliation,
+    WriteBlocker,
+};
 
 const INCIDENT_BEFORE_ENTRIES: usize = 8;
 const INCIDENT_AFTER_ENTRIES: usize = 2;
@@ -33,6 +36,20 @@ pub enum DiagnosticAnomaly {
     IntentAcceptedWithoutGeneration {
         intent: Intent,
     },
+    ControlledIntent {
+        intent: IntentId,
+        issue: ControlledIssue,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControlledIssue {
+    IdentityConflict,
+    AuthorityFenced,
+    UnexpectedReceipt,
+    InconsistentReceipt,
+    Divergence,
+    WriteReadinessLost,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +59,7 @@ pub enum DiagnosticEvent {
         role: ObservationBindingRole,
     },
     Engine(EngineEvent),
+    Controlled(ControlledEvent),
     SourceObservationsInvalidated {
         source: ObservationSourceId,
         session: ObservationSessionId,
@@ -106,6 +124,17 @@ impl FlightRecorder {
         self.incidents.iter()
     }
 
+    pub(crate) fn forget_observation_stream(
+        &mut self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+    ) {
+        // Engine rejects retired-session observations before they reach this detector.
+        self.detector
+            .last_observation_sequence
+            .remove(&(source.clone(), session.clone()));
+    }
+
     pub(crate) fn record_observation(
         &mut self,
         update: CarObservationUpdate,
@@ -118,6 +147,10 @@ impl FlightRecorder {
         for event in events {
             self.record(DiagnosticEvent::Engine(event.clone()));
         }
+    }
+
+    pub(crate) fn record_controlled(&mut self, event: ControlledEvent) {
+        self.record(DiagnosticEvent::Controlled(event));
     }
 
     pub(crate) fn record_source_invalidation(
@@ -260,9 +293,112 @@ impl SequenceDetector {
                     }]
                 }
             }
+            DiagnosticEvent::Controlled(event) => {
+                use ControlledIssue as Issue;
+                let (intent, issue) = match event {
+                    ControlledEvent::Admission {
+                        request,
+                        result: Admission::IdentityConflict,
+                        ..
+                    } => (request.id(), Issue::IdentityConflict),
+                    ControlledEvent::Admission {
+                        request,
+                        result: Admission::Blocked(WriteBlocker::AuthorityFenced),
+                        ..
+                    } => (request.id(), Issue::AuthorityFenced),
+                    ControlledEvent::Receipt {
+                        receipt,
+                        result: ReceiptResult::Unexpected,
+                    } => (receipt.intent, Issue::UnexpectedReceipt),
+                    ControlledEvent::Receipt {
+                        receipt,
+                        result: ReceiptResult::Inconsistent,
+                    } => (receipt.intent, Issue::InconsistentReceipt),
+                    ControlledEvent::Reconciliation {
+                        intent,
+                        outcome: Reconciliation::Diverged { .. },
+                        ..
+                    } => (*intent, Issue::Divergence),
+                    ControlledEvent::ReadinessLost { intent, .. } => {
+                        (*intent, Issue::WriteReadinessLost)
+                    }
+                    _ => return Vec::new(),
+                };
+                vec![DiagnosticAnomaly::ControlledIntent { intent, issue }]
+            }
             DiagnosticEvent::Engine(_)
             | DiagnosticEvent::SourceObservationsInvalidated { .. }
             | DiagnosticEvent::Anomaly(_) => Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use liftassistant_model::{BuildingTopology, CarState, Floor, ObservationProvenance};
+
+    use super::*;
+    use crate::{Engine, ObservationIngestError, ObservationIngestResult};
+
+    #[test]
+    fn sequence_detector_retains_only_the_current_stream_after_session_churn() {
+        let mut engine = Engine::new(BuildingTopology::reference_eight_floor());
+        let source = ObservationSourceId::new("churn");
+        let first_session = ObservationSessionId::new("session-0");
+        let car = CarState::new("A", Floor::new(1));
+        engine
+            .bind_observation(
+                source.clone(),
+                car.id.clone(),
+                ObservationBindingRole::Operational,
+            )
+            .unwrap();
+        for generation in 0..2048 {
+            let session = ObservationSessionId::new(format!("session-{generation}"));
+            engine
+                .begin_source_session(source.clone(), session.clone())
+                .unwrap();
+            let update = CarObservationUpdate::from_state(
+                ObservationProvenance {
+                    source: source.clone(),
+                    session,
+                    sequence: ObservationSequence::new(1),
+                },
+                &car,
+            );
+            assert!(matches!(
+                engine.ingest_observation_update(update.clone()),
+                ObservationIngestResult::Resolution(_)
+            ));
+            engine.ingest_observation_update(update);
+            assert_eq!(engine.active_source_sessions.len(), 1);
+            assert_eq!(engine.source_states.len(), 1);
+            assert_eq!(engine.operational_states.len(), 1);
+            assert_eq!(
+                engine.diagnostics.detector.last_observation_sequence.len(),
+                1
+            );
+        }
+        assert_eq!(engine.diagnostics.incidents().count(), INCIDENT_LIMIT);
+        assert_eq!(
+            engine.diagnostics.entries().count(),
+            crate::DEFAULT_DIAGNOSTIC_CAPACITY
+        );
+        for session in [first_session, ObservationSessionId::new("session-2046")] {
+            let late = CarObservationUpdate::from_state(
+                ObservationProvenance {
+                    source: source.clone(),
+                    session,
+                    sequence: ObservationSequence::new(9999),
+                },
+                &car,
+            );
+            assert!(matches!(
+                engine.ingest_observation_update(late),
+                ObservationIngestResult::Rejected(
+                    ObservationIngestError::InactiveSourceSession { .. }
+                )
+            ));
         }
     }
 }

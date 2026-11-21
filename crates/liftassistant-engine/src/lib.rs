@@ -1,13 +1,32 @@
 #![forbid(unsafe_code)]
 
+mod controlled;
 mod diagnostics;
+mod external_dispatch;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-pub use diagnostics::{
-    DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, DiagnosticSequence, FlightRecorder,
-    IncidentSnapshot,
+pub use controlled::{
+    Admission, AuthorityError, AuthorityGrant, AuthorityGrantId, ControlledEvent,
+    ControlledIntentRecovery, ControlledRecoveryError, IntentRecord, IntentRequest, PrincipalId,
+    Receipt, ReceiptResult, Reconciliation, VirtualCheckpoint, WithdrawalError, WithdrawalReason,
+    WriteBlocker,
 };
+pub use diagnostics::{
+    ControlledIssue, DiagnosticAnomaly, DiagnosticEntry, DiagnosticEvent, DiagnosticSequence,
+    FlightRecorder, IncidentSnapshot,
+};
+pub use external_dispatch::{
+    DispatchOwnership, ExternalAssignmentEvidence, ExternalAssignmentRejection,
+    ExternalAssignmentResult, ExternalCallContext, ExternalCommandRejection,
+    ExternalDispatchAuthorityError, ExternalDispatchAuthorityGrant,
+    ExternalDispatchAuthorityGrantId, ExternalDispatchConfigurationError, ExternalDispatchDelivery,
+    ExternalDispatchDisposition, ExternalDispatchRecord, ExternalDispatchRequest,
+    ExternalDispatchScopeId, ExternalDispatchSink, ExternalDispatchSubmission,
+    ExternalDispatchSubmissionError, ExternalDispatchTerminal, ExternalEvidenceRejection,
+    ExternalReceiptResult, ExternalServingResult, NativeAssignmentId,
+};
+pub use liftassistant_runtime::ControllerId;
 
 use liftassistant_core::{
     CallRegistration, CallRegistry, DispatchCandidate, DispatchSelection, HallCallRejection,
@@ -109,10 +128,6 @@ pub enum SourceSessionError {
         source: ObservationSourceId,
         session: ObservationSessionId,
     },
-    RetiredSession {
-        source: ObservationSourceId,
-        session: ObservationSessionId,
-    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -125,6 +140,10 @@ pub struct SourceSessionTransition {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceObservationInvalidationError {
+    UnboundCar {
+        source: ObservationSourceId,
+        car: CarId,
+    },
     NoActiveSourceSession {
         source: ObservationSourceId,
         requested: ObservationSessionId,
@@ -155,11 +174,12 @@ pub struct Engine {
     observation_bindings: BTreeMap<(ObservationSourceId, CarId), ObservationBindingRole>,
     operational_authorities: BTreeMap<CarId, ObservationSourceId>,
     active_source_sessions: BTreeMap<ObservationSourceId, ObservationSessionId>,
-    retired_source_sessions: BTreeSet<(ObservationSourceId, ObservationSessionId)>,
     observations: ObservationAssembler,
     source_states: BTreeMap<(ObservationSourceId, CarId), CarState>,
     operational_states: BTreeMap<CarId, CarState>,
     execution_capabilities: BTreeMap<CarId, ExecutionCapabilities>,
+    controlled: controlled::ControlledIntents,
+    external_dispatch: external_dispatch::ExternalDispatches,
     diagnostics: FlightRecorder,
 }
 
@@ -177,11 +197,12 @@ impl Engine {
             observation_bindings: BTreeMap::new(),
             operational_authorities: BTreeMap::new(),
             active_source_sessions: BTreeMap::new(),
-            retired_source_sessions: BTreeSet::new(),
             observations: ObservationAssembler::new(),
             source_states: BTreeMap::new(),
             operational_states: BTreeMap::new(),
             execution_capabilities: BTreeMap::new(),
+            controlled: controlled::ControlledIntents::default(),
+            external_dispatch: external_dispatch::ExternalDispatches::default(),
             diagnostics: FlightRecorder::new(capacity),
         }
     }
@@ -228,8 +249,10 @@ impl Engine {
                 role: *existing,
             });
         }
-        if role == ObservationBindingRole::Operational
-            && let Some(existing_source) = self.operational_authorities.get(&car)
+        if let Some(existing_source) = self
+            .operational_authorities
+            .get(&car)
+            .filter(|_| role == ObservationBindingRole::Operational)
         {
             return Err(ObservationBindingError::OperationalAuthorityConflict {
                 car,
@@ -266,6 +289,8 @@ impl Engine {
         self.active_source_sessions.get(source)
     }
 
+    /// Activates a fresh incarnation supplied by the ingestion-lifecycle owner.
+    /// The caller must never assign a historical token to a new lifetime.
     pub fn begin_source_session(
         &mut self,
         source: ObservationSourceId,
@@ -281,19 +306,12 @@ impl Engine {
         if self.active_source_sessions.get(&source) == Some(&session) {
             return Err(SourceSessionError::AlreadyActive { source, session });
         }
-        if self
-            .retired_source_sessions
-            .contains(&(source.clone(), session.clone()))
-        {
-            return Err(SourceSessionError::RetiredSession { source, session });
-        }
-
         let previous_session = self
             .active_source_sessions
             .insert(source.clone(), session.clone());
         if let Some(previous) = &previous_session {
-            self.retired_source_sessions
-                .insert((source.clone(), previous.clone()));
+            self.diagnostics
+                .forget_observation_stream(&source, previous);
         }
         self.observations.remove_source(&source);
         let mut invalidated_cars: BTreeSet<_> = self
@@ -312,6 +330,12 @@ impl Engine {
             }
         }
 
+        for car in &invalidated_cars {
+            if self.operational_authorities.get(car) == Some(&source) {
+                self.reset_external_service_observation(car, None);
+                self.note_controlled_readiness_loss(car, WriteBlocker::ObservationUnavailable);
+            }
+        }
         Ok(SourceSessionTransition {
             source,
             previous_session,
@@ -330,19 +354,7 @@ impl Engine {
         source: ObservationSourceId,
         session: ObservationSessionId,
     ) -> Result<SourceObservationInvalidation, SourceObservationInvalidationError> {
-        let Some(active) = self.active_source_sessions.get(&source) else {
-            return Err(SourceObservationInvalidationError::NoActiveSourceSession {
-                source,
-                requested: session,
-            });
-        };
-        if active != &session {
-            return Err(SourceObservationInvalidationError::InactiveSourceSession {
-                source,
-                active: active.clone(),
-                requested: session,
-            });
-        }
+        self.check_invalidation_session(&source, &session)?;
 
         self.observations.invalidate_source_evidence(&source);
         let mut invalidated_cars: BTreeSet<_> = self
@@ -361,6 +373,12 @@ impl Engine {
             }
         }
         let invalidated_cars = invalidated_cars.into_iter().collect::<Vec<_>>();
+        for car in &invalidated_cars {
+            if self.operational_authorities.get(car) == Some(&source) {
+                self.reset_external_service_observation(car, None);
+                self.note_controlled_readiness_loss(car, WriteBlocker::ObservationUnavailable);
+            }
+        }
         self.diagnostics.record_source_invalidation(
             source.clone(),
             session.clone(),
@@ -372,6 +390,61 @@ impl Engine {
             session,
             invalidated_cars,
         })
+    }
+
+    /// Revokes one bound car's evidence and resolved state in the current incarnation.
+    /// Other bindings and the source-global sequence watermark remain intact.
+    pub fn invalidate_car_observations(
+        &mut self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+        car: &CarId,
+    ) -> Result<ObservationBindingRole, SourceObservationInvalidationError> {
+        self.check_invalidation_session(source, session)?;
+        let role = self.observation_binding_role(source, car).ok_or_else(|| {
+            SourceObservationInvalidationError::UnboundCar {
+                source: source.clone(),
+                car: car.clone(),
+            }
+        })?;
+        self.observations
+            .invalidate_car_evidence(source, session, car);
+        self.source_states.remove(&(source.clone(), car.clone()));
+        if role == ObservationBindingRole::Operational {
+            self.reset_external_service_observation(car, None);
+        }
+        if role == ObservationBindingRole::Operational
+            && self.operational_states.remove(car).is_some()
+        {
+            self.note_controlled_readiness_loss(car, WriteBlocker::ObservationUnavailable);
+        }
+        self.diagnostics.record_source_invalidation(
+            source.clone(),
+            session.clone(),
+            vec![car.clone()],
+        );
+        Ok(role)
+    }
+
+    fn check_invalidation_session(
+        &self,
+        source: &ObservationSourceId,
+        session: &ObservationSessionId,
+    ) -> Result<(), SourceObservationInvalidationError> {
+        let Some(active) = self.active_source_sessions.get(source) else {
+            return Err(SourceObservationInvalidationError::NoActiveSourceSession {
+                source: source.clone(),
+                requested: session.clone(),
+            });
+        };
+        if active != session {
+            return Err(SourceObservationInvalidationError::InactiveSourceSession {
+                source: source.clone(),
+                active: active.clone(),
+                requested: session.clone(),
+            });
+        }
+        Ok(())
     }
 
     pub fn car_states(&self) -> Vec<CarState> {
@@ -435,7 +508,18 @@ impl Engine {
         let Some(snapshot) = assembled.snapshot() else {
             self.source_states.remove(&key);
             if role == ObservationBindingRole::Operational {
-                self.operational_states.remove(&assembled.car);
+                self.reset_external_service_observation(
+                    &assembled.car,
+                    Some(&assembled.latest_provenance),
+                );
+            }
+            if role == ObservationBindingRole::Operational
+                && self.operational_states.remove(&assembled.car).is_some()
+            {
+                self.note_controlled_readiness_loss(
+                    &assembled.car,
+                    WriteBlocker::ObservationUnavailable,
+                );
             }
             return ObservationIngestResult::Incomplete(Box::new(assembled));
         };
@@ -444,14 +528,35 @@ impl Engine {
             CarStateResolution::Resolved(state) => {
                 self.source_states.insert(key, state.clone());
                 if role == ObservationBindingRole::Operational {
-                    self.operational_states
+                    let previous = self
+                        .operational_states
                         .insert(state.id.clone(), state.clone());
+                    if state.mode != liftassistant_model::OperatingMode::Normal
+                        && previous.is_some_and(|previous| {
+                            previous.mode == liftassistant_model::OperatingMode::Normal
+                        })
+                    {
+                        self.note_controlled_readiness_loss(
+                            &state.id,
+                            WriteBlocker::Mode(state.mode),
+                        );
+                    }
+                    self.reconcile_controlled(state, &assembled);
+                    self.observe_external_service(state, &assembled);
                 }
             }
             CarStateResolution::Unresolved { car, .. } => {
                 self.source_states.remove(&key);
                 if role == ObservationBindingRole::Operational {
-                    self.operational_states.remove(car);
+                    self.reset_external_service_observation(
+                        car,
+                        Some(&assembled.latest_provenance),
+                    );
+                }
+                if role == ObservationBindingRole::Operational
+                    && self.operational_states.remove(car).is_some()
+                {
+                    self.note_controlled_readiness_loss(car, WriteBlocker::ObservationUnavailable);
                 }
             }
         }
@@ -516,7 +621,12 @@ impl Engine {
             events.push(EngineEvent::Runtime(runtime_event.clone()));
             match &runtime_event {
                 RuntimeEvent::IntentAccepted(Intent::ServeFloor { car, floor }) => {
-                    if let Some(id) = self.calls.assigned_call(car, *floor) {
+                    let assigned = self.calls.active_calls().find(|call| {
+                        !self.external_dispatch.owns(call.id)
+                            && call.call.floor == *floor
+                            && matches!(&call.state, CallState::Assigned(assigned) if assigned == car)
+                    }).map(|call| call.id);
+                    if let Some(id) = assigned {
                         assert!(self.calls.mark_serving(id, car));
                         events.push(EngineEvent::CallStateChanged {
                             id,
@@ -529,7 +639,14 @@ impl Engine {
                     self.ingest_observation_update(update.clone());
                 }
                 RuntimeEvent::Arrived { car, floor } => {
-                    self.calls.note_arrival(car, *floor);
+                    let serving = self.calls.active_calls().find(|call| {
+                        !self.external_dispatch.owns(call.id)
+                            && call.call.floor == *floor
+                            && matches!(&call.state, CallState::Serving(assigned) if assigned == car)
+                    }).map(|call| call.id);
+                    if let Some(id) = serving {
+                        assert!(self.calls.note_call_arrival(id, car, *floor));
+                    }
                 }
                 RuntimeEvent::DoorStateChanged {
                     car,
@@ -555,7 +672,14 @@ impl Engine {
     where
         B: IntentSink,
     {
-        let pending: Vec<_> = self.calls.pending_calls().collect();
+        if self.is_controlled() {
+            return Vec::new();
+        }
+        let pending: Vec<_> = self
+            .calls
+            .pending_calls()
+            .filter(|(id, _)| !self.external_dispatch.owns(*id))
+            .collect();
         let mut events = Vec::new();
 
         for (id, call) in pending {
@@ -1037,13 +1161,6 @@ mod tests {
             })
         );
         assert_eq!(engine.source_state(&source, &car), Some(&state_b));
-        assert_eq!(
-            engine.begin_source_session(source.clone(), session_a.clone()),
-            Err(SourceSessionError::RetiredSession {
-                source: source.clone(),
-                session: session_a,
-            })
-        );
         assert_eq!(
             engine.begin_source_session(source.clone(), session_b.clone()),
             Err(SourceSessionError::AlreadyActive {

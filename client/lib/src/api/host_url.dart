@@ -4,6 +4,14 @@ const String experimentalApiVersion = 'experimental/v0';
 const String snapshotPath = '/api/experimental/v0/snapshot';
 const String eventsPath = '/api/experimental/v0/events';
 
+const String devControlApiVersion = 'dev-sim/v0';
+const String devControlCapabilitiesPath = '/api/dev-sim/v0/capabilities';
+const String devControlServeFloorPreviewPath =
+    '/api/dev-sim/v0/serve-floor/preview';
+const String devControlServeFloorSubmitPath =
+    '/api/dev-sim/v0/serve-floor/submit';
+const String devControlSubmissionsPathPrefix = '/api/dev-sim/v0/submissions/';
+
 @immutable
 class InvalidHostUrlException implements Exception {
   const InvalidHostUrlException(this.message);
@@ -98,7 +106,8 @@ class HostEndpoint {
       );
     }
 
-    final String formattedHost = uri.host.contains(':') && !uri.host.startsWith('[')
+    final String formattedHost =
+        uri.host.contains(':') && !uri.host.startsWith('[')
         ? '[${uri.host}]'
         : uri.host;
     final String portSuffix = uri.hasPort ? ':${uri.port}' : '';
@@ -114,6 +123,29 @@ class HostEndpoint {
   final Uri baseUri;
   final Uri snapshotUri;
   final Uri eventsUri;
+
+  Uri get devControlCapabilitiesUri =>
+      baseUri.replace(path: devControlCapabilitiesPath);
+
+  Uri get devControlServeFloorPreviewUri =>
+      baseUri.replace(path: devControlServeFloorPreviewPath);
+
+  Uri get devControlServeFloorSubmitUri =>
+      baseUri.replace(path: devControlServeFloorSubmitPath);
+
+  Uri devControlSubmissionUri(
+    String submissionKey, {
+    String? expectedInstanceId,
+  }) {
+    final String encodedKey = Uri.encodeComponent(submissionKey);
+    return baseUri.replace(
+      path: '$devControlSubmissionsPathPrefix$encodedKey',
+      queryParameters:
+          expectedInstanceId != null && expectedInstanceId.isNotEmpty
+          ? <String, String>{'expected_instance_id': expectedInstanceId}
+          : null,
+    );
+  }
 
   String get origin => baseUri.toString();
 

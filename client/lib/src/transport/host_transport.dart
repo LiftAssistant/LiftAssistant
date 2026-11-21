@@ -45,8 +45,8 @@ final class UnexpectedContentTypeException extends HostTransportException {
     required this.actualContentType,
     required this.operation,
   }) : super(
-          '$operation endpoint returned unexpected Content-Type "$actualContentType" (expected "$expectedPrefix").',
-        );
+         '$operation endpoint returned unexpected Content-Type "$actualContentType" (expected "$expectedPrefix").',
+       );
 
   final String expectedPrefix;
   final String actualContentType;
@@ -58,9 +58,9 @@ const int maxSnapshotBytes = 8 * 1024 * 1024;
 @immutable
 final class SnapshotTooLargeException extends HostTransportException {
   const SnapshotTooLargeException({required this.limitBytes})
-      : super(
-          'Snapshot response exceeded maximum bounded size ($limitBytes bytes).',
-        );
+    : super(
+        'Snapshot response exceeded maximum bounded size ($limitBytes bytes).',
+      );
 
   final int limitBytes;
 }
@@ -91,6 +91,21 @@ class HostSseConnection {
   }
 }
 
+const int maxControlResponseBytes = 256 * 1024;
+
+@immutable
+final class ControlHttpResponse {
+  const ControlHttpResponse({
+    required this.statusCode,
+    required this.body,
+    required this.contentType,
+  });
+
+  final int statusCode;
+  final String body;
+  final String contentType;
+}
+
 abstract interface class HostTransport {
   /// Performs `GET /api/experimental/v0/snapshot` and returns the raw UTF-8 JSON body.
   Future<String> fetchSnapshotJson(HostEndpoint endpoint);
@@ -100,6 +115,28 @@ abstract interface class HostTransport {
   Future<HostSseConnection> openSnapshotEvents(HostEndpoint endpoint);
 
   void dispose();
+}
+
+/// Optional transport for the isolated development-only Simulator control surface (`/api/dev-sim/v0/*`).
+/// Kept separate from read-only [HostTransport].
+abstract interface class DevControlTransport {
+  Future<ControlHttpResponse> fetchControlCapabilities(HostEndpoint endpoint);
+
+  Future<ControlHttpResponse> postServeFloorPreview(
+    HostEndpoint endpoint,
+    String jsonBody,
+  );
+
+  Future<ControlHttpResponse> postServeFloorSubmit(
+    HostEndpoint endpoint,
+    String jsonBody,
+  );
+
+  Future<ControlHttpResponse> fetchSubmissionStatus(
+    HostEndpoint endpoint,
+    String submissionKey, {
+    String? expectedInstanceId,
+  });
 }
 
 HostTransport createPlatformHostTransport({
