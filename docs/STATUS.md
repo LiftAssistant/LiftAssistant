@@ -147,9 +147,9 @@ The sources support a conservative recorded subset of `STA`, `CMD`, `MDE` and
 parser across LCE software generations, raw framing, lifecycle/freshness,
 hardware access, or write safety.
 
-The new model-only `liftassistant-lce` crate parses bounded original-synthetic
-row/column fixtures and maps only justified evidence through the existing
-`CarObservationUpdate` and Engine binding/session path. Level requires stopped,
+The R0 model-only `liftassistant-lce` implementation parses bounded
+original-synthetic row/column fixtures and maps only justified evidence through
+the existing `CarObservationUpdate` and Engine binding/session path. Level requires stopped,
 door-zone and at-level evidence; advance position remains context; motion needs
 consistent speed/direction; exact simple door states map while composite values
 remain unknown; only normal/fire/out-of-service MDE modes have strong canonical
@@ -218,6 +218,58 @@ lifecycle, query safety or production compatibility.
 real-controller evidence remains gated. NO serial, LCEUIO, unlock, CPU561
 connection, active terminal query, passenger-equipment access or KONE
 write/control path is authorized.`
+
+### LCE-R2 — Offline / PTY Read-only Terminal Connector Foundation
+
+**COMPLETE — `PTY_READONLY_CONNECTOR_PARTIAL`; HUMAN-CHECK reached.** R2 adds a
+synchronous typed session above R1 without opening a real device or changing
+Core/Engine authority. Its only query variants generate `STA\r`, `CMD\r` or
+`MDE\r`; there is no arbitrary command/write method. The historical
+9600/8N1 runtime profile is explicit and target-unvalidated, while the
+CPU561 115200 SD/bootloader servicing profile is explicitly unsupported.
+
+The session preserves `Unknown`/`Available`/`LockedOrUnavailable` interface
+state and proceeds only after the historical-manual `?` boundary. Banners,
+fragmentation and optional echo are bounded; an unknown interactive prompt,
+family mismatch, unsupported family, malformed/oversized response, timeout,
+partial response or disconnect fails closed without generating a follow-up
+keystroke. There is no automatic poll/retry, baud scan, printer-mode entry,
+pagination, escape, unlock or LCEUIO behavior.
+
+Each synthetic session records bounded exact TX/RX bytes, typed query and
+session/parser markers, monotonic relative time, profile and end reason in an
+internal versioned capture. Finalization computes SHA-256; loading revalidates
+the artifact and replay sends only RX bytes through a fresh R1 decoder. A Linux
+kernel PTY regression runs a scripted `LIFTASSISTANT_SYNTHETIC` peer through
+whole/bytewise/irregular output, CRLF splits, echo/no echo, delayed response,
+all three allowed families, disconnect and new-session recovery. Portable core
+tests cover the same fail-closed semantics without PTY.
+
+The [compatibility dossier](LCE_RAW_TERMINAL_COMPATIBILITY.md) retains the
+evidence hierarchy: KONE-origin LCEUIO and commissioning documents establish
+interface/lock and CPU561 XDB1 serial-port identity; the historical terminal
+manual plus independent field reports support the 9600/8N1 read-query
+hypothesis; no public raw real capture was found. All committed bytes remain
+synthetic. No Core or Engine type/behavior changed. Normal dependencies add
+`serde`/`serde_json` for the bounded internal capture and `sha2` for its
+integrity; `rustix` is dev-only for the Linux PTY proof.
+
+**Next gate:** `LCE-R3 — FIRST REAL READ-ONLY EVIDENCE ACQUISITION`, pending a
+new explicit HUMAN authorization. Exact firmware banner, prompt/echo/newline,
+screen layout, timing, pagination, target lock state and LCEUIO pass-through
+remain unknown. R2 makes no `REAL_LCE_COMPATIBLE`, `CPU561_VALIDATED`,
+`LCEUIO_VALIDATED`, `LIVE_SERIAL_VALIDATED` or `PRODUCTION_READY` claim.
+
+Closing validation passes formatting, warning-free workspace all-target
+Clippy, 237 workspace tests with one expected ignored soak child, exact
+Rust/Cargo 1.85.0 locked all-target check, nine TUI scenarios, four non-live
+Headless scenarios, 34 focused LCE unit tests, two Linux PTY integration tests
+and one compile-fail public-API regression. No live/external LCE evidence was
+run or claimed.
+
+**Terminal boundary:** `HUMAN-CHECK — NO /dev/tty*, USB-RS232, CPU561, XDB1,
+LCEUIO, unlock, controller probing/TX, live serial, passenger equipment or KONE
+write/control path was used or authorized.`
 
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 

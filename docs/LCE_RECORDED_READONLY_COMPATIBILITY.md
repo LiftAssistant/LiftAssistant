@@ -63,8 +63,8 @@ firmware, or proprietary software is stored in this repository.
 
 ## Implemented recorded vertical
 
-`liftassistant-lce` is a model-only normal dependency crate. It parses bounded
-ASCII representations of the documented row/column families `STA`, `CMD`,
+At R0, `liftassistant-lce` was a model-only normal dependency crate and parsed
+bounded ASCII representations of the documented row/column families `STA`, `CMD`,
 `MDE`, and `GRP`. The checked-in fixture text is original and synthetic; it is
 not copied controller output. `CAL` and `N` remain research-only because they
 do not add honest canonical car state for this slice.

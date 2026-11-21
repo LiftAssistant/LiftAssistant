@@ -3,11 +3,27 @@
 //! Experimental parser and conservative canonical mapping for recorded KONE LCE
 //! diagnostic-terminal tables.
 //!
-//! This crate deliberately contains no serial transport, terminal command generation,
-//! unlock logic, controller write path, or hardware access. It accepts original synthetic
-//! recorded fixtures and bounded offline transcript bytes for the same native families.
+//! This crate deliberately contains no real serial transport, device enumeration, unlock
+//! logic, controller-control path, or hardware access. Its terminal session can generate only
+//! the typed `STA`, `CMD`, and `MDE` observation queries for synthetic PTY validation. It accepts
+//! original synthetic recorded fixtures and bounded offline transcript bytes for the same
+//! native families.
 
+mod capture;
+mod terminal;
 mod transcript;
+
+pub use capture::{
+    FinalizedLceEvidenceCapture, LCE_CAPTURE_FORMAT_VERSION, LceCaptureDirection,
+    LceCaptureEndReason, LceCaptureEntry, LceCaptureError, LceCaptureMarker, LceCaptureOrigin,
+    LceCapturePayload,
+};
+pub use terminal::{
+    LceDataBits, LceDisconnectReason, LceInterfaceState, LceParity, LceReadOnlyQuery,
+    LceRuntimeTerminalProfile, LceStopBits, LceTerminalFailure, LceTerminalFailureKind,
+    LceTerminalSession, LceTerminalSessionEvent, LceTerminalSessionState, LceTerminalTx,
+    LceTerminalUseError,
+};
 
 pub use transcript::{
     DecodedLceTranscriptFrame, LceTranscriptDecoder, LceTranscriptError, LceTranscriptEvent,

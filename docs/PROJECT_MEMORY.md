@@ -277,6 +277,25 @@ and `RST` remain unsupported native/research context. The result is
 `OFFLINE_TRANSCRIPT_PARTIAL`; serial acquisition and real-controller evidence
 remain separately gated.
 
+LCE-R2 adds a synchronous, bounded terminal-session layer without a real serial
+backend. Its complete positive TX allowlist is typed `STA`, `CMD` and `MDE`;
+there is no arbitrary byte/string command. The historical 9600/8N1 runtime
+profile is distinct from the unsupported 115200 CPU561 servicing/bootloader
+profile. The session requires a known historical `?` boundary, preserves
+banner/noise/echo, fails closed on ambiguous or interactive input, never
+automatically polls/retries/pages, and delegates all table interpretation to
+R1. `Unknown`, `Available` and `LockedOrUnavailable` interface state remains
+explicit; no LCEUIO or unlock behavior exists.
+
+R2 capture keeps bounded exact TX/RX, monotonic relative timing, typed query and
+session/parser context, profile and end reason in an internal versioned artifact
+whose canonical body has a verified SHA-256. Replay feeds only RX bytes through
+a fresh R1 decoder. Linux PTY tests use only `LIFTASSISTANT_SYNTHETIC` peers;
+normal code has no serial/USB dependency or device enumeration. The result is
+`PTY_READONLY_CONNECTOR_PARTIAL`, not evidence of real CPU561, LCEUIO or live
+serial compatibility. First real read-only evidence acquisition remains a
+separate HUMAN gate.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

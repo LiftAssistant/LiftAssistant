@@ -8,6 +8,12 @@ publish.workspace = true
 
 [dependencies]
 liftassistant-model = { path = "../liftassistant-model" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
 
 [dev-dependencies]
 liftassistant-engine = { path = "../liftassistant-engine" }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+rustix = { version = "0.38.44", features = ["pty", "termios"] }

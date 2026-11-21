@@ -1,6 +1,6 @@
-# LCE-R1 raw terminal compatibility
+# LCE-R1/R2 raw terminal compatibility
 
-Status: `OFFLINE_TRANSCRIPT_PARTIAL`
+Status: R1 `OFFLINE_TRANSCRIPT_PARTIAL`; R2 `PTY_READONLY_CONNECTOR_PARTIAL`
 
 Reviewed: 2026-11-21
 
@@ -24,9 +24,10 @@ arbitrary offline byte chunks
   -> Engine-owned operational state
 ```
 
-There is no serial dependency, terminal command generation, controller query,
-LCEUIO communication, unlock/counter operation, memory or parameter access,
-call generation, hardware access, or write/control path.
+R1 introduced no serial dependency, terminal command generation, controller
+query, LCEUIO communication, unlock/counter operation, memory or parameter
+access, call generation, hardware access, or write/control path. R2's later
+typed synthetic-PTY query surface is documented separately below.
 
 ## Relation to LCE-R0
 
@@ -73,7 +74,7 @@ capture checksum to record.
 | KCM831 parameter/LON capture report | [VatorTrader thread](https://www.vatortrader.com/forums/ubbthreads.php?Board=1&main=913&type=thread&ubb=printthread), Scott Davidson, 2013-01 | Author claims a real KCM831/LCE connection using Windows XP, RS232/null-modem and HyperTerminal text capture | No capture bytes are public; report says screen text was continuously saved. Banner, echo, commands and tables cannot be inspected | Specific controller context and method; later field discussions corroborate use of the terminal path | Public post, but the capture/write-up was offered privately and has no redistribution grant | `FIELD_REPORT_ONLY`; medium confidence that real captures existed, zero content-corpus confidence |
 | Later HyperTerminal discussions | [2024 discussion](https://www.vatortrader.com/forums/ubbthreads.php?Number=37544&ubb=showflat) and [2024 LCE thread](https://www.vatortrader.com/forums/ubbthreads.php?Board=1&main=6770&type=thread&ubb=printthread) | Field users discuss KCM831/LCE connection and privately shared instructions | No public raw log, parameter dump, banner, prompt, or table body | Consistent with the 2013 report and KONE-origin interface evidence | Public posts only; private material was not requested or accessed | `FIELD_REPORT_ONLY`; low-to-medium content confidence |
 | LCE terminal instructions | [Publicly readable community upload](https://www.scribd.com/document/379489546/LCE-Terminal-using-instructions-with-logo-KONE-pdf), historical document, uploader Daud Jiong KIM | KONE-branded historical instructions with sample `STA`, `CMD`, `CAL`, `GRP`, `MDE`, `N`, prompt, pagination, and active-function descriptions | Manual examples are formatted/OCR-derived, not an independently captured field session; keystrokes and output are interleaved in explanatory text | Vocabulary agrees with R0 evidence and field reports | Marked all rights reserved; nothing copied into the repository | `VENDOR_MANUAL_SAMPLE`; medium semantic confidence, low byte-layout confidence |
-| LCEUIO manual, EDMS 884634en.A.2 | [Public mirror of KONE-origin document](https://v6-file.globalso.com/file_manage/1579/20240913/kone-service-tool.pdf), first issue 2006-02-28 | Identifies LCECPU40/LCECPU561/LOPCB, LCEUIO and LCETERM interface/lock boundary | Not a terminal transcript and does not define the runtime table grammar | KONE-origin identity and independently mirrored document metadata | External reference only; no repository copy | `VENDOR_MANUAL_SAMPLE`; high interface-boundary confidence, no grammar confidence |
+| LCEUIO manual, EDMS 884634en.A.2 | [Public mirror of KONE-origin document](https://v6-file.globalso.com/file_manage/1579/20240913/kone-service-tool.pdf), first issue 2006-02-28 | Identifies LCECPU40/LCECPU561/LOPCB, LCEUIO and LCETERM interface/lock boundary | Not a terminal transcript and does not define the runtime table grammar | KONE-origin identity and independently mirrored document metadata | External reference only; no repository copy | `VENDOR_ORIGIN_INTERFACE_EVIDENCE`; high interface-boundary confidence, no grammar confidence |
 | R0 and R1 test inputs | Independently authored in this repository, 2026-11-20/21 | Synthetic normalized tables and malformed/boundary inputs | Self-contained LF/CRLF byte streams with deliberately synthetic values and session noise | Executable deterministic tests only | Repository-owned test material; no site/controller identifiers | `LIFTASSISTANT_SYNTHETIC`; high test-provenance confidence, no field-compatibility claim |
 
 No candidate qualified as `REAL_FIELD_CAPTURE` or
@@ -239,9 +240,160 @@ hardware, serial, LCEUIO, unlock, or active-query work remains a separate HUMAN
 gate. A real capture must be reviewed for permission and site/private data
 before any minimized derivative fixture could enter the repository.
 
+## R2 evidence dossier
+
+R2 rechecked the narrow interface/session claims instead of treating the task
+summary as a protocol specification:
+
+| Source | Durable evidence used | Classification / exclusion |
+| --- | --- | --- |
+| KONE *LCEUIO Dongle User Manual*, EDMS 884634en.A.2, first issue 2006-02-28 | The KONE-origin document identifies the LCE 6.X.X lock boundary, D9 Port A for LCECPU40/LCECPU561/LOPCB, Port B for LCETERM, 10–24 V external power, and the CPU connection as RS232 | `VENDOR_ORIGIN_INTERFACE_EVIDENCE`; establishes interface/lock existence only. It does not establish target lock state, terminal grammar, or permission to unlock |
+| Historical KONE-branded *LCE Terminal Using Instructions* | Historical runtime profile 9600 baud, 8 data bits, no parity, one stop bit and null-modem wiring; monitoring families include `STA`, `CMD`, `MDE`; the same terminal surface also includes calls, memory, parameters, roll call and interactive/paginated operations | `VENDOR_MANUAL_SAMPLE`; supports a strict positive allowlist and stateful/fail-closed session, not byte-for-byte firmware compatibility |
+| KONE AM-11.65.040-USK, *KCM831 with KDM drive*, 2022-09-27 | CPU561 XDB1 is explicitly called the Serial Port in the commissioning procedure | `VENDOR_ORIGIN_INTERFACE_EVIDENCE`; connector identity only. No pinout, field procedure, or controller access was derived |
+| [2013 KCM831 report](https://www.vatortrader.com/forums/ubbthreads.php?Board=1&main=913&type=thread&ubb=printthread) | A real PC/RS232/null-modem/HyperTerminal session and `.txt` capture of parameters/LON information were reported | `FIELD_REPORT_ONLY`; `REAL_CAPTURE_EXISTENCE_CORROBORATED`, but no public raw bytes |
+| [2024 LCE discussion](https://www.vatortrader.com/forums/ubbthreads.php?Board=1&main=6770&type=thread&ubb=printthread) | Independent field report says RS232, 9600, 8-bit and null modem worked on LCE and distinguishes newer KCE | `FIELD_REPORT_ONLY`; profile corroboration, not complete grammar evidence |
+| KONE AS-10.22.028, LCECPU561 software-upload/SD servicing instruction | Its 115200 baud output belongs to the SD/bootloader/service information path | `VENDOR_ORIGIN_INTERFACE_EVIDENCE`, explicitly excluded from the runtime connector. No baud scan, 115200 fallback, bootloader or upload support exists |
+
+This leaves the R1 corpus result unchanged:
+
+```text
+REAL_CAPTURE_EXISTENCE_CORROBORATED
+PUBLIC_RAW_CORPUS_NOT_FOUND
+REAL_FIELD_CAPTURE absent
+```
+
+No source document, screenshot, binary or external terminal transcript was
+copied into the repository. All executable R2 bytes are marked
+`LIFTASSISTANT_SYNTHETIC`.
+
+## R2 typed terminal boundary
+
+The public query surface is exactly:
+
+```text
+LceReadOnlyQuery::Status       -> STA + carriage return
+LceReadOnlyQuery::CommandState -> CMD + carriage return
+LceReadOnlyQuery::Mode         -> MDE + carriage return
+```
+
+There is no raw/string command, generic write, memory, parameter, call, test,
+escape, pagination or unlock API. `LceTerminalTx` has private construction and
+can only expose bytes generated from one of those three variants. The session
+never automatically polls or retries. It sends nothing until it has observed
+the historical-manual `?` boundary; any other question-like prompt fails
+closed without guessing a reply. It never sends the historical printer-mode
+entry sequence, RETURN-for-next-page, Escape or Ctrl-C.
+
+`LceRuntimeTerminalProfile::historical_9600_8n1()` is an explicit profile type,
+not parser state. The reviewed 9600/8N1 value is a historical/vendor-evidenced
+default and remains unvalidated on the target CPU561. No constructor or
+fallback exists for the separate 115200 servicing profile.
+
+`LceInterfaceState` preserves `Unknown`, `Available`, and
+`LockedOrUnavailable`. An exact known boundary can move an unknown synthetic
+session to available. A configured locked/unavailable interface fails before
+query generation. The connector contains no LCEUIO algorithm, counter reset,
+unlock sequence or license/tool bypass.
+
+## R2 session and evidence lifecycle
+
+The synchronous session represents:
+
+```text
+Disconnected
+  -> SessionStarting
+  -> AwaitingKnownBoundary
+  -> IdleOrReady
+  -> AwaitingResponse(query)
+  -> ReceivingResponse(query)
+  -> IdleOrReady
+
+any unsupported/ambiguous/timeout path -> FailedClosed(reason)
+```
+
+It accepts arbitrary RX fragmentation and delegates every table byte to the R1
+decoder. Banners and non-interactive noise are preserved without becoming
+state; exact fragmented echo is classified but optional. A supported-family
+mismatch, `GRP`/`CAL`/`N`/`SPB`/`RST`, unknown interactive prompt, malformed or
+oversized input, timeout, partial table or disconnect mid-response stops query
+issuance. End-of-stream completion is retained as raw evidence but is not
+released as an observation-bearing frame. Reconnection requires a new
+`ObservationSessionId`; a disconnected old session rejects late bytes, while
+Engine source-session fencing remains authoritative for canonical ingestion.
+
+The response timeout is supplied explicitly by the caller. R2 establishes no
+universal LCE timing value and has no background clock, task or retry loop. The
+caller supplies a per-session monotonic relative clock beginning at zero.
+
+Every session owns a bounded internal evidence recorder containing:
+
+- format version, session ID, capture origin, interface state and profile;
+- monotonic relative microsecond offsets;
+- exact TX/RX byte entries with typed query correlation;
+- structured session/parser markers;
+- explicit completion/disconnect/fail-closed reason;
+- SHA-256 over the canonical capture body.
+
+The internal JSON envelope is versioned and experimental. Limits are 128 bytes
+for session identity, 4,096 entries, 64 KiB per raw entry, 1 MiB aggregate raw
+bytes and 5 MiB serialized form. Deserialization revalidates version, profile,
+timestamps, TX/query correlation, cardinality, sizes and SHA-256. Replay feeds
+only RX entries through a fresh R1 decoder; TX and markers never become
+observations. No site, building, passenger or controller identity is recorded
+by default.
+
+## R2 PTY validation boundary
+
+The Linux integration test creates a real kernel pseudo-terminal with `rustix`,
+puts its slave in raw mode, and runs a scripted fake LCE peer. It exercises
+whole, bytewise and irregular reads; fragmented CRLF; startup noise and known
+boundary; echo/no echo; `STA`/`CMD`/`MDE`; delayed response; multiple sequential
+records; partial response; disconnect; reconnect/new session; exact TX/RX
+capture; finalized checksum; and deterministic R1 replay. The fake and every
+fixture are explicitly `LIFTASSISTANT_SYNTHETIC`.
+
+Portable session/recorder tests retain the semantic coverage when a non-Linux
+target does not compile the PTY integration test. `rustix` is a dev-only PTY
+dependency; there is no serial/USB runtime dependency or device enumeration.
+Normal dependencies add existing-workspace `serde`/`serde_json` for the bounded
+internal evidence artifact and the small RustCrypto `sha2` implementation for
+artifact integrity. No async runtime, daemon, SDK or adapter framework was
+introduced.
+
+Closing validation passes formatting, warning-free workspace all-target
+Clippy, 237 workspace tests with one expected ignored soak child, the exact
+Rust/Cargo 1.85.0 locked all-target workspace check, all nine TUI scenarios,
+all four non-live Headless scenarios, 34 focused LCE unit tests, two Linux PTY
+integration tests and the compile-fail public-API regression. No live RMF,
+Podman, serial device, CPU561, XDB1, LCEUIO or external peer was used.
+
+R2 still routes accepted bytes only through:
+
+```text
+terminal session -> exact RX -> R1 decoder -> R0 native mapper
+  -> CarObservationUpdate -> explicit Engine binding/session
+```
+
+No Core or Engine domain type, authority rule, Intent, Principal, grant or
+write path changed.
+
+## R2 result and next evidence gap
+
+R2 is complete at `PTY_READONLY_CONNECTOR_PARTIAL`. This means the typed
+observation-only query surface, bounded fail-closed session, synthetic PTY
+transport proof, raw evidence finalization/checksum/replay and existing
+R1/R0/Engine path are implemented. It does not mean `REAL_LCE_COMPATIBLE`,
+`CPU561_VALIDATED`, `LCEUIO_VALIDATED`, `LIVE_SERIAL_VALIDATED` or
+`PRODUCTION_READY`.
+
+The next gate is `LCE-R3 — FIRST REAL READ-ONLY EVIDENCE ACQUISITION`. It needs
+separate HUMAN authorization and must begin with evidence preservation. Exact
+firmware banner, prompt variants, echo, CR/LF, screen layout, timing,
+pagination, lock state and LCEUIO pass-through remain unknown.
+
 ## HUMAN gate
 
-No authorization follows from R1 for serial hardware, LCEUIO, CPU561
-connection, unlock, active terminal queries, passenger equipment, or controller
-writes. Crossing any of those boundaries requires a separate explicit HUMAN
-decision.
+No authorization follows from R1/R2 for real serial hardware, `/dev/tty*`,
+USB-RS232, XDB1, LCEUIO, CPU561 connection, unlock, live terminal queries,
+passenger equipment, controller probing or controller writes. Crossing any of
+those boundaries requires a separate explicit HUMAN decision.

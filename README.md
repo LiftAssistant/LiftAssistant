@@ -91,6 +91,22 @@ cargo run -p liftassistant-tui -- --scenario bacnet-recorded-read-only
 
 This experiment maps a typed in-memory projection of decoded BACnet Lift properties into the same canonical observation/Engine ingestion path. Universal floor numbers remain configured floor references; multi-door status is not collapsed when doors disagree; and BACnet object `Out_Of_Service` decoupling makes operational evidence unknown rather than pretending the car is in LiftAssistant's `OutOfService` mode. It implements no BACnet packet codec, transport, discovery, property write, live connection, or conformance claim.
 
+Exercise the offline KONE LCE typed-session and real Linux PTY proof:
+
+~~~bash
+cargo test -p liftassistant-lce --test pty_readonly_connector
+~~~
+
+The test creates only a kernel pseudo-terminal and a scripted
+`LIFTASSISTANT_SYNTHETIC` peer. The connector generates only typed `STA`, `CMD`
+and `MDE` observation queries, preserves bounded exact TX/RX evidence, finalizes
+and verifies an internal SHA-256 capture, and deterministically replays RX
+through the existing R1/R0 path. It contains no real serial backend, device
+enumeration, LCEUIO/unlock procedure, controller connection or KONE control
+path. The historical 9600/8N1 profile and `?` boundary remain unvalidated on a
+real CPU561; see
+[`docs/LCE_RAW_TERMINAL_COMPATIBILITY.md`](docs/LCE_RAW_TERMINAL_COMPATIBILITY.md).
+
 Run the internal observation-adapter validation profiles:
 
 ~~~bash
@@ -265,7 +281,7 @@ crates/
   liftassistant-core/      deterministic semantic decisions
   liftassistant-engine/    shared semantic orchestration
   liftassistant-headless/  internal read-only host/lifecycle and live proofs
-  liftassistant-lce/       offline legacy-LCE recorded/transcript research
+  liftassistant-lce/       offline legacy-LCE parser/session/evidence/PTY research
   liftassistant-rmf/       Open-RMF mapping and subscription-only adapter
   liftassistant-runtime/   semantic runtime contract
   liftassistant-sim/       deterministic reference and recorded backends

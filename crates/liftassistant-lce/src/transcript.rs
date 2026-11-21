@@ -5,7 +5,7 @@ use crate::{LceParseError, RecordedLceFrame, parse_recorded_frame};
 const MAX_TRANSCRIPT_LINE_BYTES: usize = 512;
 const MAX_PENDING_FRAME_BYTES: usize = 1024;
 const MAX_PENDING_FRAME_LINES: usize = 16;
-const MAX_INPUT_CHUNK_BYTES: usize = 8 * 1024;
+pub(crate) const MAX_INPUT_CHUNK_BYTES: usize = 8 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LceTranscriptFamily {
@@ -259,6 +259,10 @@ pub struct LceTranscriptDecoder {
 impl LceTranscriptDecoder {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub(crate) fn pending_family(&self) -> Option<LceTranscriptFamily> {
+        self.pending_frame.as_ref().map(|frame| frame.family)
     }
 
     /// Accepts an arbitrary chunk and returns every complete frame or structural

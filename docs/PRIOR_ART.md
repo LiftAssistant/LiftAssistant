@@ -393,6 +393,28 @@ levels separately, and leaves real-capture compatibility unclaimed. The full
 classification and projection/Core-gap matrices are in
 [`LCE_RAW_TERMINAL_COMPATIBILITY.md`](LCE_RAW_TERMINAL_COMPATIBILITY.md).
 
+### LCE-R2 interface/profile/session finding
+
+The KONE-origin [LCEUIO manual, EDMS 884634en.A.2](https://v6-file.globalso.com/file_manage/1579/20240913/kone-service-tool.pdf)
+establishes an LCE interface/lock boundary, an RS232 CPU561 connection and
+LCETERM pass-through, but not target availability or terminal grammar. KONE
+AM-11.65.040-USK independently calls CPU561 XDB1 the Serial Port. The
+historical [LCE terminal instructions](https://www.scribd.com/document/379489546/LCE-Terminal-using-instructions-with-logo-KONE-pdf)
+and the independent [2024 field report](https://www.vatortrader.com/forums/ubbthreads.php?Board=1&main=6770&type=thread&ubb=printthread)
+support a 9600/8N1/null-modem runtime profile and `STA`/`CMD`/`MDE` vocabulary.
+The manual also exposes calls, parameters, memory, roll call and interactive
+pagination, so the terminal as a whole is not a read-only protocol.
+
+The durable design lesson is `interface identity != availability`, `runtime
+profile != servicing profile`, and `typed observation query != arbitrary
+terminal access`. CPU561 service/SD documentation associates 115200 with the
+bootloader/information path; it is not a fallback for runtime acquisition.
+LiftAssistant therefore models interface state explicitly, exposes only the
+three typed observation queries, requires a known boundary, records evidence
+before interpretation and fails closed on unknown interaction. PTY behavior is
+`LIFTASSISTANT_SYNTHETIC`; absent real raw bytes, exact prompt, echo, line
+ending, timing, pagination, firmware and LCEUIO behavior remain unknown.
+
 
 ## M4 semantic-boundary audit findings — reported/current/desired state
 
