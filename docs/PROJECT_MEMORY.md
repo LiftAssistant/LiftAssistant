@@ -305,6 +305,17 @@ a known boundary; v1 synthetic captures are not migrated or treated as v2.
 This adds no second lifecycle model, protocol behavior, dependency, hardware
 path or authority.
 
+LCE-R2.2 hardens future field evidence by separating
+`QueryPrepared` from `TRANSPORT_ACCEPTED_TX`. A typed TX token is bound to
+the observation session and a local sequence; only a reported accepted byte
+count can turn its fixed `STA\r`, `CMD\r` or `MDE\r` prefix into TX
+evidence. Partial/failed writes fail closed without retry, and response timeout
+starts only after all four bytes are reported accepted. Capture format v3
+validates that lifecycle. "Transport accepted" is intentionally weaker than
+serial drain or physical-wire confirmation, and the artifact SHA-256 is an
+integrity checksum rather than source authentication. No real transport,
+hardware path or authority was added.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

@@ -151,9 +151,14 @@ framework.
 The internal LCE evidence artifact keeps construction-time interface knowledge
 as `initial_interface_state`; it is not a final or inferred state. A later
 `KnownBoundary` marker is the evidence that moves the live R2 session to
-`Available`. Capture format v2 preserves that distinction and rejects query/TX
-history that precedes a known boundary instead of maintaining a second
-interface-state timeline.
+`Available`. R2.2 capture format v3 also separates a typed query being
+prepared from bytes reported accepted by the caller-owned transport. The
+session enters `Transmitting` after preparation and starts its response
+timeout only after the complete four-byte allowlisted query has been reported
+transport-accepted. Partial or failed writes fail closed without automatic
+retry. `TRANSPORT_ACCEPTED_TX` is deliberately not named or treated as UART
+drain or physical-wire confirmation; stronger transport evidence belongs to a
+future real backend and must remain a distinct fact.
 Further packages still require real lifecycle/reuse pressure rather than speculative
 layering.
 

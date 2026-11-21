@@ -416,6 +416,37 @@ before interpretation and fails closed on unknown interaction. PTY behavior is
 ending, timing, pagination, firmware and LCEUIO behavior remain unknown.
 
 
+### LCE-R2.2 generic transport-evidence comparison
+
+R2.2 compared the connector's TX evidence semantics with established
+byte-stream and request/response interfaces rather than treating a successful
+application call as proof of physical transmission:
+
+- Rust `std::io::Write::write` explicitly permits short writes:
+  https://doc.rust-lang.org/stable/std/io/trait.Write.html
+- pySerial separates `write()` from `flush()`, where the latter waits for
+  output completion:
+  https://pyserial.readthedocs.io/en/latest/pyserial_api.html
+- POSIX/Linux `tcdrain()` is a stronger "wait until transmitted" operation
+  than simply handing bytes to a write call:
+  https://man7.org/linux/man-pages/man3/tcdrain.3p.html
+- Linux SocketCAN exposes `MSG_CONFIRM` only where the driver can provide a
+  stronger local transmission-confirmation signal:
+  https://docs.kernel.org/networking/can.html
+- Modbus serial guidance models a single pending request and moves to response
+  waiting after the request is sent:
+  https://www.modbus.org/file/secure/modbusoverserial.pdf
+
+The durable design lesson is `prepared != transport accepted != drained !=
+independently observed on wire`. LiftAssistant records only the level it can
+actually support. R2.2 therefore labels accepted write bytes
+`TRANSPORT_ACCEPTED_TX`, starts response timeout after complete acceptance,
+preserves short-write prefixes before failing closed, and leaves any future
+drain/wire evidence as a separate real-transport concern. SHA-256 protects
+capture integrity only; provenance authentication would require a distinct
+trust/signature design and is not claimed.
+
+
 ## M4 semantic-boundary audit findings — reported/current/desired state
 
 ### Reported state and desired intent must remain distinct

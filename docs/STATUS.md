@@ -302,6 +302,47 @@ terminal query, hardware path or authority changed. R2 remains
 LCEUIO, unlock, controller probing/TX, live serial, passenger equipment or KONE
 write/control path was used or authorized.`
 
+### LCE-R2.2 — Transport TX Evidence Accuracy
+
+**COMPLETE — `TRANSPORT_TX_EVIDENCE_ACCURATE`; HUMAN-CHECK reached.** R2.2
+separates query preparation from transport evidence before any real field
+capture. `issue_query` now creates only a private, session-bound typed token
+and records `QueryPrepared`; the session enters `Transmitting` and accepts no
+RX until the caller reports exactly one transport write result.
+
+Only bytes reported accepted by that write attempt are stored as
+`TRANSPORT_ACCEPTED_TX`, and those bytes are derived from the fixed typed token
+rather than supplied by the caller. A complete four-byte `STA\r`, `CMD\r`
+or `MDE\r` acceptance records `QueryTransportAccepted` and starts the
+response timeout. Zero/failed or short writes fail closed without automatic
+retry; a short accepted prefix remains evidence but cannot enter the response
+state. Tokens are bound to their `ObservationSessionId` and local sequence, so
+cross-session/stale transport confirmation is rejected.
+
+Capture format is now v3 and validates the prepared -> accepted-prefix ->
+complete-transport-acceptance lifecycle. `TRANSPORT_ACCEPTED_TX` means only
+that the caller-owned byte transport accepted those bytes; it does **not** claim
+UART/USB drain completion or physical-wire observation. The SHA-256 remains an
+integrity checksum, not provenance authentication. No serial/USB runtime,
+device enumeration, Core/Engine change, new dependency, KONE unlock behavior or
+authority expansion was added.
+
+The design was checked against Rust short-write semantics, pySerial/POSIX drain
+separation, Linux SocketCAN confirmation semantics and Modbus serial
+single-pending-request behavior. These are generic transport architecture priors,
+not KONE protocol evidence.
+
+Final hosted code validation at commit `9fd0c76387d262f5563e6943d1f9719b74c8fffc`
+passes stable Format, warning-free Clippy and workspace tests plus the exact
+Rust 1.85 MSRV workspace check. The workspace reports 242 passed tests with one
+expected ignored soak child; `liftassistant-lce` has 39 unit tests plus two
+Linux PTY integration tests, with the existing compile-fail public-API
+regression retained.
+
+**Terminal boundary:** `HUMAN-CHECK — NO /dev/tty*, USB-RS232, CPU561, XDB1,
+LCEUIO, unlock, controller probing/TX, live serial, passenger equipment or KONE
+write/control path was used or authorized. R3 remains separate.`
+
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 
 **COMPLETE (Simulator-only development slice).** This vertical slice connects

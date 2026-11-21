@@ -311,6 +311,7 @@ Disconnected
   -> SessionStarting
   -> AwaitingKnownBoundary
   -> IdleOrReady
+  -> Transmitting(query)
   -> AwaitingResponse(query)
   -> ReceivingResponse(query)
   -> IdleOrReady
@@ -329,31 +330,36 @@ released as an observation-bearing frame. Reconnection requires a new
 Engine source-session fencing remains authoritative for canonical ingestion.
 
 The response timeout is supplied explicitly by the caller. R2 establishes no
-universal LCE timing value and has no background clock, task or retry loop. The
+universal LCE timing value and has no background clock, task or retry loop. In
+R2.2 it starts only after the complete typed query has been reported accepted
+by the caller-owned transport, not when the query is merely prepared. The
 caller supplies a per-session monotonic relative clock beginning at zero.
 
 Every session owns a bounded internal evidence recorder containing:
 
 - format version, session ID, capture origin, initial interface state and profile;
 - monotonic relative microsecond offsets;
-- exact TX/RX byte entries with typed query correlation;
+- exact RX bytes plus transport-accepted TX prefixes with typed query correlation;
 - structured session/parser markers;
 - explicit completion/disconnect/fail-closed reason;
 - SHA-256 over the canonical capture body.
 
-The internal JSON envelope is versioned and experimental. R2.1 bumps it to v2
-because `interface_state` was renamed to the semantically precise
-`initial_interface_state`. The repository has no real v1 field corpus, so v1
-is rejected rather than migrated or silently interpreted as v2. A recomputed
-checksum cannot legitimize impossible history: artifact loading requires a
-prior `KnownBoundary` before any `QueryIssued` marker or TX bytes, and a
-locked/unavailable initial state cannot claim that boundary. Limits are 128 bytes
-for session identity, 4,096 entries, 64 KiB per raw entry, 1 MiB aggregate raw
-bytes and 5 MiB serialized form. Deserialization revalidates version, profile,
-timestamps, TX/query correlation, cardinality, sizes and SHA-256. Replay feeds
-only RX entries through a fresh R1 decoder; TX and markers never become
-observations. No site, building, passenger or controller identity is recorded
-by default.
+The internal JSON envelope is versioned and experimental. R2.1 introduced v2
+for `initial_interface_state`; R2.2 bumps the format to v3 because TX evidence
+now distinguishes `QueryPrepared`, exact `TRANSPORT_ACCEPTED_TX` prefixes,
+and `QueryTransportAccepted`. Older synthetic schemas are rejected rather than
+silently reinterpreted. Artifact loading requires the known boundary before a
+prepared query, requires transport-accepted bytes to be an exact non-empty
+prefix of that private typed query, and permits response correlation only after
+all four bytes were accepted. A short accepted prefix may exist only as
+evidence on a fail-closed path. Limits remain 128 bytes for session identity,
+4,096 entries, 64 KiB per raw entry, 1 MiB aggregate raw bytes and 5 MiB
+serialized form. Deserialization revalidates version, profile, timestamps,
+typed-query lifecycle, cardinality, sizes and SHA-256. The checksum detects
+artifact mutation; it is not a digital signature or proof of source identity.
+Replay feeds only RX entries through a fresh R1 decoder; TX and markers never
+become observations. No site, building, passenger or controller identity is
+recorded by default.
 
 ## R2 PTY validation boundary
 
@@ -361,8 +367,9 @@ The Linux integration test creates a real kernel pseudo-terminal with `rustix`,
 puts its slave in raw mode, and runs a scripted fake LCE peer. It exercises
 whole, bytewise and irregular reads; fragmented CRLF; startup noise and known
 boundary; echo/no echo; `STA`/`CMD`/`MDE`; delayed response; multiple sequential
-records; partial response; disconnect; reconnect/new session; exact TX/RX
-capture; finalized checksum; and deterministic R1 replay. The fake and every
+records; partial response; disconnect; reconnect/new session; and deterministic
+R1 replay. R2.2 uses a single PTY `write` result as transport-acceptance evidence
+before advancing the session, rather than recording TX at query preparation. The fake and every
 fixture are explicitly `LIFTASSISTANT_SYNTHETIC`.
 
 Portable session/recorder tests retain the semantic coverage when a non-Linux
@@ -374,10 +381,11 @@ artifact integrity. No async runtime, daemon, SDK or adapter framework was
 introduced.
 
 Closing validation passes formatting, warning-free workspace all-target
-Clippy, 238 workspace tests with one expected ignored soak child, the exact
-Rust/Cargo 1.85.0 locked all-target workspace check, all nine TUI scenarios,
-all four non-live Headless scenarios, 35 focused LCE unit tests, two Linux PTY
-integration tests and the compile-fail public-API regression. No live RMF,
+Clippy, 242 workspace tests with one expected ignored soak child, the exact
+Rust/Cargo 1.85.0 locked all-target workspace check, 39 focused LCE unit tests,
+two Linux PTY integration tests and the compile-fail public-API regression.
+The existing scenario suites were not changed by this focused transport-evidence
+patch. No live RMF,
 Podman, serial device, CPU561, XDB1, LCEUIO or external peer was used.
 
 R2 still routes accepted bytes only through:
@@ -389,6 +397,41 @@ terminal session -> exact RX -> R1 decoder -> R0 native mapper
 
 No Core or Engine domain type, authority rule, Intent, Principal, grant or
 write path changed.
+
+## R2.2 transport-evidence hardening
+
+R2.2 closes the distinction between application intent and transport evidence:
+
+```text
+KnownBoundary
+  -> QueryPrepared(query)
+  -> Transmitting(query)
+  -> TRANSPORT_ACCEPTED_TX exact prefix
+  -> QueryTransportAccepted(query) only after all 4 bytes
+  -> AwaitingResponse(query)
+```
+
+`LceTerminalTx` remains privately constructible and is bound to its
+`ObservationSessionId` plus a session-local sequence, so a stale token from
+another session cannot confirm a new query. Callers report only the number of
+bytes one write attempt accepted; the session derives the corresponding prefix
+from the typed token and never accepts arbitrary caller-provided TX bytes.
+Zero/failed and partial writes fail closed, and no automatic retry can turn a
+partially accepted terminal command into a different interaction.
+
+This distinction follows ordinary byte-stream semantics rather than a KONE
+claim. Rust `Write::write` may accept fewer bytes than requested; serial APIs
+commonly distinguish write acceptance from a later flush/drain; Linux serial
+and SocketCAN documentation likewise distinguish queue/driver acceptance from
+stronger transmission confirmation. Modbus serial guidance keeps a single
+request pending and starts response waiting after request transmission. These
+are architecture priors only; they do not establish CPU561 runtime behavior.
+
+R2.2 intentionally stops at **transport accepted**. A future real serial backend
+may record a separate drain confirmation if its platform can support one, but
+neither transport acceptance nor OS drain is to be mislabeled as independent
+physical-wire observation. No serial backend, `/dev/tty*` access, USB
+enumeration, LCEUIO behavior or controller access is introduced here.
 
 ## R2 result and next evidence gap
 
