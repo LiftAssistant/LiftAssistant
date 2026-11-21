@@ -1440,7 +1440,7 @@ class UnavailableOperationalCarCard extends StatelessWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Tooltip(
-                        message: 'Logical CarId: \${car.carId}',
+                        message: 'Logical CarId: ${car.carId}',
                         child: Text(
                           car.carId,
                           maxLines: 1,
@@ -1568,7 +1568,7 @@ class _UnavailableAvailabilityBadge extends StatelessWidget {
       background: bg,
       icon: icon,
       tooltip:
-          'Observation availability (\${availability.wireValue}) describes LiftAssistant evidence state only — NOT an elevator fault or OutOfService mode.',
+          'Observation availability (${availability.wireValue}) describes LiftAssistant evidence state only — NOT an elevator fault or OutOfService mode.',
     );
   }
 }
