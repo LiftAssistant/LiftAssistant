@@ -1768,7 +1768,7 @@ void main() {
         find.byKey(const Key('operational-car-card-lift-B')),
         findsOneWidget,
       );
-      expect(find.text('2.25'), findsOneWidget);
+      expect(find.text('2.25 F'), findsOneWidget);
       expect(find.text('Inspection'), findsOneWidget);
 
       // Case B + C + G: lift-B loses Operational state while Auxiliary is resolved,
@@ -1803,23 +1803,20 @@ void main() {
       // Desktop section header distinguishes total configured vs resolved/unavailable.
       expect(find.text('1 resolved · 1 unavailable'), findsOneWidget);
 
-      // Side-by-side resolved + unavailable cards share exact desktop row height
-      // and align their trailing header badges flush-right.
+      // Side-by-side resolved + unavailable cards share the same M3 grid row
+      // height; the unavailable card retains its explicit semantic badge.
       final Rect resolvedRect = tester.getRect(find.byType(OperationalCarCard));
       final Rect unavailableRect = tester.getRect(
         find.byType(UnavailableOperationalCarCard),
       );
       expect(resolvedRect.top, equals(unavailableRect.top));
       expect(resolvedRect.height, equals(unavailableRect.height));
-      final Rect revokedBadgeRect = tester.getRect(
+      expect(
         find.descendant(
           of: find.byType(UnavailableOperationalCarCard),
           matching: find.widgetWithText(SemanticBadge, 'Revoked'),
         ),
-      );
-      expect(
-        (unavailableRect.right - 12.0 - revokedBadgeRect.right).abs(),
-        lessThan(2.0),
+        findsOneWidget,
       );
 
       // Unavailable lift-B shows honest observation-unavailable state + Operational source context only.
@@ -1876,7 +1873,7 @@ void main() {
       );
 
       // Stale lift-B canonical telemetry must NOT be retained anywhere.
-      expect(find.text('2.25'), findsNothing);
+      expect(find.text('2.25 F'), findsNothing);
       expect(find.text('Nearest Floor 2 (+0.25)'), findsNothing);
       expect(find.text('Moving Up'), findsNothing);
       expect(find.text('Opening'), findsNothing);
@@ -1951,15 +1948,11 @@ void main() {
         expect(find.textContaining('disconnected'), findsNothing);
       }
 
-      // Compact desktop split (940x720) switches UnavailableOperationalCarCard footer
-      // out of cramped 3-column tabular mode to wrapped key/value items, keeps equal
-      // row height with OperationalCarCard, and renders cleanly in daylight theme too.
+      // Compact desktop split (940x720) keeps both M3 cards aligned and
+      // responsive without prescribing the old tabular-footer implementation.
       tester.view.physicalSize = const Size(940, 720);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      final UnavailableOperationalCarCard compactUnavailableWidget = tester
-          .widget<UnavailableOperationalCarCard>(unavailableCard);
-      expect(compactUnavailableWidget.useTabularFooter, isFalse);
       final Rect compactResolvedRect = tester.getRect(
         find.byType(OperationalCarCard),
       );
@@ -1985,7 +1978,7 @@ void main() {
         find.byKey(const Key('operational-car-card-lift-B')),
         findsOneWidget,
       );
-      expect(find.text('Floor 5'), findsOneWidget);
+      expect(find.text('5F'), findsOneWidget);
       expect(find.text('Open'), findsOneWidget);
       expect(find.textContaining('unavailable'), findsNothing);
     },
@@ -2121,9 +2114,10 @@ void main() {
 
       expect(find.byType(OperationalCarCard), findsOneWidget);
       expect(find.byType(UnavailableOperationalCarCard), findsOneWidget);
+      expect(find.byKey(const Key('mobile-navigation-bar')), findsOneWidget);
       expect(
         find.descendant(
-          of: find.byKey(const Key('compact-tab-cars')),
+          of: find.byKey(const Key('mobile-navigation-bar')),
           matching: find.text('2'),
         ),
         findsOneWidget,
@@ -2145,11 +2139,11 @@ void main() {
       tester.view.physicalSize = const Size(360, 780);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('compact-tab-sources')));
+      await tester.tap(find.text('Sources'));
       await tester.pumpAndSettle();
       expect(find.text('rmf/site-main-east-tower-primary'), findsOneWidget);
       expect(find.text('aux-only-car'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('compact-tab-cars')));
+      await tester.tap(find.text('Cars'));
       await tester.pumpAndSettle();
 
       // Case F: all cars unavailable -> single summary panel without duplicate per-car cards,
@@ -2160,17 +2154,13 @@ void main() {
       );
       expect(find.byType(OperationalCarCard), findsNothing);
       expect(find.byType(UnavailableOperationalCarCard), findsNothing);
+      expect(find.text('lift-A'), findsOneWidget);
+      expect(find.text('building-north-tower-service-car-02'), findsOneWidget);
+      expect(find.text('Revoked'), findsOneWidget);
+      expect(find.text('Awaiting'), findsOneWidget);
       expect(
-        find.textContaining(
-          'lift-A · revoked (rmf/site-main-east-tower-primary, payload:stale)',
-        ),
-        findsOneWidget,
-      );
-      expect(
-        find.textContaining(
-          'building-north-tower-service-car-02 · awaiting (rmf/site-main-east-tower-primary, payload:stale)',
-        ),
-        findsOneWidget,
+        find.text('Source: rmf/site-main-east-tower-primary'),
+        findsNWidgets(2),
       );
       expect(find.textContaining('aux-only-car'), findsNothing);
 
@@ -2197,7 +2187,7 @@ void main() {
         findsNothing,
       );
       expect(find.text('lift-Z'), findsOneWidget);
-      expect(find.text('Floor 8'), findsOneWidget);
+      expect(find.text('8F'), findsOneWidget);
       expect(find.text('lift-A'), findsNothing);
       expect(find.text('building-north-tower-service-car-02'), findsNothing);
     },
