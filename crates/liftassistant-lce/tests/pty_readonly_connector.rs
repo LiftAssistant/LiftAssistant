@@ -137,7 +137,11 @@ fn real_pty_runs_only_typed_queries_and_replays_exact_evidence() {
         let tx = session
             .issue_query(query, Duration::from_micros(clock))
             .unwrap();
-        terminal.write_all(tx.as_bytes()).unwrap();
+        let accepted = terminal.write(tx.as_bytes()).unwrap();
+        assert_eq!(accepted, tx.as_bytes().len());
+        session
+            .transport_write_accepted(&tx, accepted, Duration::from_micros(clock))
+            .unwrap();
         terminal.flush().unwrap();
         fake.expect_query(tx.as_bytes());
 
@@ -196,7 +200,7 @@ fn real_pty_runs_only_typed_queries_and_replays_exact_evidence() {
         .iter()
         .filter_map(|entry| match entry.payload() {
             LceCapturePayload::Bytes {
-                direction: LceCaptureDirection::Tx,
+                direction: LceCaptureDirection::TransportAcceptedTx,
                 bytes,
             } => Some(bytes.as_slice()),
             _ => None,
@@ -230,7 +234,10 @@ fn pty_disconnect_fences_old_session_and_reconnect_uses_new_incarnation() {
     let tx = old
         .issue_query(LceReadOnlyQuery::Status, Duration::from_micros(clock + 1))
         .unwrap();
-    old_terminal.write_all(tx.as_bytes()).unwrap();
+    let accepted = old_terminal.write(tx.as_bytes()).unwrap();
+    assert_eq!(accepted, tx.as_bytes().len());
+    old.transport_write_accepted(&tx, accepted, Duration::from_micros(clock + 2))
+        .unwrap();
     old_fake.expect_query(b"STA\r");
     let partial = &STATUS[..STATUS.len() / 2];
     old_fake.send(partial);
@@ -265,7 +272,10 @@ fn pty_disconnect_fences_old_session_and_reconnect_uses_new_incarnation() {
             Duration::from_micros(new_clock + 1),
         )
         .unwrap();
-    new_terminal.write_all(tx.as_bytes()).unwrap();
+    let accepted = new_terminal.write(tx.as_bytes()).unwrap();
+    assert_eq!(accepted, tx.as_bytes().len());
+    new.transport_write_accepted(&tx, accepted, Duration::from_micros(new_clock + 2))
+        .unwrap();
     new_fake.expect_query(b"STA\r");
     new_fake.send(STATUS);
     let events = receive_exact_in_chunks(

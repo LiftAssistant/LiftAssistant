@@ -9,7 +9,7 @@ use crate::{
     transcript::MAX_INPUT_CHUNK_BYTES,
 };
 
-pub const LCE_CAPTURE_FORMAT_VERSION: u16 = 2;
+pub const LCE_CAPTURE_FORMAT_VERSION: u16 = 3;
 
 const MAX_CAPTURE_SESSION_ID_BYTES: usize = 128;
 const MAX_CAPTURE_ENTRIES: usize = 4096;
@@ -30,7 +30,9 @@ pub enum LceCaptureOrigin {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum LceCaptureDirection {
-    Tx,
+    /// Bytes reported as accepted by one transport write attempt. This is not
+    /// a claim of UART/USB drain completion or physical-wire observation.
+    TransportAcceptedTx,
     Rx,
 }
 
@@ -40,7 +42,8 @@ pub enum LceCaptureMarker {
     SessionStarted,
     TransportReady,
     KnownBoundary,
-    QueryIssued { query: LceReadOnlyQuery },
+    QueryPrepared { query: LceReadOnlyQuery },
+    QueryTransportAccepted { query: LceReadOnlyQuery },
     EchoObserved { query: LceReadOnlyQuery },
     NativeFrame { query: LceReadOnlyQuery },
     UnknownText,
@@ -411,9 +414,13 @@ fn validate_body(body: &LceEvidenceCaptureBody) -> Result<(), LceCaptureError> {
     if body.entries.len() > MAX_CAPTURE_ENTRIES {
         return Err(LceCaptureError::TooManyEntries);
     }
+
     let mut previous = 0;
     let mut total = 0usize;
     let mut known_boundary_seen = false;
+    let mut prepared: Option<(LceReadOnlyQuery, usize)> = None;
+    let mut awaiting_response: Option<LceReadOnlyQuery> = None;
+
     for entry in &body.entries {
         if entry.offset_micros < previous || entry.offset_micros > body.ended_at_micros {
             return Err(LceCaptureError::InvalidCapture(
@@ -421,6 +428,7 @@ fn validate_body(body: &LceEvidenceCaptureBody) -> Result<(), LceCaptureError> {
             ));
         }
         previous = entry.offset_micros;
+
         if let LceCapturePayload::Marker { marker } = &entry.payload {
             match marker {
                 LceCaptureMarker::KnownBoundary => {
@@ -431,14 +439,70 @@ fn validate_body(body: &LceEvidenceCaptureBody) -> Result<(), LceCaptureError> {
                     }
                     known_boundary_seen = true;
                 }
-                LceCaptureMarker::QueryIssued { .. } if !known_boundary_seen => {
-                    return Err(LceCaptureError::InvalidCapture(
-                        "query issued before a known boundary",
-                    ));
+                LceCaptureMarker::QueryPrepared { query } => {
+                    if !known_boundary_seen {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "query prepared before a known boundary",
+                        ));
+                    }
+                    if entry.query != Some(*query) {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "query-prepared marker does not match entry query",
+                        ));
+                    }
+                    if prepared.is_some() || awaiting_response.is_some() {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "query prepared while another query is pending",
+                        ));
+                    }
+                    prepared = Some((*query, 0));
                 }
-                _ => {}
+                LceCaptureMarker::QueryTransportAccepted { query } => {
+                    if entry.query != Some(*query) {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "transport-accepted marker does not match entry query",
+                        ));
+                    }
+                    match prepared {
+                        Some((pending, accepted))
+                            if pending == *query && accepted == query.command().len() =>
+                        {
+                            prepared = None;
+                            awaiting_response = Some(*query);
+                        }
+                        _ => {
+                            return Err(LceCaptureError::InvalidCapture(
+                                "query transport acceptance lacks a complete typed TX prefix",
+                            ));
+                        }
+                    }
+                }
+                LceCaptureMarker::EchoObserved { query } => {
+                    if entry.query != Some(*query) || awaiting_response != Some(*query) {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "echo marker is not correlated with the pending response",
+                        ));
+                    }
+                }
+                LceCaptureMarker::NativeFrame { query } => {
+                    if entry.query != Some(*query) || awaiting_response != Some(*query) {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "native-frame marker is not correlated with the pending response",
+                        ));
+                    }
+                    awaiting_response = None;
+                }
+                LceCaptureMarker::FailedClosed { .. } | LceCaptureMarker::Disconnected { .. } => {
+                    prepared = None;
+                    awaiting_response = None;
+                }
+                LceCaptureMarker::SessionStarted
+                | LceCaptureMarker::TransportReady
+                | LceCaptureMarker::UnknownText
+                | LceCaptureMarker::TranscriptRejected => {}
             }
         }
+
         if let LceCapturePayload::Bytes { direction, bytes } = &entry.payload {
             if bytes.len() > MAX_CAPTURE_ENTRY_BYTES {
                 return Err(LceCaptureError::EntryTooLarge { bytes: bytes.len() });
@@ -446,26 +510,46 @@ fn validate_body(body: &LceEvidenceCaptureBody) -> Result<(), LceCaptureError> {
             total = total
                 .checked_add(bytes.len())
                 .ok_or(LceCaptureError::RawCaptureTooLarge { bytes: usize::MAX })?;
-            if matches!(direction, LceCaptureDirection::Tx) && entry.query.is_none() {
-                return Err(LceCaptureError::InvalidCapture(
-                    "TX bytes are not associated with a typed query",
-                ));
-            }
-            if matches!(direction, LceCaptureDirection::Tx) {
-                if !known_boundary_seen {
-                    return Err(LceCaptureError::InvalidCapture(
-                        "TX bytes precede a known boundary",
-                    ));
+
+            match direction {
+                LceCaptureDirection::TransportAcceptedTx => {
+                    let query = entry.query.ok_or(LceCaptureError::InvalidCapture(
+                        "transport-accepted TX bytes are not associated with a typed query",
+                    ))?;
+                    let Some((pending, accepted_before)) = prepared else {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "transport-accepted TX bytes have no prepared query",
+                        ));
+                    };
+                    if pending != query || accepted_before != 0 {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "transport-accepted TX bytes do not match the prepared query",
+                        ));
+                    }
+                    let command = query.command();
+                    if bytes.is_empty()
+                        || bytes.len() > command.len()
+                        || bytes.as_slice() != &command[..bytes.len()]
+                    {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "transport-accepted TX bytes do not match the typed query prefix",
+                        ));
+                    }
+                    prepared = Some((query, bytes.len()));
                 }
-                let query = entry.query.expect("TX query presence checked above");
-                if bytes.as_slice() != query.command() {
-                    return Err(LceCaptureError::InvalidCapture(
-                        "TX bytes do not match the associated typed query",
-                    ));
+                LceCaptureDirection::Rx => {
+                    if let Some(query) = entry.query {
+                        if awaiting_response != Some(query) {
+                            return Err(LceCaptureError::InvalidCapture(
+                                "RX bytes are not correlated with the pending response",
+                            ));
+                        }
+                    }
                 }
             }
         }
     }
+
     if total > MAX_CAPTURE_RAW_BYTES {
         return Err(LceCaptureError::RawCaptureTooLarge { bytes: total });
     }
@@ -509,58 +593,63 @@ mod tests {
             )
             .unwrap();
         recorder
-            .record_bytes(
-                Duration::from_millis(1),
-                Some(LceReadOnlyQuery::Status),
-                LceCaptureDirection::Tx,
-                b"STA\r",
-            )
-            .unwrap();
-        recorder
             .record_marker(
-                Duration::from_millis(1),
+                Duration::from_micros(3),
                 Some(LceReadOnlyQuery::Status),
-                LceCaptureMarker::QueryIssued {
+                LceCaptureMarker::QueryPrepared {
                     query: LceReadOnlyQuery::Status,
                 },
             )
             .unwrap();
         recorder
             .record_bytes(
-                Duration::from_millis(2),
+                Duration::from_micros(4),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureDirection::TransportAcceptedTx,
+                b"STA\r",
+            )
+            .unwrap();
+        recorder
+            .record_marker(
+                Duration::from_micros(5),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureMarker::QueryTransportAccepted {
+                    query: LceReadOnlyQuery::Status,
+                },
+            )
+            .unwrap();
+        recorder
+            .record_bytes(
+                Duration::from_micros(6),
                 Some(LceReadOnlyQuery::Status),
                 LceCaptureDirection::Rx,
                 b"STA\r\n",
             )
             .unwrap();
         let capture = recorder
-            .finalize(Duration::from_millis(3), LceCaptureEndReason::Completed)
+            .finalize(Duration::from_micros(7), LceCaptureEndReason::Completed)
             .unwrap();
+
         assert_eq!(capture.sha256().len(), 64);
         assert_eq!(capture.origin(), LceCaptureOrigin::LiftAssistantSynthetic);
         assert_eq!(
             capture.initial_interface_state(),
             LceInterfaceState::Unknown
         );
-        assert_eq!(
-            capture.profile(),
-            LceRuntimeTerminalProfile::historical_9600_8n1()
-        );
-        assert_eq!(capture.end_reason(), LceCaptureEndReason::Completed);
         let encoded = capture.to_json_bytes().unwrap();
         let encoded_text = std::str::from_utf8(&encoded).unwrap();
-        assert!(encoded_text.contains("\"format_version\": 2"));
+        assert!(encoded_text.contains("\"format_version\": 3"));
         assert!(encoded_text.contains("\"initial_interface_state\": \"UNKNOWN\""));
-        assert!(!encoded_text.contains("\"interface_state\":"));
+        assert!(encoded_text.contains("\"direction\": \"TRANSPORT_ACCEPTED_TX\""));
         let decoded = super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded).unwrap();
         assert_eq!(capture, decoded);
 
         let mut wrong_version = serde_json::from_slice::<serde_json::Value>(&encoded).unwrap();
-        wrong_version["capture"]["format_version"] = serde_json::json!(1);
+        wrong_version["capture"]["format_version"] = serde_json::json!(2);
         let wrong_version = serde_json::to_vec(&wrong_version).unwrap();
         assert!(matches!(
             super::FinalizedLceEvidenceCapture::from_json_bytes(&wrong_version),
-            Err(LceCaptureError::UnsupportedVersion { version: 1 })
+            Err(LceCaptureError::UnsupportedVersion { version: 2 })
         ));
 
         let mut tampered = encoded;
@@ -570,11 +659,7 @@ mod tests {
             .position(|window| window == marker)
             .expect("capture envelope contains a checksum")
             + marker.len();
-        tampered[position] = if tampered[position] == b'0' {
-            b'1'
-        } else {
-            b'0'
-        };
+        tampered[position] = if tampered[position] == b'0' { b'1' } else { b'0' };
         assert!(matches!(
             super::FinalizedLceEvidenceCapture::from_json_bytes(&tampered),
             Err(LceCaptureError::Serialization(_)) | Err(LceCaptureError::IntegrityMismatch)
@@ -582,11 +667,11 @@ mod tests {
     }
 
     #[test]
-    fn capture_validation_rejects_non_allowlisted_tx_bytes() {
+    fn capture_validation_rejects_non_allowlisted_or_unprepared_tx() {
         let mut recorder = LceEvidenceRecorder::new(
             "fixture-session",
             LceCaptureOrigin::LiftAssistantSynthetic,
-            LceInterfaceState::Available,
+            LceInterfaceState::Unknown,
             LceRuntimeTerminalProfile::historical_9600_8n1(),
         )
         .unwrap();
@@ -594,134 +679,169 @@ mod tests {
             .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
             .unwrap();
         recorder
-            .record_bytes(
-                Duration::ZERO,
+            .record_marker(
+                Duration::from_micros(1),
                 Some(LceReadOnlyQuery::Status),
-                LceCaptureDirection::Tx,
+                LceCaptureMarker::QueryPrepared {
+                    query: LceReadOnlyQuery::Status,
+                },
+            )
+            .unwrap();
+        recorder
+            .record_bytes(
+                Duration::from_micros(2),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureDirection::TransportAcceptedTx,
                 b"CAL\r",
             )
             .unwrap();
         assert!(matches!(
-            recorder.finalize(Duration::ZERO, LceCaptureEndReason::Completed),
+            recorder.finalize(Duration::from_micros(3), LceCaptureEndReason::Completed),
             Err(LceCaptureError::InvalidCapture(
-                "TX bytes do not match the associated typed query"
+                "transport-accepted TX bytes do not match the typed query prefix"
+            ))
+        ));
+
+        let mut no_prepare = LceEvidenceRecorder::new(
+            "fixture-session-2",
+            LceCaptureOrigin::LiftAssistantSynthetic,
+            LceInterfaceState::Unknown,
+            LceRuntimeTerminalProfile::historical_9600_8n1(),
+        )
+        .unwrap();
+        no_prepare
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
+            .unwrap();
+        no_prepare
+            .record_bytes(
+                Duration::from_micros(1),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureDirection::TransportAcceptedTx,
+                b"STA\r",
+            )
+            .unwrap();
+        assert!(matches!(
+            no_prepare.finalize(Duration::from_micros(2), LceCaptureEndReason::Completed),
+            Err(LceCaptureError::InvalidCapture(
+                "transport-accepted TX bytes have no prepared query"
             ))
         ));
     }
 
     #[test]
-    fn capture_validation_requires_a_prior_known_boundary_for_queries_and_tx() {
-        fn encoded_artifact(
-            initial_interface_state: LceInterfaceState,
-            entries: Vec<super::LceCaptureEntry>,
-        ) -> Vec<u8> {
-            let body = super::LceEvidenceCaptureBody {
-                format_version: super::LCE_CAPTURE_FORMAT_VERSION,
-                session_id: "fixture-session".to_owned(),
-                origin: LceCaptureOrigin::LiftAssistantSynthetic,
-                initial_interface_state,
-                profile: LceRuntimeTerminalProfile::historical_9600_8n1(),
-                entries,
-                ended_at_micros: 4,
-                end_reason: LceCaptureEndReason::Completed,
-            };
-            let sha256 = super::body_sha256(&body).unwrap();
-            serde_json::to_vec(&super::LceEvidenceCaptureEnvelope {
-                capture: body,
-                sha256,
-            })
-            .unwrap()
-        }
-
-        fn marker(
-            offset_micros: u64,
-            query: Option<LceReadOnlyQuery>,
-            marker: LceCaptureMarker,
-        ) -> super::LceCaptureEntry {
-            super::LceCaptureEntry {
-                offset_micros,
-                query,
-                payload: super::LceCapturePayload::Marker { marker },
-            }
-        }
-
-        fn tx(offset_micros: u64) -> super::LceCaptureEntry {
-            super::LceCaptureEntry {
-                offset_micros,
-                query: Some(LceReadOnlyQuery::Status),
-                payload: super::LceCapturePayload::Bytes {
-                    direction: LceCaptureDirection::Tx,
-                    bytes: b"STA\r".to_vec(),
+    fn partial_transport_acceptance_is_valid_only_as_partial_evidence() {
+        let mut recorder = LceEvidenceRecorder::new(
+            "fixture-session",
+            LceCaptureOrigin::LiftAssistantSynthetic,
+            LceInterfaceState::Unknown,
+            LceRuntimeTerminalProfile::historical_9600_8n1(),
+        )
+        .unwrap();
+        recorder
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
+            .unwrap();
+        recorder
+            .record_marker(
+                Duration::from_micros(1),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureMarker::QueryPrepared {
+                    query: LceReadOnlyQuery::Status,
                 },
-            }
-        }
-
-        let prefix = vec![
-            marker(0, None, LceCaptureMarker::SessionStarted),
-            marker(1, None, LceCaptureMarker::TransportReady),
-        ];
-        let mut invalid_query = prefix.clone();
-        invalid_query.push(marker(
-            2,
-            Some(LceReadOnlyQuery::Status),
-            LceCaptureMarker::QueryIssued {
-                query: LceReadOnlyQuery::Status,
-            },
-        ));
-        invalid_query.push(tx(3));
-        assert!(matches!(
-            super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded_artifact(
-                LceInterfaceState::Unknown,
-                invalid_query,
-            )),
-            Err(LceCaptureError::InvalidCapture(
-                "query issued before a known boundary"
-            ))
-        ));
-
-        let mut invalid_tx = prefix.clone();
-        invalid_tx.push(tx(2));
-        assert!(matches!(
-            super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded_artifact(
-                LceInterfaceState::Unknown,
-                invalid_tx,
-            )),
-            Err(LceCaptureError::InvalidCapture(
-                "TX bytes precede a known boundary"
-            ))
-        ));
-
-        let mut valid = prefix;
-        valid.push(marker(2, None, LceCaptureMarker::KnownBoundary));
-        valid.push(marker(
-            3,
-            Some(LceReadOnlyQuery::Status),
-            LceCaptureMarker::QueryIssued {
-                query: LceReadOnlyQuery::Status,
-            },
-        ));
-        valid.push(tx(4));
+            )
+            .unwrap();
+        recorder
+            .record_bytes(
+                Duration::from_micros(2),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureDirection::TransportAcceptedTx,
+                b"ST",
+            )
+            .unwrap();
+        recorder
+            .record_marker(
+                Duration::from_micros(3),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureMarker::FailedClosed {
+                    reason: crate::LceTerminalFailureKind::TransportWriteIncomplete,
+                },
+            )
+            .unwrap();
         assert!(
-            super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded_artifact(
-                LceInterfaceState::Unknown,
-                valid,
-            ))
-            .is_ok()
+            recorder
+                .finalize(
+                    Duration::from_micros(4),
+                    LceCaptureEndReason::FailedClosed {
+                        reason: crate::LceTerminalFailureKind::TransportWriteIncomplete,
+                    },
+                )
+                .is_ok()
         );
+    }
 
-        let mut impossible_locked = vec![
-            marker(0, None, LceCaptureMarker::SessionStarted),
-            marker(1, None, LceCaptureMarker::TransportReady),
-        ];
-        impossible_locked.push(marker(2, None, LceCaptureMarker::KnownBoundary));
+    #[test]
+    fn query_transport_acceptance_requires_complete_typed_prefix() {
+        let mut recorder = LceEvidenceRecorder::new(
+            "fixture-session",
+            LceCaptureOrigin::LiftAssistantSynthetic,
+            LceInterfaceState::Unknown,
+            LceRuntimeTerminalProfile::historical_9600_8n1(),
+        )
+        .unwrap();
+        recorder
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
+            .unwrap();
+        recorder
+            .record_marker(
+                Duration::from_micros(1),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureMarker::QueryPrepared {
+                    query: LceReadOnlyQuery::Status,
+                },
+            )
+            .unwrap();
+        recorder
+            .record_bytes(
+                Duration::from_micros(2),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureDirection::TransportAcceptedTx,
+                b"ST",
+            )
+            .unwrap();
+        recorder
+            .record_marker(
+                Duration::from_micros(3),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureMarker::QueryTransportAccepted {
+                    query: LceReadOnlyQuery::Status,
+                },
+            )
+            .unwrap();
         assert!(matches!(
-            super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded_artifact(
-                LceInterfaceState::LockedOrUnavailable,
-                impossible_locked,
-            )),
+            recorder.finalize(Duration::from_micros(4), LceCaptureEndReason::Completed),
+            Err(LceCaptureError::InvalidCapture(
+                "query transport acceptance lacks a complete typed TX prefix"
+            ))
+        ));
+    }
+
+    #[test]
+    fn locked_initial_state_still_cannot_claim_known_boundary() {
+        let mut recorder = LceEvidenceRecorder::new(
+            "fixture-session",
+            LceCaptureOrigin::LiftAssistantSynthetic,
+            LceInterfaceState::LockedOrUnavailable,
+            LceRuntimeTerminalProfile::historical_9600_8n1(),
+        )
+        .unwrap();
+        recorder
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
+            .unwrap();
+        assert!(matches!(
+            recorder.finalize(Duration::ZERO, LceCaptureEndReason::Completed),
             Err(LceCaptureError::InvalidCapture(
                 "a locked/unavailable initial interface cannot observe a known boundary"
             ))
         ));
     }
 }
+
