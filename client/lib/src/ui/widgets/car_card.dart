@@ -1540,7 +1540,7 @@ class _UnavailableAvailabilityBadge extends StatelessWidget {
         'Incomplete',
         palette.caution,
         palette.cautionContainer,
-        Icons.data_alert_rounded,
+        Icons.warning_amber_rounded,
       ),
       ObservationAvailability.unresolved => (
         'Unresolved',
