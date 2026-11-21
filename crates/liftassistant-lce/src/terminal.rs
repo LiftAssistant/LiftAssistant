@@ -186,14 +186,16 @@ pub enum LceTerminalSessionState {
     Transmitting(LceReadOnlyQuery),
     AwaitingResponse(LceReadOnlyQuery),
     ReceivingResponse(LceReadOnlyQuery),
-    IdleOrReady,
+    MainLevelReady,
+    VTestReady,
     FailedClosed(LceTerminalFailure),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LceTerminalSessionEvent {
     StateChanged(LceTerminalSessionState),
-    KnownBoundary,
+    MainLevelBoundary,
+    VTestBoundary,
     Echo(LceReadOnlyQuery),
     UnknownText(Vec<u8>),
     NativeFrame(Box<DecodedLceTranscriptFrame>),
@@ -271,8 +273,9 @@ impl From<LceCaptureError> for LceTerminalUseError {
 
 /// A synchronous, bounded, observation-only terminal session.
 ///
-/// It emits TX only from [`LceReadOnlyQuery`] after a reviewed `?` boundary is
-/// observed. It never enters printer/V-test mode, advances pagination, sends an
+/// It emits observation-query TX only from [`LceReadOnlyQuery`] after an exact
+/// `VTEST1` context boundary is observed. A main-level `?` proves interface
+/// availability but does not authorize `STA`/`CMD`/`MDE`. It never enters printer/V-test mode, advances pagination, sends an
 /// escape key, retries automatically, scans profiles, or accepts caller bytes.
 /// The caller owns transport I/O and monotonic timing.
 ///
@@ -395,7 +398,7 @@ impl LceTerminalSession {
         query: LceReadOnlyQuery,
         at: Duration,
     ) -> Result<LceTerminalTx, LceTerminalUseError> {
-        if !matches!(self.state, LceTerminalSessionState::IdleOrReady) {
+        if !matches!(self.state, LceTerminalSessionState::VTestReady) {
             return Err(self.invalid_state("prepare query"));
         }
         if self.interface_state != LceInterfaceState::Available {
@@ -670,7 +673,8 @@ impl LceTerminalSession {
             LceTerminalSessionState::FailedClosed(failure) => LceCaptureEndReason::FailedClosed {
                 reason: failure.kind,
             },
-            LceTerminalSessionState::IdleOrReady
+            LceTerminalSessionState::MainLevelReady
+            | LceTerminalSessionState::VTestReady
             | LceTerminalSessionState::AwaitingKnownBoundary
             | LceTerminalSessionState::SessionStarting => LceCaptureEndReason::Completed,
             LceTerminalSessionState::Transmitting(_)
@@ -706,7 +710,7 @@ impl LceTerminalSession {
                     self.in_flight = None;
                     self.deadline = None;
                     events.push(LceTerminalSessionEvent::NativeFrame(frame));
-                    events.extend(self.transition(LceTerminalSessionState::IdleOrReady));
+                    events.extend(self.transition(LceTerminalSessionState::VTestReady));
                 } else {
                     events.extend(self.fail_closed(
                         at,
@@ -734,21 +738,52 @@ impl LceTerminalSession {
                         && matches!(
                             self.state,
                             LceTerminalSessionState::AwaitingKnownBoundary
-                                | LceTerminalSessionState::IdleOrReady
+                                | LceTerminalSessionState::MainLevelReady
+                                | LceTerminalSessionState::VTestReady
                         )
                     {
                         self.interface_state = LceInterfaceState::Available;
                         if !self.record_marker_or_fail(
                             at,
                             None,
-                            LceCaptureMarker::KnownBoundary,
+                            LceCaptureMarker::MainLevelBoundary,
                             events,
                         ) {
                             return;
                         }
-                        events.push(LceTerminalSessionEvent::KnownBoundary);
-                        if !matches!(self.state, LceTerminalSessionState::IdleOrReady) {
-                            events.extend(self.transition(LceTerminalSessionState::IdleOrReady));
+                        events.push(LceTerminalSessionEvent::MainLevelBoundary);
+                        if !matches!(self.state, LceTerminalSessionState::MainLevelReady) {
+                            events.extend(self.transition(LceTerminalSessionState::MainLevelReady));
+                        }
+                    } else {
+                        events.extend(self.fail_closed(
+                            at,
+                            LceTerminalFailureKind::UnexpectedBoundary,
+                            self.in_flight,
+                            &raw,
+                        ));
+                    }
+                } else if trimmed == b"VTEST1" {
+                    if self.in_flight.is_none()
+                        && matches!(
+                            self.state,
+                            LceTerminalSessionState::AwaitingKnownBoundary
+                                | LceTerminalSessionState::MainLevelReady
+                                | LceTerminalSessionState::VTestReady
+                        )
+                    {
+                        self.interface_state = LceInterfaceState::Available;
+                        if !self.record_marker_or_fail(
+                            at,
+                            None,
+                            LceCaptureMarker::VTestBoundary,
+                            events,
+                        ) {
+                            return;
+                        }
+                        events.push(LceTerminalSessionEvent::VTestBoundary);
+                        if !matches!(self.state, LceTerminalSessionState::VTestReady) {
+                            events.extend(self.transition(LceTerminalSessionState::VTestReady));
                         }
                     } else {
                         events.extend(self.fail_closed(
@@ -931,7 +966,8 @@ fn state_name(state: &LceTerminalSessionState) -> &'static str {
         LceTerminalSessionState::Transmitting(_) => "transmitting",
         LceTerminalSessionState::AwaitingResponse(_) => "awaiting-response",
         LceTerminalSessionState::ReceivingResponse(_) => "receiving-response",
-        LceTerminalSessionState::IdleOrReady => "idle-or-ready",
+        LceTerminalSessionState::MainLevelReady => "main-level-ready",
+        LceTerminalSessionState::VTestReady => "v-test-ready",
         LceTerminalSessionState::FailedClosed(_) => "failed-closed",
     }
 }
@@ -1017,10 +1053,21 @@ mod tests {
     fn ready(session: &mut LceTerminalSession) {
         session.connect(Duration::ZERO).unwrap();
         session.transport_ready(Duration::ZERO).unwrap();
-        session
-            .receive(Duration::from_millis(1), b"synthetic banner\r\n?\r\n")
+        let events = session
+            .receive(
+                Duration::from_millis(1),
+                b"synthetic banner\r\n?\r\nVTEST1\r\n",
+            )
             .unwrap();
-        assert_eq!(session.state(), &LceTerminalSessionState::IdleOrReady);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            LceTerminalSessionEvent::MainLevelBoundary
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            LceTerminalSessionEvent::VTestBoundary
+        )));
+        assert_eq!(session.state(), &LceTerminalSessionState::VTestReady);
         assert_eq!(session.interface_state(), LceInterfaceState::Available);
     }
 
@@ -1033,6 +1080,35 @@ mod tests {
         let accepted = tx.as_bytes().len();
         session.transport_write_accepted(&tx, accepted, at).unwrap();
         tx
+    }
+
+    #[test]
+    fn main_level_boundary_does_not_authorize_v_test_queries() {
+        let mut session = session(Duration::from_secs(1));
+        session.connect(Duration::ZERO).unwrap();
+        session.transport_ready(Duration::ZERO).unwrap();
+        let events = session
+            .receive(Duration::from_millis(1), b"?\r\n")
+            .unwrap();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            LceTerminalSessionEvent::MainLevelBoundary
+        )));
+        assert_eq!(session.state(), &LceTerminalSessionState::MainLevelReady);
+        assert_eq!(session.interface_state(), LceInterfaceState::Available);
+        assert!(matches!(
+            session.issue_query(LceReadOnlyQuery::Status, Duration::from_millis(2)),
+            Err(crate::LceTerminalUseError::InvalidState { .. })
+        ));
+
+        let events = session
+            .receive(Duration::from_millis(3), b"VTEST1\r\n")
+            .unwrap();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            LceTerminalSessionEvent::VTestBoundary
+        )));
+        assert_eq!(session.state(), &LceTerminalSessionState::VTestReady);
     }
 
     #[test]
@@ -1104,7 +1180,7 @@ mod tests {
             LceTerminalSessionEvent::NativeFrame(frame)
                 if matches!(frame.native, crate::RecordedLceFrame::Sta(_))
         )));
-        assert_eq!(session.state(), &LceTerminalSessionState::IdleOrReady);
+        assert_eq!(session.state(), &LceTerminalSessionState::VTestReady);
     }
 
     #[test]
@@ -1130,7 +1206,25 @@ mod tests {
                     .any(|event| matches!(event, LceTerminalSessionEvent::NativeFrame(_)))
             );
         }
-        assert_eq!(session.state(), &LceTerminalSessionState::IdleOrReady);
+        assert_eq!(session.state(), &LceTerminalSessionState::VTestReady);
+    }
+
+    #[test]
+    fn returning_to_main_level_revokes_v_test_query_readiness() {
+        let mut session = session(Duration::from_secs(1));
+        ready(&mut session);
+        let events = session
+            .receive(Duration::from_millis(2), b"?\r\n")
+            .unwrap();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            LceTerminalSessionEvent::MainLevelBoundary
+        )));
+        assert_eq!(session.state(), &LceTerminalSessionState::MainLevelReady);
+        assert!(matches!(
+            session.issue_query(LceReadOnlyQuery::Status, Duration::from_millis(3)),
+            Err(crate::LceTerminalUseError::InvalidState { .. })
+        ));
     }
 
     #[test]
@@ -1420,7 +1514,7 @@ mod tests {
         assert!(capture.entries().iter().any(|entry| matches!(
             entry.payload(),
             LceCapturePayload::Marker {
-                marker: LceCaptureMarker::KnownBoundary
+                marker: LceCaptureMarker::MainLevelBoundary
             }
         )));
         let encoded = capture.to_json_bytes().unwrap();

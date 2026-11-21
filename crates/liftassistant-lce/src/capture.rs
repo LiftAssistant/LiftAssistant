@@ -9,7 +9,7 @@ use crate::{
     transcript::MAX_INPUT_CHUNK_BYTES,
 };
 
-pub const LCE_CAPTURE_FORMAT_VERSION: u16 = 3;
+pub const LCE_CAPTURE_FORMAT_VERSION: u16 = 4;
 
 const MAX_CAPTURE_SESSION_ID_BYTES: usize = 128;
 const MAX_CAPTURE_ENTRIES: usize = 4096;
@@ -41,7 +41,8 @@ pub enum LceCaptureDirection {
 pub enum LceCaptureMarker {
     SessionStarted,
     TransportReady,
-    KnownBoundary,
+    MainLevelBoundary,
+    VTestBoundary,
     QueryPrepared { query: LceReadOnlyQuery },
     QueryTransportAccepted { query: LceReadOnlyQuery },
     EchoObserved { query: LceReadOnlyQuery },
@@ -415,9 +416,16 @@ fn validate_body(body: &LceEvidenceCaptureBody) -> Result<(), LceCaptureError> {
         return Err(LceCaptureError::TooManyEntries);
     }
 
+    #[derive(Clone, Copy, Eq, PartialEq)]
+    enum TerminalContext {
+        Unknown,
+        MainLevel,
+        VTest,
+    }
+
     let mut previous = 0;
     let mut total = 0usize;
-    let mut known_boundary_seen = false;
+    let mut context = TerminalContext::Unknown;
     let mut prepared: Option<(LceReadOnlyQuery, usize)> = None;
     let mut awaiting_response: Option<LceReadOnlyQuery> = None;
 
@@ -431,18 +439,27 @@ fn validate_body(body: &LceEvidenceCaptureBody) -> Result<(), LceCaptureError> {
 
         if let LceCapturePayload::Marker { marker } = &entry.payload {
             match marker {
-                LceCaptureMarker::KnownBoundary => {
+                LceCaptureMarker::MainLevelBoundary | LceCaptureMarker::VTestBoundary => {
                     if body.initial_interface_state == LceInterfaceState::LockedOrUnavailable {
                         return Err(LceCaptureError::InvalidCapture(
-                            "a locked/unavailable initial interface cannot observe a known boundary",
+                            "a locked/unavailable initial interface cannot observe a terminal context boundary",
                         ));
                     }
-                    known_boundary_seen = true;
+                    if prepared.is_some() || awaiting_response.is_some() {
+                        return Err(LceCaptureError::InvalidCapture(
+                            "terminal context changed while a query was pending",
+                        ));
+                    }
+                    context = if matches!(marker, LceCaptureMarker::MainLevelBoundary) {
+                        TerminalContext::MainLevel
+                    } else {
+                        TerminalContext::VTest
+                    };
                 }
                 LceCaptureMarker::QueryPrepared { query } => {
-                    if !known_boundary_seen {
+                    if context != TerminalContext::VTest {
                         return Err(LceCaptureError::InvalidCapture(
-                            "query prepared before a known boundary",
+                            "query prepared outside V-test context",
                         ));
                     }
                     if entry.query != Some(*query) {
@@ -589,12 +606,19 @@ mod tests {
             .record_marker(
                 Duration::from_micros(2),
                 None,
-                LceCaptureMarker::KnownBoundary,
+                LceCaptureMarker::MainLevelBoundary,
             )
             .unwrap();
         recorder
             .record_marker(
                 Duration::from_micros(3),
+                None,
+                LceCaptureMarker::VTestBoundary,
+            )
+            .unwrap();
+        recorder
+            .record_marker(
+                Duration::from_micros(4),
                 Some(LceReadOnlyQuery::Status),
                 LceCaptureMarker::QueryPrepared {
                     query: LceReadOnlyQuery::Status,
@@ -603,7 +627,7 @@ mod tests {
             .unwrap();
         recorder
             .record_bytes(
-                Duration::from_micros(4),
+                Duration::from_micros(5),
                 Some(LceReadOnlyQuery::Status),
                 LceCaptureDirection::TransportAcceptedTx,
                 b"STA\r",
@@ -611,7 +635,7 @@ mod tests {
             .unwrap();
         recorder
             .record_marker(
-                Duration::from_micros(5),
+                Duration::from_micros(6),
                 Some(LceReadOnlyQuery::Status),
                 LceCaptureMarker::QueryTransportAccepted {
                     query: LceReadOnlyQuery::Status,
@@ -620,14 +644,14 @@ mod tests {
             .unwrap();
         recorder
             .record_bytes(
-                Duration::from_micros(6),
+                Duration::from_micros(7),
                 Some(LceReadOnlyQuery::Status),
                 LceCaptureDirection::Rx,
                 b"STA\r\n",
             )
             .unwrap();
         let capture = recorder
-            .finalize(Duration::from_micros(7), LceCaptureEndReason::Completed)
+            .finalize(Duration::from_micros(8), LceCaptureEndReason::Completed)
             .unwrap();
 
         assert_eq!(capture.sha256().len(), 64);
@@ -638,18 +662,18 @@ mod tests {
         );
         let encoded = capture.to_json_bytes().unwrap();
         let encoded_text = std::str::from_utf8(&encoded).unwrap();
-        assert!(encoded_text.contains("\"format_version\": 3"));
+        assert!(encoded_text.contains("\"format_version\": 4"));
         assert!(encoded_text.contains("\"initial_interface_state\": \"UNKNOWN\""));
         assert!(encoded_text.contains("\"direction\": \"TRANSPORT_ACCEPTED_TX\""));
         let decoded = super::FinalizedLceEvidenceCapture::from_json_bytes(&encoded).unwrap();
         assert_eq!(capture, decoded);
 
         let mut wrong_version = serde_json::from_slice::<serde_json::Value>(&encoded).unwrap();
-        wrong_version["capture"]["format_version"] = serde_json::json!(2);
+        wrong_version["capture"]["format_version"] = serde_json::json!(3);
         let wrong_version = serde_json::to_vec(&wrong_version).unwrap();
         assert!(matches!(
             super::FinalizedLceEvidenceCapture::from_json_bytes(&wrong_version),
-            Err(LceCaptureError::UnsupportedVersion { version: 2 })
+            Err(LceCaptureError::UnsupportedVersion { version: 3 })
         ));
 
         let mut tampered = encoded;
@@ -671,6 +695,39 @@ mod tests {
     }
 
     #[test]
+    fn main_level_boundary_alone_does_not_authorize_queries() {
+        let mut recorder = LceEvidenceRecorder::new(
+            "fixture-main-level",
+            LceCaptureOrigin::LiftAssistantSynthetic,
+            LceInterfaceState::Unknown,
+            LceRuntimeTerminalProfile::historical_9600_8n1(),
+        )
+        .unwrap();
+        recorder
+            .record_marker(
+                Duration::ZERO,
+                None,
+                LceCaptureMarker::MainLevelBoundary,
+            )
+            .unwrap();
+        recorder
+            .record_marker(
+                Duration::from_micros(1),
+                Some(LceReadOnlyQuery::Status),
+                LceCaptureMarker::QueryPrepared {
+                    query: LceReadOnlyQuery::Status,
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            recorder.finalize(Duration::from_micros(2), LceCaptureEndReason::Completed),
+            Err(LceCaptureError::InvalidCapture(
+                "query prepared outside V-test context"
+            ))
+        ));
+    }
+
+    #[test]
     fn capture_validation_rejects_non_allowlisted_or_unprepared_tx() {
         let mut recorder = LceEvidenceRecorder::new(
             "fixture-session",
@@ -680,7 +737,7 @@ mod tests {
         )
         .unwrap();
         recorder
-            .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::VTestBoundary)
             .unwrap();
         recorder
             .record_marker(
@@ -714,7 +771,7 @@ mod tests {
         )
         .unwrap();
         no_prepare
-            .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::VTestBoundary)
             .unwrap();
         no_prepare
             .record_bytes(
@@ -742,7 +799,7 @@ mod tests {
         )
         .unwrap();
         recorder
-            .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::VTestBoundary)
             .unwrap();
         recorder
             .record_marker(
@@ -792,7 +849,7 @@ mod tests {
         )
         .unwrap();
         recorder
-            .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::VTestBoundary)
             .unwrap();
         recorder
             .record_marker(
@@ -829,7 +886,7 @@ mod tests {
     }
 
     #[test]
-    fn locked_initial_state_still_cannot_claim_known_boundary() {
+    fn locked_initial_state_cannot_claim_terminal_context_boundary() {
         let mut recorder = LceEvidenceRecorder::new(
             "fixture-session",
             LceCaptureOrigin::LiftAssistantSynthetic,
@@ -838,12 +895,12 @@ mod tests {
         )
         .unwrap();
         recorder
-            .record_marker(Duration::ZERO, None, LceCaptureMarker::KnownBoundary)
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::VTestBoundary)
             .unwrap();
         assert!(matches!(
             recorder.finalize(Duration::ZERO, LceCaptureEndReason::Completed),
             Err(LceCaptureError::InvalidCapture(
-                "a locked/unavailable initial interface cannot observe a known boundary"
+                "a locked/unavailable initial interface cannot observe a terminal context boundary"
             ))
         ));
     }

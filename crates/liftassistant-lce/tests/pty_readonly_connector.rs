@@ -104,7 +104,7 @@ fn real_pty_runs_only_typed_queries_and_replays_exact_evidence() {
     session.connect(Duration::ZERO).unwrap();
     session.transport_ready(Duration::ZERO).unwrap();
 
-    let startup = b"synthetic CPU561-shaped banner only\r\n?\r\n";
+    let startup = b"synthetic CPU561-shaped banner only\r\n?\r\nVTEST1\r\n";
     fake.send(startup);
     let startup_events = receive_exact_in_chunks(
         &mut terminal,
@@ -116,9 +116,14 @@ fn real_pty_runs_only_typed_queries_and_replays_exact_evidence() {
     assert!(
         startup_events
             .iter()
-            .any(|event| matches!(event, LceTerminalSessionEvent::KnownBoundary))
+            .any(|event| matches!(event, LceTerminalSessionEvent::MainLevelBoundary))
     );
-    assert_eq!(session.state(), &LceTerminalSessionState::IdleOrReady);
+    assert!(
+        startup_events
+            .iter()
+            .any(|event| matches!(event, LceTerminalSessionEvent::VTestBoundary))
+    );
+    assert_eq!(session.state(), &LceTerminalSessionState::VTestReady);
     assert_eq!(session.interface_state(), LceInterfaceState::Available);
 
     let fixtures = [
@@ -172,7 +177,7 @@ fn real_pty_runs_only_typed_queries_and_replays_exact_evidence() {
             .iter()
             .filter(|event| matches!(event, LceTerminalSessionEvent::NativeFrame(_)))
             .count();
-        assert_eq!(session.state(), &LceTerminalSessionState::IdleOrReady);
+        assert_eq!(session.state(), &LceTerminalSessionState::VTestReady);
     }
     assert_eq!(decoded, 3);
 
@@ -192,7 +197,13 @@ fn real_pty_runs_only_typed_queries_and_replays_exact_evidence() {
     assert!(capture.entries().iter().any(|entry| matches!(
         entry.payload(),
         LceCapturePayload::Marker {
-            marker: liftassistant_lce::LceCaptureMarker::KnownBoundary
+            marker: liftassistant_lce::LceCaptureMarker::MainLevelBoundary
+        }
+    )));
+    assert!(capture.entries().iter().any(|entry| matches!(
+        entry.payload(),
+        LceCapturePayload::Marker {
+            marker: liftassistant_lce::LceCaptureMarker::VTestBoundary
         }
     )));
     let tx_bytes = capture
@@ -229,8 +240,8 @@ fn pty_disconnect_fences_old_session_and_reconnect_uses_new_incarnation() {
     let mut clock = 0;
     old.connect(Duration::ZERO).unwrap();
     old.transport_ready(Duration::ZERO).unwrap();
-    old_fake.send(b"?\r\n");
-    receive_exact_in_chunks(&mut old_terminal, &mut old, 3, &[1], &mut clock);
+    old_fake.send(b"?\r\nVTEST1\r\n");
+    receive_exact_in_chunks(&mut old_terminal, &mut old, 11, &[1], &mut clock);
     let tx = old
         .issue_query(LceReadOnlyQuery::Status, Duration::from_micros(clock + 1))
         .unwrap();
@@ -264,8 +275,8 @@ fn pty_disconnect_fences_old_session_and_reconnect_uses_new_incarnation() {
     let mut new_clock = 0;
     new.connect(Duration::ZERO).unwrap();
     new.transport_ready(Duration::ZERO).unwrap();
-    new_fake.send(b"?\r\n");
-    receive_exact_in_chunks(&mut new_terminal, &mut new, 3, &[2, 1], &mut new_clock);
+    new_fake.send(b"?\r\nVTEST1\r\n");
+    receive_exact_in_chunks(&mut new_terminal, &mut new, 11, &[2, 1], &mut new_clock);
     let tx = new
         .issue_query(
             LceReadOnlyQuery::Status,
