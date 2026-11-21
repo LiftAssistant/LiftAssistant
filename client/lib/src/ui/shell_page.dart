@@ -1084,6 +1084,9 @@ class _ClientShellPageState extends State<ClientShellPage> {
     final InstrumentPalette palette = context.palette;
     final int carCount = carsView.totalCount;
     final int nonResolvedOperational = carsView.unavailableCars.length;
+    final String carCountLabel = carsView.unavailableCars.isEmpty
+        ? '$carCount ${carCount == 1 ? "operational car" : "operational cars"}'
+        : '$carCount ${carCount == 1 ? "configured car" : "configured cars"}';
     final (
       String readinessLabel,
       String readinessTip,
@@ -1135,8 +1138,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
                       title: 'Operational Cars',
                       subtitle: 'Monitor current Engine-owned elevator state resolved from authoritative Operational bindings.',
                       icon: Icons.elevator_outlined,
-                      countLabel:
-                          '$carCount ${carCount == 1 ? "configured car" : "configured cars"}',
+                      countLabel: carCountLabel,
                       countBadgeKey: const Key('cars-page-count-badge'),
                       trailingBadges: <Widget>[
                         SemanticBadge(
@@ -1487,7 +1489,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
     final bool compactCard = cardWidth < 400 || textScale > 1.15;
     return switch (slot) {
       ResolvedCarSlot(:final car) => OperationalCarCard(
-        key: Key('operational-car-card-\${car.id}'),
+        key: Key('operational-car-card-${car.id}'),
         car: car,
         stretchToRowHeight: stretchToRowHeight,
         useTabularFooter: useTabularFooter,
@@ -1499,7 +1501,7 @@ class _ClientShellPageState extends State<ClientShellPage> {
             _openServeFloorWorkflow(car.id, startInStatusView: true),
       ),
       UnavailableCarSlot(:final car) => UnavailableOperationalCarCard(
-        key: Key('unavailable-car-card-\${car.carId}'),
+        key: Key('unavailable-car-card-${car.carId}'),
         car: car,
         stretchToRowHeight: stretchToRowHeight,
         useTabularFooter: useTabularFooter,
@@ -1871,14 +1873,14 @@ class _EmptyOperationalCarsPanel extends StatelessWidget {
                         icon: observationAvailabilityIcon(car.availability),
                       ),
                       SemanticBadge(
-                        label: 'Source: \${car.source}',
+                        label: 'Source: ${car.source}',
                         foreground: palette.subtleText,
                         background: palette.elevatedSurface,
                         icon: Icons.hub_outlined,
                       ),
                       SemanticBadge(
                         label:
-                            'Payload: \${formatPayloadActivityLabel(car.payload)}',
+                            'Payload: ${formatPayloadActivityLabel(car.payload)}',
                         foreground: palette.subtleText,
                         background: palette.elevatedSurface,
                         icon: Icons.sensors_rounded,
