@@ -1059,14 +1059,16 @@ mod tests {
                 b"synthetic banner\r\n?\r\nVTEST1\r\n",
             )
             .unwrap();
-        assert!(events.iter().any(|event| matches!(
-            event,
-            LceTerminalSessionEvent::MainLevelBoundary
-        )));
-        assert!(events.iter().any(|event| matches!(
-            event,
-            LceTerminalSessionEvent::VTestBoundary
-        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, LceTerminalSessionEvent::MainLevelBoundary))
+        );
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, LceTerminalSessionEvent::VTestBoundary))
+        );
         assert_eq!(session.state(), &LceTerminalSessionState::VTestReady);
         assert_eq!(session.interface_state(), LceInterfaceState::Available);
     }
@@ -1087,13 +1089,12 @@ mod tests {
         let mut session = session(Duration::from_secs(1));
         session.connect(Duration::ZERO).unwrap();
         session.transport_ready(Duration::ZERO).unwrap();
-        let events = session
-            .receive(Duration::from_millis(1), b"?\r\n")
-            .unwrap();
-        assert!(events.iter().any(|event| matches!(
-            event,
-            LceTerminalSessionEvent::MainLevelBoundary
-        )));
+        let events = session.receive(Duration::from_millis(1), b"?\r\n").unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, LceTerminalSessionEvent::MainLevelBoundary))
+        );
         assert_eq!(session.state(), &LceTerminalSessionState::MainLevelReady);
         assert_eq!(session.interface_state(), LceInterfaceState::Available);
         assert!(matches!(
@@ -1104,10 +1105,11 @@ mod tests {
         let events = session
             .receive(Duration::from_millis(3), b"VTEST1\r\n")
             .unwrap();
-        assert!(events.iter().any(|event| matches!(
-            event,
-            LceTerminalSessionEvent::VTestBoundary
-        )));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, LceTerminalSessionEvent::VTestBoundary))
+        );
         assert_eq!(session.state(), &LceTerminalSessionState::VTestReady);
     }
 
@@ -1213,13 +1215,12 @@ mod tests {
     fn returning_to_main_level_revokes_v_test_query_readiness() {
         let mut session = session(Duration::from_secs(1));
         ready(&mut session);
-        let events = session
-            .receive(Duration::from_millis(2), b"?\r\n")
-            .unwrap();
-        assert!(events.iter().any(|event| matches!(
-            event,
-            LceTerminalSessionEvent::MainLevelBoundary
-        )));
+        let events = session.receive(Duration::from_millis(2), b"?\r\n").unwrap();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, LceTerminalSessionEvent::MainLevelBoundary))
+        );
         assert_eq!(session.state(), &LceTerminalSessionState::MainLevelReady);
         assert!(matches!(
             session.issue_query(LceReadOnlyQuery::Status, Duration::from_millis(3)),

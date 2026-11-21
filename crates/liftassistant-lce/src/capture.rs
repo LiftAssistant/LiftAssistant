@@ -704,11 +704,7 @@ mod tests {
         )
         .unwrap();
         recorder
-            .record_marker(
-                Duration::ZERO,
-                None,
-                LceCaptureMarker::MainLevelBoundary,
-            )
+            .record_marker(Duration::ZERO, None, LceCaptureMarker::MainLevelBoundary)
             .unwrap();
         recorder
             .record_marker(
