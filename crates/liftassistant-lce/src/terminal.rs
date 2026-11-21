@@ -995,7 +995,8 @@ mod tests {
         LceCaptureDirection, LceCaptureMarker, LceCaptureOrigin, LceCapturePayload,
         LceDisconnectReason, LceInterfaceState, LceReadOnlyQuery, LceRuntimeTerminalProfile,
         LceTerminalFailureKind, LceTerminalSession, LceTerminalSessionEvent,
-        LceTerminalSessionState, RecordedLceFrame, map_cmd_record, map_mde_record, map_sta_record,
+        LceTerminalSessionState, LceTerminalTx, RecordedLceFrame, map_cmd_record, map_mde_record,
+        map_sta_record,
     };
 
     const STATUS: &[u8] = b"STA STATUS_OF_LIFT 02\r\nADV_POS SPD DIR SRV FLT_ID DOOR LVL_NO AT_DZN TERM_LIM SPDA_VID SPDB_VID LOAD CORR_DRV CC_PREFF AT_LEVEL\r\n03 0 0 0 0 3 03 1 0 1 2 0 0 0 FF\r\n";
@@ -1030,9 +1031,7 @@ mod tests {
     ) -> LceTerminalTx {
         let tx = session.issue_query(query, at).unwrap();
         let accepted = tx.as_bytes().len();
-        session
-            .transport_write_accepted(&tx, accepted, at)
-            .unwrap();
+        session.transport_write_accepted(&tx, accepted, at).unwrap();
         tx
     }
 

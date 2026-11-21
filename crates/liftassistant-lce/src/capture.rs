@@ -659,7 +659,11 @@ mod tests {
             .position(|window| window == marker)
             .expect("capture envelope contains a checksum")
             + marker.len();
-        tampered[position] = if tampered[position] == b'0' { b'1' } else { b'0' };
+        tampered[position] = if tampered[position] == b'0' {
+            b'1'
+        } else {
+            b'0'
+        };
         assert!(matches!(
             super::FinalizedLceEvidenceCapture::from_json_bytes(&tampered),
             Err(LceCaptureError::Serialization(_)) | Err(LceCaptureError::IntegrityMismatch)
@@ -844,4 +848,3 @@ mod tests {
         ));
     }
 }
-
