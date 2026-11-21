@@ -447,6 +447,31 @@ capture integrity only; provenance authentication would require a distinct
 trust/signature design and is not claimed.
 
 
+### LCE-R2.3 terminal-context finding
+
+The same historical [LCE Terminal Using Instructions](https://www.scribd.com/document/379489546/LCE-Terminal-using-instructions-with-logo-KONE-pdf)
+also provides an important context distinction that is separate from serial
+framing. Its main level presents a `?` prompt and test-program selectors. The
+documented V-test flow then reaches `VTEST1`, where `STA`, `CMD`, `MDE`
+and related V-test functions are used. Because that broader terminal also
+contains active functions, `interface responded` cannot be equated with
+`observation query is valid in the current terminal context`.
+
+R2.3 therefore treats `?` only as a main-level/interface-availability
+boundary and requires observed `VTEST1` context before the existing typed
+observation queries can be prepared. It does not implement the historical
+navigation keystrokes needed to enter V-test. The durable lesson is
+`interface available != terminal context authorized for a query`; navigation
+itself must remain separately evidenced and HUMAN-gated.
+
+The reviewed LCE material specifies 9600 baud, eight data bits, no parity, one
+stop bit and null-modem wiring, but the current dossier does not independently
+state a runtime flow-control setting. Other KONE serial products cannot fill
+that LCE-specific gap. A future real serial transport must therefore make flow
+control an explicit evidence/configuration decision rather than silently
+inherit a platform default.
+
+
 ## M4 semantic-boundary audit findings — reported/current/desired state
 
 ### Reported state and desired intent must remain distinct

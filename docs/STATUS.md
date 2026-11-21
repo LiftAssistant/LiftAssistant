@@ -343,6 +343,49 @@ regression retained.
 LCEUIO, unlock, controller probing/TX, live serial, passenger equipment or KONE
 write/control path was used or authorized. R3 remains separate.`
 
+### LCE-R2.3 — Terminal Context Fail-Closed
+
+**COMPLETE — `TERMINAL_CONTEXT_FAIL_CLOSED`; HUMAN-CHECK reached.** R2.3
+corrects the last pre-field terminal-context assumption found during the R2.2
+comparison audit. Historical LCE terminal evidence distinguishes a main-level
+`?` prompt from the `VTEST1` context in which `STA`, `CMD`, `MDE` and
+other V-test functions are used. A responding interface therefore does not by
+itself prove that an observation query is valid in the current terminal
+context.
+
+The session now records exact `?` as `MainLevelBoundary` and enters
+`MainLevelReady`. That can move an initially unknown interface to
+`Available`, but `issue_query()` remains forbidden. Only an exact observed
+`VTEST1` records `VTestBoundary` and enters `VTestReady`, where the
+existing three fixed observation queries remain available. Observing `?`
+again returns to `MainLevelReady` and revokes query readiness. Capture format
+v4 validates the same context lifecycle and rejects a prepared query outside
+V-test context or a context transition while a query is pending.
+
+R2.3 adds **no** printer/V-test entry, `V`/space navigation, RETURN pagination,
+Escape, Ctrl-C, generic terminal command or new TX family. A first future field
+session can therefore stop after preserving a main-level prompt rather than
+guessing how to enter V-test. If V-test entry is required, that is a separate
+R3 evidence/authorization decision.
+
+Hosted code validation at commit
+`1485b6002a6f73eb3f320ffa27d3514bf64a1656` passes Format, warning-free
+Clippy, workspace tests and the exact Rust 1.85 MSRV check. The workspace
+reports 245 passed tests with one expected ignored soak child;
+`liftassistant-lce` has 42 unit tests plus two Linux PTY integration tests and
+the compile-fail public-API regression. No new dependency, Core/Engine change,
+serial runtime, device enumeration or authority expansion was introduced.
+
+A remaining R3 configuration gap is explicit rather than guessed: the reviewed
+historical LCE evidence establishes 9600/8N1 and null-modem prior art, but does
+not independently establish runtime flow control. A real serial backend must
+not silently inherit an unstated library/OS flow-control default.
+
+**Terminal boundary:** `HUMAN-CHECK — NO /dev/tty*, USB-RS232, CPU561, XDB1,
+LCEUIO, unlock, V-test navigation TX, controller probing/TX, live serial,
+passenger equipment or KONE write/control path was used or authorized. R3
+remains separate.`
+
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 
 **COMPLETE (Simulator-only development slice).** This vertical slice connects

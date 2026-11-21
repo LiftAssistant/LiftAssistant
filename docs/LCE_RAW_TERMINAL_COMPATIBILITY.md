@@ -279,10 +279,12 @@ LceReadOnlyQuery::Mode         -> MDE + carriage return
 There is no raw/string command, generic write, memory, parameter, call, test,
 escape, pagination or unlock API. `LceTerminalTx` has private construction and
 can only expose bytes generated from one of those three variants. The session
-never automatically polls or retries. It sends nothing until it has observed
-the historical-manual `?` boundary; any other question-like prompt fails
-closed without guessing a reply. It never sends the historical printer-mode
-entry sequence, RETURN-for-next-page, Escape or Ctrl-C.
+never automatically polls or retries. R2.3 distinguishes the historical
+main-level `?` prompt from the `VTEST1` observation context: `?` may
+establish interface availability but cannot authorize `STA`/`CMD`/`MDE`;
+only an exact `VTEST1` boundary permits those typed queries. Returning to
+`?` revokes query readiness. The connector still never sends the historical
+printer/V-test entry sequence, RETURN-for-next-page, Escape or Ctrl-C.
 
 `LceRuntimeTerminalProfile::historical_9600_8n1()` is an explicit profile type,
 not parser state. The reviewed 9600/8N1 value is a historical/vendor-evidenced
@@ -295,12 +297,14 @@ session to available. A configured locked/unavailable interface fails before
 query generation. The connector contains no LCEUIO algorithm, counter reset,
 unlock sequence or license/tool bypass.
 
-Capture format v2 distinguishes that live state from construction-time
-evidence metadata. `initial_interface_state` is exactly the caller's knowledge
-when the session/capture is created and is never rewritten. The existing
-`KnownBoundary` marker records a later observed boundary that changes the live
-session to `Available`; no redundant final-state field or second transition
-history is stored.
+Capture metadata continues to distinguish construction-time interface
+knowledge from later terminal evidence. `initial_interface_state` is exactly
+the caller's knowledge when the session/capture is created and is never
+rewritten. R2.3 capture format v4 replaces the formerly ambiguous generic
+boundary with `MainLevelBoundary` and `VTestBoundary`: either can establish
+that an initially unknown interface responded, while only `VTestBoundary`
+authorizes observation queries. No redundant final-state field or second
+interface-state history is stored.
 
 ## R2 session and evidence lifecycle
 
@@ -310,11 +314,14 @@ The synchronous session represents:
 Disconnected
   -> SessionStarting
   -> AwaitingKnownBoundary
-  -> IdleOrReady
+  -> MainLevelReady        on exact "?"
+  -> VTestReady            only on exact "VTEST1"
   -> Transmitting(query)
   -> AwaitingResponse(query)
   -> ReceivingResponse(query)
-  -> IdleOrReady
+  -> VTestReady
+
+VTestReady -> MainLevelReady on exact "?"
 
 any unsupported/ambiguous/timeout path -> FailedClosed(reason)
 ```
@@ -345,14 +352,16 @@ Every session owns a bounded internal evidence recorder containing:
 - SHA-256 over the canonical capture body.
 
 The internal JSON envelope is versioned and experimental. R2.1 introduced v2
-for `initial_interface_state`; R2.2 bumps the format to v3 because TX evidence
-now distinguishes `QueryPrepared`, exact `TRANSPORT_ACCEPTED_TX` prefixes,
-and `QueryTransportAccepted`. Older synthetic schemas are rejected rather than
-silently reinterpreted. Artifact loading requires the known boundary before a
-prepared query, requires transport-accepted bytes to be an exact non-empty
-prefix of that private typed query, and permits response correlation only after
-all four bytes were accepted. A short accepted prefix may exist only as
-evidence on a fail-closed path. Limits remain 128 bytes for session identity,
+for `initial_interface_state`; R2.2 introduced v3 for prepared versus
+transport-accepted TX evidence; R2.3 bumps the format to v4 because terminal
+context is now explicit. Older synthetic schemas are rejected rather than
+silently reinterpreted. Artifact loading requires `VTestBoundary` before a
+prepared observation query; `MainLevelBoundary` alone is insufficient.
+Changing terminal context while a query is pending is rejected.
+Transport-accepted bytes must remain an exact non-empty prefix of the private
+typed query, and response correlation begins only after all four bytes were
+accepted. A short accepted prefix may exist only as evidence on a fail-closed
+path. Limits remain 128 bytes for session identity,
 4,096 entries, 64 KiB per raw entry, 1 MiB aggregate raw bytes and 5 MiB
 serialized form. Deserialization revalidates version, profile, timestamps,
 typed-query lifecycle, cardinality, sizes and SHA-256. The checksum detects
@@ -365,12 +374,15 @@ recorded by default.
 
 The Linux integration test creates a real kernel pseudo-terminal with `rustix`,
 puts its slave in raw mode, and runs a scripted fake LCE peer. It exercises
-whole, bytewise and irregular reads; fragmented CRLF; startup noise and known
-boundary; echo/no echo; `STA`/`CMD`/`MDE`; delayed response; multiple sequential
-records; partial response; disconnect; reconnect/new session; and deterministic
-R1 replay. R2.2 uses a single PTY `write` result as transport-acceptance evidence
-before advancing the session, rather than recording TX at query preparation. The fake and every
-fixture are explicitly `LIFTASSISTANT_SYNTHETIC`.
+whole, bytewise and irregular reads; fragmented CRLF; startup noise;
+main-level `?` and V-test `VTEST1` context boundaries; echo/no echo;
+`STA`/`CMD`/`MDE`; delayed response; multiple sequential records; partial
+response; disconnect; reconnect/new session; and deterministic R1 replay.
+R2.2 uses a single PTY `write` result as transport-acceptance evidence before
+advancing the session, rather than recording TX at query preparation. R2.3
+proves that main-level `?` alone cannot prepare a query and that a later
+`?` revokes V-test query readiness. The fake and every fixture are explicitly
+`LIFTASSISTANT_SYNTHETIC`.
 
 Portable session/recorder tests retain the semantic coverage when a non-Linux
 target does not compile the PTY integration test. `rustix` is a dev-only PTY
@@ -381,11 +393,11 @@ artifact integrity. No async runtime, daemon, SDK or adapter framework was
 introduced.
 
 Closing validation passes formatting, warning-free workspace all-target
-Clippy, 242 workspace tests with one expected ignored soak child, the exact
-Rust/Cargo 1.85.0 locked all-target workspace check, 39 focused LCE unit tests,
+Clippy, 245 workspace tests with one expected ignored soak child, the exact
+Rust/Cargo 1.85.0 locked all-target workspace check, 42 focused LCE unit tests,
 two Linux PTY integration tests and the compile-fail public-API regression.
-The existing scenario suites were not changed by this focused transport-evidence
-patch. No live RMF,
+The existing scenario suites were not changed or separately rerun by these
+focused R2.2/R2.3 patches. No live RMF,
 Podman, serial device, CPU561, XDB1, LCEUIO or external peer was used.
 
 R2 still routes accepted bytes only through:
@@ -433,6 +445,38 @@ neither transport acceptance nor OS drain is to be mislabeled as independent
 physical-wire observation. No serial backend, `/dev/tty*` access, USB
 enumeration, LCEUIO behavior or controller access is introduced here.
 
+## R2.3 terminal-context hardening
+
+The historical KONE terminal instructions distinguish the terminal's main
+level from the V-test monitoring context. The main level presents `?` and
+lists test-program selectors, while the documented V-test flow reaches a
+`VTEST1` context in which `STA`, `CMD`, `MDE` and other V-test
+functions are used. Because the whole terminal surface also contains active
+functions, LiftAssistant must not treat a bare main prompt as observation
+authority.
+
+R2.3 therefore models only evidence that the controller itself supplied:
+
+```text
+?       -> MainLevelBoundary -> MainLevelReady
+VTEST1  -> VTestBoundary     -> VTestReady
+```
+
+`MainLevelReady` records an available terminal interface but
+`issue_query()` fails there. Only `VTestReady` permits the existing
+`STA\r`, `CMD\r` and `MDE\r` allowlist. Observing `?` again moves the
+session back to `MainLevelReady` and immediately revokes that query
+readiness. No R2.3 code generates the historical `V`/space entry sequence,
+printer-mode entry, RETURN pagination, Escape, Ctrl-C or another navigation
+keystroke.
+
+This means a future first field session can truthfully stop after capturing a
+main-level prompt instead of gambling that an observation command is valid in
+that context. If the controller is already in or independently exposes
+`VTEST1`, the typed observation-query path can be considered separately under
+the R3 HUMAN gate. If entry into V-test is required, that navigation remains a
+new evidence/authorization decision rather than an implicit R2 behavior.
+
 ## R2 result and next evidence gap
 
 R2 is complete at `PTY_READONLY_CONNECTOR_PARTIAL`. This means the typed
@@ -445,7 +489,12 @@ R1/R0/Engine path are implemented. It does not mean `REAL_LCE_COMPATIBLE`,
 The next gate is `LCE-R3 — FIRST REAL READ-ONLY EVIDENCE ACQUISITION`. It needs
 separate HUMAN authorization and must begin with evidence preservation. Exact
 firmware banner, prompt variants, echo, CR/LF, screen layout, timing,
-pagination, lock state and LCEUIO pass-through remain unknown.
+pagination, lock state and LCEUIO pass-through remain unknown. The reviewed
+historical LCE terminal profile establishes baud/data/parity/stop-bit and
+null-modem prior art, but the current evidence dossier does not independently
+establish a runtime hardware/software flow-control setting; any real serial
+backend must therefore make that choice explicit rather than inherit an
+unstated library or OS default.
 
 ## HUMAN gate
 

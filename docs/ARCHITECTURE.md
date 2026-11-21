@@ -149,16 +149,24 @@ control path. None of these packages establishes a general service or adapter
 framework.
 
 The internal LCE evidence artifact keeps construction-time interface knowledge
-as `initial_interface_state`; it is not a final or inferred state. A later
-`KnownBoundary` marker is the evidence that moves the live R2 session to
-`Available`. R2.2 capture format v3 also separates a typed query being
-prepared from bytes reported accepted by the caller-owned transport. The
-session enters `Transmitting` after preparation and starts its response
-timeout only after the complete four-byte allowlisted query has been reported
-transport-accepted. Partial or failed writes fail closed without automatic
-retry. `TRANSPORT_ACCEPTED_TX` is deliberately not named or treated as UART
-drain or physical-wire confirmation; stronger transport evidence belongs to a
-future real backend and must remain a distinct fact.
+as `initial_interface_state`; it is not a final or inferred state. R2.3
+separates terminal context from interface availability: an exact main-level
+`?` is recorded as `MainLevelBoundary` and may establish that the interface
+responds, but it does not authorize `STA`/`CMD`/`MDE`. Observation
+queries are enabled only after an exact `VTEST1` boundary establishes
+`VTestReady`; returning to the main-level prompt revokes that readiness.
+LiftAssistant does not generate the historical V-test entry/navigation
+keystrokes, so it cannot silently cross from main level into the observation
+context. Capture format v4 validates this context boundary.
+
+R2.2 also separates a typed query being prepared from bytes reported accepted
+by the caller-owned transport. The session enters `Transmitting` after
+preparation and starts its response timeout only after the complete four-byte
+allowlisted query has been reported transport-accepted. Partial or failed
+writes fail closed without automatic retry. `TRANSPORT_ACCEPTED_TX` is
+deliberately not named or treated as UART drain or physical-wire confirmation;
+stronger transport evidence belongs to a future real backend and must remain a
+distinct fact.
 Further packages still require real lifecycle/reuse pressure rather than speculative
 layering.
 

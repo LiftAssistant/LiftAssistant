@@ -316,6 +316,18 @@ serial drain or physical-wire confirmation, and the artifact SHA-256 is an
 integrity checksum rather than source authentication. No real transport,
 hardware path or authority was added.
 
+LCE-R2.3 corrects the terminal-context boundary before any real acquisition.
+Historical LCE terminal evidence distinguishes the main-level `?` prompt from
+the `VTEST1` context where the V-test observation families are used. The
+session now records `MainLevelBoundary`/ `MainLevelReady` without granting
+query readiness, and only an exact `VTEST1` boundary creates `VTestReady`.
+A later main-level prompt revokes readiness. Capture format v4 validates the
+same rule. R2.3 deliberately implements no printer/V-test entry, `V`/space,
+RETURN pagination, Escape, Ctrl-C or other navigation TX. Thus a first real
+session may capture and stop at main level rather than guessing how to enter a
+diagnostic context. Runtime flow control is not established by the current LCE
+evidence and must be explicit in any future real serial backend.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.
