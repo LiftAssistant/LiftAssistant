@@ -437,9 +437,9 @@ random/termios. `serialport`, Tokio, async runtime, udev and device enumeration
 remain absent.
 
 **Subsequent gate refinement:** later HUMAN review inserted R3A.0.2 evidence
-freeze, R3A.0.3 design contract and separately authorized R3A.0.4 isolated
-bench validation before R3A.1 can be considered. R3A.0 itself did not authorize
-any of those physical stages.
+freeze and then split field assurance into a lower software-RX-only path and a
+higher physical-RX-only path. R3A.0 itself did not authorize a real field
+session; R3A.1 still requires a separate explicit HUMAN decision.
 
 **Terminal boundary:** `HUMAN-CHECK — NO real /dev/ttyUSB* or /dev/ttyS* field
 session, CPU561, XDB1, LCEUIO, controller, passenger equipment, hardware TX,
@@ -493,10 +493,12 @@ compile-fail public-API regressions. Normal and Linux dev/example dependencies
 are unchanged; `serialport`, Tokio, async runtime, udev/device enumeration,
 Core/Engine changes and authority changes remain absent.
 
-**Subsequent gate refinement:** R3A.0.2 must freeze connector/path evidence,
-R3A.0.3 must establish a physical RX-only design contract, and a separately
-authorized R3A.0.4 isolated bench must validate the exact candidate before a
-HUMAN may consider R3A.1. Software RX-only remains insufficient.
+**Subsequent gate refinement:** R3A.0.2 freezes connector/path evidence. A later
+explicit HUMAN architecture decision then separated assurance levels:
+software-RX-only is sufficient to *consider* a separately approved
+observational R3A.1 session while remaining
+`PHYSICALLY_PASSIVE=false/unproven`; R3A.0.3/R3A.0.4 remain the stronger
+required path for a physical-passivity claim.
 
 **Terminal boundary:** `HUMAN-CHECK — NO real /dev/tty* field capture, CPU561,
 XDB1, LCEUIO, controller, passenger equipment, real TX, V-test navigation or
@@ -544,9 +546,10 @@ error and future software regression. It defines only requirements and future
 isolated bench evidence. It provides no schematic, component selection, pin
 connection recipe, approved construction or live-elevator procedure.
 
-**Next possible stage:** `LCE-R3A.0.4 — ISOLATED BENCH VALIDATION`, separately
-HUMAN-authorized and currently **NOT READY**. R3A.1 remains behind another
-HUMAN gate after the exact candidate and bench evidence are reviewed.
+**Hardened-path next stage:** `LCE-R3A.0.4 — ISOLATED BENCH VALIDATION`,
+separately HUMAN-authorized and currently **NOT READY**. It remains mandatory
+before any future `PHYSICALLY_PASSIVE` claim, but is no longer a prerequisite
+for the lower-assurance software-RX-only R3A.1 path.
 
 Closing validation passes format, locked warning-free workspace all-target
 Clippy, 264 workspace tests with one expected ignored soak child, the exact
@@ -561,6 +564,28 @@ CPU561, XDB1, LCEUIO, controller, passenger equipment, controller or
 site-network interaction, hardware TX, terminal query, baud probe, V-test
 navigation or unlock was used. R3A.0.4 and R3A.1 were not started;
 PHYSICALLY_PASSIVE remains false/unproven.`
+
+### LCE-R3A software-RX-only field assurance path
+
+**DESIGN CONTRACT ESTABLISHED — FIELD CAPTURE STILL HUMAN-PENDING.** The
+[field contract](LCE_R3A_SOFTWARE_RX_ONLY_FIELD_PATH.md) records the deliberate
+lower-assurance option for the first observational session. It preserves the
+existing application boundary: explicit tty path, `O_RDONLY`, exclusive mode,
+no serial write API, no modem-output API, no query/unlock/navigation and no
+active fallback. It also states the residual risk truthfully: a normal RS-232
+adapter may retain an electrical TX path, idle line-driver state and
+driver/open/close side effects, so `PHYSICALLY_PASSIVE=false/unproven`.
+
+The contract does not approve a cable or actual field session. Before R3A.1 a
+HUMAN must still review the actual CPU561/XDB1-compatible connector/cable,
+confirm a true RS-232 (not TTL-UART) adapter and exact tty identity, establish
+process/service isolation, retain the reviewed capture policy, and explicitly
+accept the software-only assurance level. Silence remains `PassiveSilent`;
+nothing may respond to silence by transmitting.
+
+**Current decision boundary:** the repository may now consider a separately
+approved `LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE` without first
+completing R3A.0.4. No real hardware access is authorized by this commit.
 
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 

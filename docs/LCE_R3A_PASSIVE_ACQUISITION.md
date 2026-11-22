@@ -12,8 +12,20 @@ It does **not** claim `PHYSICALLY_PASSIVE`, `WIRE_PASSIVE`, `ZERO_INFLUENCE`,
 `WIRE_CONFIRMED`, live LCE compatibility, or controller validation. Opening or
 closing a tty can activate driver/device behavior, including modem-control
 line handling. A full-duplex cable also remains physically connected even if
-the application never calls `write(2)`. Physical RX-only construction is a
-separate HUMAN hardware gate.
+the application never calls `write(2)`.
+
+Two assurance levels are now kept separate:
+
+- **SOFTWARE_RX_ONLY field observation** may use a normal reviewed RS-232
+  physical interface while the LiftAssistant application exposes no explicit
+  data-TX or modem-output operation. It must be reported as
+  `PHYSICALLY_PASSIVE=false/unproven` and requires a separate HUMAN field gate.
+- **PHYSICAL_RX_ONLY hardened acquisition** additionally removes the intentional
+  controller-receive drive path and requires the separate R3A.0.3/R3A.0.4
+  design-and-bench path.
+
+The second level is stronger, but it is no longer a mandatory prerequisite for
+the first controlled software-RX-only observation.
 
 ## Ownership and evidence flow
 
@@ -151,31 +163,46 @@ Its runtime arguments are exactly `--device <absolute-path> --output
 <new-file> --duration-seconds <1..300>`. The output is create-new. Running it
 against a real `/dev/tty*` was not authorized or performed in R3A.0.
 
-## Pre-field gates
+## Pre-field assurance split
 
-The [R3A.0.2 evidence freeze](LCE_R3A_XDB1_EVIDENCE.md) separates direct KONE
-facts from CPU561 pin-direction inference and unknown idle-output behavior. The
-[R3A.0.3 physical RX-only design contract](LCE_R3A_PHYSICAL_RX_ONLY_DESIGN.md)
-defines the one-way invariant and future verification requirements without
-providing a field wiring recipe. Neither document authorizes bench work or a
-real controller connection.
+The [R3A.0.2 evidence freeze](LCE_R3A_XDB1_EVIDENCE.md) remains common to both
+field-assurance paths. It separates direct KONE facts from CPU561 pin-direction
+inference and unknown idle-output behavior.
 
-R3A.0.4 remains a separately authorized isolated bench-validation stage. Only
-after a reviewed candidate survives that gate may a HUMAN consider R3A.1.
+The [software-RX-only field contract](LCE_R3A_SOFTWARE_RX_ONLY_FIELD_PATH.md)
+defines the lower-assurance path for a first controlled observational session.
+It explicitly accepts that a normal RS-232 adapter may retain an electrically
+capable TX path and that tty/driver lifecycle side effects are not proven absent.
 
-## FIELD_PRECHECK for a future R3A.1 session
+The [R3A.0.3 physical RX-only design contract](LCE_R3A_PHYSICAL_RX_ONLY_DESIGN.md)
+and future R3A.0.4 isolated bench remain the stronger hardened path. Passing
+that path is required before claiming `PHYSICALLY_PASSIVE`, but is not a
+prerequisite for a separately HUMAN-approved software-RX-only R3A.1 session.
+
+None of these documents by themselves authorizes a real controller connection.
+
+## FIELD_PRECHECK for a future software-RX-only R3A.1 session
 
 Before a real field open, a HUMAN must separately confirm all of the following:
 
-1. the controller-side connector and signal direction from verified hardware
-   documentation or direct qualified inspection;
-2. a physical RX-only path with no capture-side TX/RTS/DTR/controller-RX
-   connection;
-3. the exact target device path and adapter identity without discovery or baud
-   scanning;
-4. that ModemManager, serial-getty, gpsd, brltty, and other processes are not
-   owning or probing the target tty;
-5. that the software open/termios policy remains the reviewed R3A.0 policy.
+1. the controller-side connector/cable identity is supported by reviewed
+   CPU561/XDB1 evidence, vendor-compatible hardware, or qualified inspection;
+   the current high-confidence per-pin inference alone must not be used to
+   invent an ad-hoc field cable;
+2. the adapter is a real RS-232 interface appropriate to the documented port,
+   not a TTL-UART-level adapter, and its exact identity is recorded;
+3. the operator explicitly accepts the residual assurance state
+   `SOFTWARE_RX_ONLY=true`, `PHYSICALLY_PASSIVE=false/unproven`: the adapter
+   may have a connected TX line, idle line-driver state, modem-control behavior,
+   and driver/open/close side effects even though LiftAssistant exposes no TX;
+4. the exact target device path is selected explicitly without discovery,
+   active baud scanning or automatic fallback;
+5. ModemManager, serial-getty, gpsd, brltty and other processes are not owning
+   or probing the target tty;
+6. the reviewed `O_RDONLY`, exclusive-mode, N_TTY and termios capture policy
+   remains unchanged, with no write, break, modem-output, query or unlock API;
+7. silence, malformed bytes, disconnect or setup failure terminate or preserve
+   evidence without triggering any active probe.
 
 Read-only process/service inspection (`lsof`, `fuser`, process listings,
 service state, and current opener inspection) may support the precheck. A
@@ -185,15 +212,18 @@ udev rules, or modify system configuration automatically. ModemManager's own
 documentation shows that eligible serial ports can be opened and sent AT
 probe commands; service isolation is therefore a first-class field condition.
 
-No CPU561/XDB1/LCEUIO pinout is guessed here. If the physical signal direction
-or service isolation is not positively established, R3A.1 must not open the
-device.
+No CPU561/XDB1/LCEUIO pinout is guessed here. If connector/cable identity,
+adapter electrical class, or service isolation is not positively established,
+R3A.1 must not open the device.
 
 ## Future HUMAN gate
 
-`LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE` requires separate
-HUMAN approval after R3A.0.4 isolated bench validation and the physical/system
-prechecks above. Its first session is observation only: no `STA`, `CMD`, `MDE`,
-V-test navigation, RETURN, Escape, Ctrl-C serial byte, unlock, or other TX.
-Silence, banner text, `?`, `VTEST1`, unknown bytes, and disconnect are all valid
-evidence outcomes.
+`LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE` still requires a
+separate explicit HUMAN approval for the actual session. That approval may
+accept the software-RX-only assurance level without completing R3A.0.4, but the
+session must be reported truthfully as non-physically-passive/unproven.
+
+The first session is observation only: no `STA`, `CMD`, `MDE`, V-test
+navigation, RETURN, Escape, Ctrl-C serial byte, unlock, keepalive, active baud
+probe, or other intentional TX. Silence, banner text, `?`, `VTEST1`, unknown
+bytes, and disconnect are all valid evidence outcomes.

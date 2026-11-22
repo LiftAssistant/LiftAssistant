@@ -123,10 +123,15 @@ read-only, a synthetic write fails `EBADF`, no tty echo reaches the peer, and
 offline R2.3 replay produces no query/TX. A duration-complete zero-byte artifact
 is explicitly `PassiveSilent` and inconclusive. Software RX-only is not
 physical passivity: no real `/dev/tty*`, CPU561, XDB1, LCEUIO, controller, or
-passenger equipment was used. The XDB1 evidence freeze, physical RX-only design
-contract, future isolated bench validation and first real capture remain
-separate gates documented from
-[`docs/LCE_R3A_PASSIVE_ACQUISITION.md`](docs/LCE_R3A_PASSIVE_ACQUISITION.md).
+passenger equipment was used. The XDB1 evidence freeze is common to two
+explicit assurance paths: a separately HUMAN-approved software-RX-only field
+observation may use a reviewed normal RS-232 interface while retaining
+`PHYSICALLY_PASSIVE=false/unproven`; the R3A.0.3/R3A.0.4 physical RX-only
+design/bench path remains the stronger prerequisite for a physical-passivity
+claim. Neither path authorizes active query, unlock or control. See
+[`docs/LCE_R3A_PASSIVE_ACQUISITION.md`](docs/LCE_R3A_PASSIVE_ACQUISITION.md)
+and
+[`docs/LCE_R3A_SOFTWARE_RX_ONLY_FIELD_PATH.md`](docs/LCE_R3A_SOFTWARE_RX_ONLY_FIELD_PATH.md).
 
 Run the internal observation-adapter validation profiles:
 

@@ -251,24 +251,32 @@ Passenger-production write deployment remains HUMAN-REVIEW and may require exter
 ## Independent LCE passive-evidence track
 
 This research track does not reopen M7 authority and does not inherit any
-write authorization from the production intent-gateway work. Its order is:
+write authorization from the production intent-gateway work. The common
+foundation is:
 
 1. **LCE-R3A.0.1 — Software RX-only artifact and tty evidence fidelity** —
    complete using synthetic/Linux PTY evidence only;
 2. **LCE-R3A.0.2 — XDB1 serial-path evidence freeze** — complete; separates
-   direct KONE facts, high-confidence inference, unknowns and non-claims;
-3. **LCE-R3A.0.3 — Physical RX-only design contract** — design established;
-   no candidate construction or validation performed;
-4. **LCE-R3A.0.4 — Isolated bench validation** — future, not READY and
-   separately HUMAN-authorized;
-5. **HUMAN gate** — review the exact candidate, bench evidence, connector/
-   direction evidence and field conditions;
-6. **LCE-R3A.1 — First real passive capture** — future, not authorized.
+   direct KONE facts, high-confidence inference, unknowns and non-claims.
 
-R3A.0.4 must use an isolated non-passenger bench and demonstrate the physical
-one-way property across lifecycle and reviewed fault cases. R3A.1 cannot be
-made READY merely because software tests or the design document pass. No stage
-in this track authorizes LCEUIO emulation, unlock, terminal navigation, active
+After R3A.0.2 the assurance path deliberately splits:
+
+- **Software-RX-only field path.** The
+  [field assurance contract](LCE_R3A_SOFTWARE_RX_ONLY_FIELD_PATH.md) accepts a
+  normal reviewed RS-232 physical interface and the residual fact that host TX/
+  driver lifecycle behavior is not physically blocked. It preserves the
+  application no-write/no-modem-output boundary and keeps
+  `PHYSICALLY_PASSIVE=false/unproven`. A separate HUMAN decision may then
+  authorize **LCE-R3A.1 — First real software-RX-only observational capture**.
+- **Hardened physical-RX-only path.** **LCE-R3A.0.3** defines the one-way
+  physical design contract. **LCE-R3A.0.4** is a future separately authorized
+  isolated bench validation of an exact candidate. This path is required before
+  any `PHYSICALLY_PASSIVE` claim, but it is not a prerequisite for the
+  lower-assurance software-RX-only R3A.1 observation.
+
+Neither path becomes field-authorized merely because its document exists.
+R3A.1 always requires a new HUMAN decision for the actual session. No stage in
+this track authorizes LCEUIO emulation, unlock, terminal navigation, active
 querying, baud probing or controller writes.
 
 ## M8 — Production Hardening

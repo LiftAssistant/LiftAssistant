@@ -98,7 +98,8 @@ Linux tty/adapter path is not independent waveform evidence.
 
 `LCE-R3A.0.2 COMPLETE — EVIDENCE FROZEN; NO REAL-HARDWARE AUTHORIZATION.`
 
-Completion permits only the R3A.0.3 design-contract phase. It does not permit
-R3A.0.4 bench work, opening a real `/dev/tty*`, attaching to CPU561/XDB1,
-using LCEUIO, unlocking an interface, transmitting terminal bytes, or starting
-R3A.1.
+Completion permits further design/review of either the software-RX-only field
+assurance path or the higher-assurance R3A.0.3 physical RX-only path. It does
+not itself permit R3A.0.4 bench work, opening a real `/dev/tty*`, attaching to
+CPU561/XDB1, using LCEUIO, unlocking an interface, transmitting terminal bytes,
+or starting R3A.1. Any real field capture remains a separate HUMAN decision.

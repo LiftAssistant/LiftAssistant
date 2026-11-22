@@ -10,7 +10,14 @@ This is a design contract, not a schematic, cable recipe, approved hardware
 design or field procedure. It deliberately gives no instruction for connecting
 specific pins to a live controller.
 
-The required invariant for any future candidate is:
+This contract is the **higher-assurance hardened acquisition path**. A later
+HUMAN decision may separately authorize a software-RX-only observational field
+capture under the weaker contract in
+[LCE_R3A_SOFTWARE_RX_ONLY_FIELD_PATH.md](LCE_R3A_SOFTWARE_RX_ONLY_FIELD_PATH.md).
+Such a session must explicitly retain `PHYSICALLY_PASSIVE=false/unproven`;
+it does not satisfy or weaken this physical contract.
+
+The required invariant for any future candidate claiming physical passivity is:
 
 > The LiftAssistant acquisition system has no intentional electrical capability
 > to transmit data or control signals into the controller-side receive path.
@@ -118,7 +125,8 @@ Stop for HUMAN review if the candidate would require:
 - active controller queries, keepalives, baud probes or terminal navigation;
 - an assumption that the current pin-direction inference is confirmed;
 - live passenger equipment to resolve a design uncertainty;
-- software permission, process discipline or `O_RDONLY` as the only TX barrier;
+- software permission, process discipline or `O_RDONLY` as the only TX barrier
+  **when claiming this physical-passivity assurance level**;
 - a claim of electrical safety, certification or field readiness without an
   independent qualified review.
 
@@ -126,6 +134,11 @@ Stop for HUMAN review if the candidate would require:
 
 `LCE-R3A.0.3 DESIGN CONTRACT ESTABLISHED — BENCH VALIDATION NOT PERFORMED.`
 
-The next possible stage is separately authorized R3A.0.4 isolated bench
-validation. R3A.1 remains behind a later HUMAN gate even if bench validation
-eventually passes.
+For this hardened path, the next possible stage is separately authorized
+R3A.0.4 isolated bench validation. R3A.0.4 remains the prerequisite for any
+future claim of `PHYSICALLY_PASSIVE`.
+
+R3A.0.4 is **not** a prerequisite for the separately defined
+software-RX-only R3A.1 observational path. That lower-assurance path has its
+own HUMAN gate and must never inherit a physical-passivity claim from software
+discipline alone.

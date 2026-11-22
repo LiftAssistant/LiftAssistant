@@ -183,22 +183,27 @@ Bytes can already be processed under inherited tty state during the
 open-to-policy window. Linux line-discipline/open/close and driver side effects
 mean this software property is not evidence of a kernel-TX-free or physically
 passive circuit. The example neither flushes input nor restores inherited tty
-state automatically. Physical RX-only construction and any first real
-controller session remain a separate HUMAN gate.
+state automatically. Any first real controller session remains a separate
+HUMAN gate.
 
-The LCE pre-field physical boundary is now staged independently from the tty
-backend. R3A.0.2 freezes source-scoped CPU561/XDB1 facts without promoting the
-inferred per-pin direction or assuming unsolicited traffic. R3A.0.3 defines a
-physical one-way invariant: no host data, modem-control or power path may have
-intentional electrical capability to drive the controller-side receive path.
-That boundary must remain effective even if software writes, the OS probes a
-device, or an adapter toggles during initialization. It is upstream of the
-Linux backend and parser, and no parser or semantic layer can weaken it.
-R3A.0.3 is a design contract only; a candidate construction, isolated bench
-validation and any first real controller session remain separately
-HUMAN-authorized gates. A complete zero-byte passive interval is an
-inconclusive `PassiveSilent` evidence outcome, never an equipment or protocol
-fault by itself.
+R3A.0.2 freezes source-scoped CPU561/XDB1 facts without promoting the inferred
+per-pin direction or assuming unsolicited traffic. After that evidence freeze,
+LCE field acquisition has two explicit assurance levels:
+
+- **software RX-only observation** preserves the reviewed `O_RDONLY`/no-write/
+  no-modem-output application boundary while accepting that a normal RS-232
+  adapter can remain electrically full-duplex and that kernel/driver lifecycle
+  side effects are not proven absent. A HUMAN may approve such an observational
+  R3A.1 session only with `PHYSICALLY_PASSIVE=false/unproven`.
+- **physical RX-only hardened acquisition** additionally requires the R3A.0.3
+  one-way invariant and separately authorized R3A.0.4 isolated bench evidence.
+  Only this path may later support a `PHYSICALLY_PASSIVE` claim.
+
+Both paths remain upstream of offline parsing and the semantic model. Neither
+grants a parser, UI, API, Host, CLI, Engine or plugin an LCE transmit, unlock,
+navigation or active-probe surface. Silence never causes an active fallback.
+A complete zero-byte interval remains an inconclusive `PassiveSilent` evidence
+outcome, never an equipment or protocol fault by itself.
 
 Further packages still require real lifecycle/reuse pressure rather than speculative
 layering.

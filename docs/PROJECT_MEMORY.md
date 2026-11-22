@@ -338,9 +338,13 @@ stores only relative-time `LINUX_TTY_DELIVERED_RX` chunks returned by
 `read(2)` and can replay RX offline through R1 or the R2.3 context classifier
 without issuing a query. SHA-256 is integrity only. Linux tty open/close and
 driver behavior can still affect RTS/DTR or device state, so software RX-only
-does not establish physical passivity. Any real CPU561/XDB1/LCEUIO/controller
-session still requires HUMAN-verified physical RX-only wiring, service/process
-isolation, and separate R3A.1 approval.
+does not establish physical passivity. The original R3A.0 review conservatively
+treated physical RX-only construction as a prerequisite for any field session;
+a later explicit HUMAN architecture decision superseded that prerequisite with
+two assurance levels. A software-RX-only R3A.1 observation may be separately
+approved while remaining `PHYSICALLY_PASSIVE=false/unproven`; physical RX-only
+remains the stronger hardened path. Service/process isolation and separate
+R3A.1 approval remain mandatory.
 
 LCE-R3A.0.1 replaces the synthetic-only passive artifact v1 with v2 before any
 field corpus exists. V2 preserves exact requested Linux path bytes separately
@@ -364,14 +368,21 @@ per-pin direction, a universal baud rate or useful unsolicited idle traffic.
 The conventional pin-direction reading remains a high-confidence inference,
 and passive silence remains inconclusive.
 
-LCE-R3A.0.3 is a design-only physical RX boundary. A future candidate must
-prevent host TX, modem-control and unintended power paths from reaching the
-controller-side receive path independently of software intent, and must
-survive reviewed lifecycle and fault cases in an isolated bench gate. No
-schematic or field wiring is approved; R3A.0.4 bench validation and R3A.1 first
-capture each require later HUMAN authorization. Passive artifact v2 remains
-unchanged; a derived `PassiveSilent` outcome means only that the full requested
-interval completed with no nonempty userspace read result.
+LCE-R3A.0.3 is the design-only **hardened physical RX** boundary. A future
+candidate claiming physical passivity must prevent host TX, modem-control and
+unintended power paths from reaching the controller-side receive path
+independently of software intent and must survive reviewed lifecycle/fault
+cases in R3A.0.4 isolated bench validation. That path remains intact, but
+R3A.0.4 is not a prerequisite for the separately HUMAN-approved
+software-RX-only R3A.1 observation.
+
+The software field assurance contract explicitly records the weaker residual
+state: a normal reviewed RS-232 adapter may retain an electrical TX path and
+driver/open/close side effects, while LiftAssistant itself exposes no serial
+write, modem-output, query, unlock or active fallback. Such a session must
+retain `PHYSICALLY_PASSIVE=false/unproven`. Passive artifact v2 remains
+unchanged; `PassiveSilent` still means only that the full requested interval
+completed with no nonempty userspace read result.
 
 ## License
 
