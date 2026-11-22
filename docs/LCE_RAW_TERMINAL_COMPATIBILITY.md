@@ -479,14 +479,16 @@ new evidence/authorization decision rather than an implicit R2 behavior.
 
 ## R3A.0 software RX-only acquisition boundary
 
-R3A.0 adds a separate Linux tty artifact before any field session. It does not
-put open/termios metadata into interpreted R2 capture v4. Passive capture v1
-records an explicit `O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC` policy,
-`TIOCEXCL`/`TIOCGEXCL` evidence, normalized termios before/after the local
-9600/8N1 raw policy, relative monotonic time, exact chunks returned by
-`read(2)`, bounded end reason, and SHA-256. The artifact can feed RX offline to
-R1 or R2.3, but acquisition never calls `issue_query` or owns a serial write
-handle.
+R3A.0 adds a separate Linux tty artifact before any field session. R3A.0.1
+hardens it to passive format v2 without changing interpreted R2 capture v4.
+V2 records an explicit `O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC` policy,
+exact requested pathname bytes, opened character-device major/minor,
+`TIOCEXCL`/`TIOCGEXCL` evidence, `N_TTY` observations before/after the local
+policy, normalized termios before/after, best-effort pre-capture `TIOCINQ`,
+relative monotonic read-observation time, exact chunks returned by `read(2)`,
+bounded end reason, and SHA-256. Passive v1 is rejected rather than migrated.
+The artifact can feed RX offline to R1 or R2.3, but acquisition never calls
+`issue_query` or owns a serial write handle.
 
 The Linux PTY proof establishes only software behavior: `F_GETFL` reports
 `O_RDONLY`, a synthetic-only write fails `EBADF`, no line-discipline echo
@@ -495,11 +497,15 @@ returns to the peer, later ordinary open is fenced by exclusive mode, and
 binary and CR/LF variants remain exact raw evidence. No PTY result can prove a
 physical controller cable is RX-only.
 
-The explicit no-flow-control, `CLOCAL=true`, `HUPCL=false`, raw-mode and
-`VMIN=VTIME=0` choices are `LOCAL_CAPTURE_POLICY`, not KONE requirements.
-There is no `tcflush`, modem-output ioctl, port scan, reconnect or daemon. Linux
-drivers and other userspace services may still affect the device. The full
-future field precheck and evidence limits are in
+The explicit break/parity/error-input normalization, no-flow-control,
+`CLOCAL=true`, `HUPCL=false`, raw-mode and `VMIN=VTIME=0` choices are
+`LOCAL_CAPTURE_POLICY`, not KONE requirements. There is no `tcflush`,
+`TIOCSETD`, modem-output ioctl, port scan, reconnect or daemon. Bytes read after
+policy installation may already have been processed or queued under inherited
+termios/`N_TTY` state during the open-to-`tcsetattr` window, and `O_RDONLY`
+cannot prove the kernel generated no output. Linux drivers and other userspace
+services may still affect the device. The full future field precheck and
+evidence limits are in
 [`LCE_R3A_PASSIVE_ACQUISITION.md`](LCE_R3A_PASSIVE_ACQUISITION.md).
 
 ## R2 result and next evidence gap

@@ -175,10 +175,16 @@ terminal session or production Host. It requires an explicit absolute path,
 opens with `O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC`, immediately requests
 `TIOCEXCL`, applies an explicit local raw-capture policy and never owns a TX,
 modem-line, reconnect, enumeration, Core, Engine or authority surface. Its
-artifact v1 names evidence `LINUX_TTY_DELIVERED_RX`; Linux open/close and driver
-side effects mean this software property is not evidence of a physically
-passive circuit. Physical RX-only construction and any first real controller
-session remain a separate HUMAN gate.
+artifact v2 names evidence `LINUX_TTY_DELIVERED_RX`, preserves exact requested
+path bytes separately from opened character-device major/minor, requires
+`N_TTY` before/after the explicit termios policy, records best-effort queued
+input, and timestamps userspace read observation rather than physical arrival.
+Bytes can already be processed under inherited tty state during the
+open-to-policy window. Linux line-discipline/open/close and driver side effects
+mean this software property is not evidence of a kernel-TX-free or physically
+passive circuit. The example neither flushes input nor restores inherited tty
+state automatically. Physical RX-only construction and any first real
+controller session remain a separate HUMAN gate.
 Further packages still require real lifecycle/reuse pressure rather than speculative
 layering.
 

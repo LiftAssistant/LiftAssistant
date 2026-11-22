@@ -3,11 +3,13 @@
 //! Experimental parser and conservative canonical mapping for recorded KONE LCE
 //! diagnostic-terminal tables.
 //!
-//! This crate deliberately contains no real serial transport, device enumeration, unlock
-//! logic, controller-control path, or hardware access. Its terminal session can generate only
-//! the typed `STA`, `CMD`, and `MDE` observation queries for synthetic PTY validation. It accepts
-//! original synthetic recorded fixtures and bounded offline transcript bytes for the same
-//! native families.
+//! The normal library/product surface contains no real serial backend, device enumeration,
+//! unlock logic, controller-control path, or production hardware integration. A Linux-only
+//! experimental example performs bounded software-RX-only tty acquisition; it is not linked
+//! into the production Host, Core, or Engine. The terminal session can generate only the typed
+//! `STA`, `CMD`, and `MDE` observation queries for synthetic PTY validation. The crate also
+//! accepts original synthetic recorded fixtures and bounded offline transcript bytes for the
+//! same native families.
 
 mod capture;
 mod passive_capture;
@@ -20,13 +22,15 @@ pub use capture::{
     LceCapturePayload,
 };
 pub use passive_capture::{
-    FinalizedLcePassiveCapture, LCE_PASSIVE_CAPTURE_FORMAT_VERSION, LceNormalizedTermios,
-    LcePassiveAccessMode, LcePassiveAcquisitionLayer, LcePassiveCaptureEndReason,
-    LcePassiveCaptureError, LcePassiveCaptureMetadata, LcePassiveCaptureRecorder,
-    LcePassiveExclusiveModeStatus, LcePassiveOpenPolicy, LcePassiveRxEntry, LcePassiveRxEntryKind,
-    MAX_PASSIVE_CAPTURE_DURATION_SECONDS, MAX_PASSIVE_CAPTURE_ENTRIES,
+    FinalizedLcePassiveCapture, LCE_PASSIVE_CAPTURE_FORMAT_VERSION, LINUX_N_TTY_LINE_DISCIPLINE,
+    LceNormalizedTermios, LcePassiveAccessMode, LcePassiveAcquisitionLayer,
+    LcePassiveCaptureEndReason, LcePassiveCaptureError, LcePassiveCaptureMetadata,
+    LcePassiveCaptureRecorder, LcePassiveExclusiveModeStatus, LcePassiveInputQueueObservation,
+    LcePassiveOpenPolicy, LcePassiveOpenedDevice, LcePassiveOpenedDeviceKind, LcePassiveRxEntry,
+    LcePassiveRxEntryKind, MAX_PASSIVE_CAPTURE_DURATION_SECONDS, MAX_PASSIVE_CAPTURE_ENTRIES,
     MAX_PASSIVE_CAPTURE_ENTRY_BYTES, MAX_PASSIVE_CAPTURE_RAW_BYTES,
-    MAX_PASSIVE_CAPTURE_SESSION_ID_BYTES, MAX_SERIALIZED_PASSIVE_CAPTURE_BYTES,
+    MAX_PASSIVE_CAPTURE_SESSION_ID_BYTES, MAX_PASSIVE_DEVICE_PATH_BYTES,
+    MAX_SERIALIZED_PASSIVE_CAPTURE_BYTES,
 };
 pub use terminal::{
     LceDataBits, LceDisconnectReason, LceInterfaceState, LceParity, LceReadOnlyQuery,

@@ -3,17 +3,25 @@
 #[path = "../examples/support/passive_linux.rs"]
 mod passive_linux;
 
-use std::{ffi::CStr, path::PathBuf, thread, time::Duration};
+use std::{
+    ffi::CStr,
+    os::unix::ffi::OsStrExt,
+    path::{Path, PathBuf},
+    thread,
+    time::Duration,
+};
 
 use liftassistant_lce::{
-    FinalizedLcePassiveCapture, LceCaptureOrigin, LcePassiveAccessMode, LcePassiveCaptureEndReason,
-    LcePassiveExclusiveModeStatus, LceTerminalSessionEvent,
+    FinalizedLcePassiveCapture, LINUX_N_TTY_LINE_DISCIPLINE, LceCaptureOrigin,
+    LcePassiveAccessMode, LcePassiveCaptureEndReason, LcePassiveCaptureError,
+    LcePassiveExclusiveModeStatus, LcePassiveInputQueueObservation, LceTerminalSessionEvent,
 };
 use passive_linux::{PassiveLinuxRequest, PassiveLinuxTty};
 use rustix::{
-    fs::{Mode, OFlags, fcntl_getfl, fcntl_setfl, open},
+    fs::{Mode, OFlags, fcntl_getfl, fcntl_setfl, fstat, major, minor, open},
     io::Errno,
     pty::{OpenptFlags, grantpt, openpt, ptsname, unlockpt},
+    termios::{InputModes, LocalModes, OptionalActions, tcgetattr, tcsetattr},
 };
 
 const SYNTHETIC_RX: &[u8] =
@@ -41,9 +49,31 @@ fn pty_master_and_path() -> (std::os::fd::OwnedFd, PathBuf) {
     (master, PathBuf::from(path))
 }
 
+fn configure_inherited_input_policy(slave_path: &Path) {
+    let setup = open(
+        slave_path,
+        OFlags::RDWR | OFlags::NOCTTY | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .unwrap();
+    let mut inherited = tcgetattr(&setup).unwrap();
+    inherited.input_modes.insert(
+        InputModes::IGNPAR
+            | InputModes::INPCK
+            | InputModes::IXOFF
+            | InputModes::IXANY
+            | InputModes::IUCLC,
+    );
+    inherited
+        .local_modes
+        .insert(LocalModes::ECHO | LocalModes::ICANON);
+    tcsetattr(&setup, OptionalActions::Now, &inherited).unwrap();
+}
+
 #[test]
 fn linux_pty_proves_software_rx_only_capture_and_offline_context_replay() {
     let (master, slave_path) = pty_master_and_path();
+    configure_inherited_input_policy(&slave_path);
     let passive = PassiveLinuxTty::open(&slave_path).unwrap();
 
     let flags = fcntl_getfl(passive.borrowed_fd_for_test()).unwrap();
@@ -56,6 +86,18 @@ fn linux_pty_proves_software_rx_only_capture_and_offline_context_replay() {
         passive.exclusive_status_for_test(),
         LcePassiveExclusiveModeStatus::ObservedEnabled
     );
+    assert_eq!(
+        passive.line_disciplines_for_test(),
+        (LINUX_N_TTY_LINE_DISCIPLINE, LINUX_N_TTY_LINE_DISCIPLINE)
+    );
+    assert!(matches!(
+        passive.pre_capture_input_queue_for_test(),
+        LcePassiveInputQueueObservation::Observed { .. }
+    ));
+    let opened_stat = fstat(passive.borrowed_fd_for_test()).unwrap();
+    let opened_device = passive.opened_device_for_test();
+    assert_eq!(opened_device.major(), major(opened_stat.st_rdev));
+    assert_eq!(opened_device.minor(), minor(opened_stat.st_rdev));
 
     match open(
         &slave_path,
@@ -76,19 +118,23 @@ fn linux_pty_proves_software_rx_only_capture_and_offline_context_replay() {
         Err(error) => panic!("second open failed with {error}, expected EBUSY"),
     }
 
+    let before = passive.before_for_test().clone();
+    assert!(before.ignpar && before.inpck && before.ixoff && before.ixany);
+    assert!(before.iuclc && before.echo && before.icanon);
+
     let after = passive.after_for_test().clone();
     assert_eq!(after.input_speed, 9600);
     assert_eq!(after.output_speed, 9600);
     assert_eq!(after.character_size_bits, 8);
     assert!(after.cs8 && after.cread && after.clocal);
     assert!(!after.parenb && !after.parodd && !after.cstopb);
+    assert!(!after.ignbrk && !after.brkint && !after.ignpar && !after.parmrk && !after.inpck);
     assert!(!after.ixon && !after.ixoff && !after.ixany && !after.crtscts);
     assert!(!after.icanon && !after.echo && !after.isig && !after.iexten);
-    assert!(!after.icrnl && !after.inlcr && !after.igncr && !after.istrip);
+    assert!(!after.icrnl && !after.inlcr && !after.igncr && !after.istrip && !after.iuclc);
     assert!(!after.opost && !after.hupcl);
     assert_eq!((after.vmin, after.vtime), (0, 0));
 
-    let before = passive.before_for_test().clone();
     let capture_path = slave_path.clone();
     let capture_thread = thread::spawn(move || {
         passive
@@ -132,6 +178,22 @@ fn linux_pty_proves_software_rx_only_capture_and_offline_context_replay() {
     assert_eq!(capture.normalized_termios_before(), &before);
     assert_eq!(capture.normalized_termios_after(), &after);
     assert_eq!(
+        capture.requested_device_path_bytes(),
+        slave_path.as_os_str().as_bytes()
+    );
+    assert_eq!(capture.opened_device(), opened_device);
+    assert_eq!(
+        (
+            capture.line_discipline_before(),
+            capture.line_discipline_after()
+        ),
+        (LINUX_N_TTY_LINE_DISCIPLINE, LINUX_N_TTY_LINE_DISCIPLINE)
+    );
+    assert!(matches!(
+        capture.pre_capture_input_queue(),
+        LcePassiveInputQueueObservation::Observed { .. }
+    ));
+    assert_eq!(
         capture
             .entries()
             .iter()
@@ -139,8 +201,22 @@ fn linux_pty_proves_software_rx_only_capture_and_offline_context_replay() {
             .collect::<Vec<_>>(),
         SYNTHETIC_RX
     );
+    let mut previous = 0;
+    for entry in capture.entries() {
+        assert!(entry.read_observed_at_micros() >= previous);
+        assert!(entry.read_observed_at_micros() <= capture.ended_at_micros());
+        assert!(
+            entry.read_observed_at_micros()
+                <= u64::from(capture.requested_duration_seconds()) * 1_000_000
+        );
+        previous = entry.read_observed_at_micros();
+    }
 
     let encoded = capture.to_json_bytes().unwrap();
+    let encoded_value = serde_json::from_slice::<serde_json::Value>(&encoded).unwrap();
+    let encoded_entry = &encoded_value["capture"]["entries"][0];
+    assert!(encoded_entry.get("read_observed_at_micros").is_some());
+    assert!(encoded_entry.get("offset_micros").is_none());
     let decoded = FinalizedLcePassiveCapture::from_json_bytes(&encoded).unwrap();
     assert_eq!(capture, decoded);
     assert_eq!(capture.sha256().len(), 64);
@@ -155,6 +231,26 @@ fn linux_pty_proves_software_rx_only_capture_and_offline_context_replay() {
         replay
             .iter()
             .any(|event| matches!(event, LceTerminalSessionEvent::VTestBoundary))
+    );
+
+    let mut tampered_path = encoded_value.clone();
+    tampered_path["capture"]["requested_device_path_bytes"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::Value::from(u64::from(b'X')));
+    assert_eq!(
+        FinalizedLcePassiveCapture::from_json_bytes(&serde_json::to_vec(&tampered_path).unwrap()),
+        Err(LcePassiveCaptureError::IntegrityMismatch)
+    );
+
+    let mut tampered_device = encoded_value;
+    let major = tampered_device["capture"]["opened_device"]["major"]
+        .as_u64()
+        .unwrap();
+    tampered_device["capture"]["opened_device"]["major"] = serde_json::Value::from(major + 1);
+    assert_eq!(
+        FinalizedLcePassiveCapture::from_json_bytes(&serde_json::to_vec(&tampered_device).unwrap()),
+        Err(LcePassiveCaptureError::IntegrityMismatch)
     );
 }
 

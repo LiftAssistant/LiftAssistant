@@ -342,6 +342,19 @@ does not establish physical passivity. Any real CPU561/XDB1/LCEUIO/controller
 session still requires HUMAN-verified physical RX-only wiring, service/process
 isolation, and separate R3A.1 approval.
 
+LCE-R3A.0.1 replaces the synthetic-only passive artifact v1 with v2 before any
+field corpus exists. V2 preserves exact requested Linux path bytes separately
+from `fstat` character-device major/minor, accepts only observed `N_TTY` before
+and after the explicit local termios policy, records best-effort pre-capture
+`TIOCINQ`, and names each relative timestamp `read_observed_at_micros`. The
+timestamp belongs to a userspace read result, not wire arrival. Input already
+queued after policy application may have been processed under inherited tty
+state during the open-to-`tcsetattr` window; neither `O_RDONLY` nor a zero
+`TIOCINQ` result proves the kernel generated no output or that physical history
+was pristine. The path/device metadata is provenance evidence, not permanent
+adapter/controller identity. V1 is rejected, input is never flushed, and
+inherited tty state is not automatically restored.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

@@ -23,7 +23,7 @@ interpreted terminal artifact:
 ```text
 explicit Linux tty path
   -> O_RDONLY acquisition
-  -> LCE passive capture v1
+  -> LCE passive capture v2
   -> exact chunks returned by read(2)
   -> offline replay
        -> R1 transcript decoder
@@ -35,32 +35,43 @@ meaning, or controller identity. R1/R2.3 interpretation is offline and does
 not call `issue_query`. The existing R2 active session, fixed `STA`/`CMD`/`MDE`
 bytes, authority model, Core, and Engine are unchanged.
 
-## Artifact v1
+## Artifact v2
 
 `FinalizedLcePassiveCapture` is internal/experimental and independent of the
-R2 capture v4 format. It records:
+R2 capture v4 format. There is no real passive-v1 field corpus, so v2 is the
+only accepted passive format and v1 is rejected as `UnsupportedVersion`; there
+is no migration or compatibility alias. V2 records:
 
 - opaque acquisition session ID and existing
   `LIFTASSISTANT_SYNTHETIC`/`FIELD_EVIDENCE_CANDIDATE` origin;
+- the exact bounded Linux pathname bytes supplied by the operator, without
+  lossy UTF-8 conversion or pre-open canonicalization;
+- character-device major/minor from `fstat(2)` on the already-open descriptor;
 - `LINUX_TTY_DELIVERED_RX` acquisition layer;
 - requested historical 9600/8N1 terminal profile;
 - requested duration and normalized open policy;
 - normalized termios before and after applying the local capture policy;
 - requested/observed exclusive-mode status;
-- relative monotonic microseconds and exact nonempty byte chunks returned by
-  Linux `read(2)`;
+- `TIOCGETD` line-discipline observations before and after policy application;
+- a best-effort `TIOCINQ` input-queue observation immediately before capture;
+- `read_observed_at_micros`, the relative monotonic time when the application
+  recorded each nonempty Linux `read(2)` result, and the exact result bytes;
 - bounded termination reason and SHA-256.
 
-The bounds are session ID 128 bytes, 4096 entries, 64 KiB per read chunk,
-1 MiB aggregate RX, 5 MiB serialized artifact, and 1–300 seconds. EOF, peer
-hangup, read or poll error, duration, or evidence limit ends the current
-acquisition. There is no reopen, reconnect, port discovery, or session reuse.
-SIGINT finalization is not implemented; the required duration is the normal
-bounded stop mechanism.
+The bounds are session ID 128 bytes, requested device pathname 4096 bytes,
+4096 entries, 64 KiB per read chunk, 1 MiB aggregate RX, 5 MiB serialized
+artifact, and 1–300 seconds. `DurationElapsed` is valid only at the exact
+requested duration boundary. EOF, peer hangup, read or poll error, duration,
+or evidence limit ends the current acquisition. There is no reopen, reconnect,
+port discovery, or session reuse. SIGINT/crash-durable finalization is not
+implemented; operators should allow the bounded duration to finish normally.
 
 SHA-256 provides mutation detection only. It is not source authentication, a
-signature, or chain-of-custody proof. A zero-entry artifact means only that
-Linux delivered no tty RX bytes during the configured window.
+signature, or chain-of-custody proof. Major/minor identifies only the kernel
+character-device object represented by the opened descriptor during this
+acquisition; it is not permanent adapter, cable, CPU561, or controller
+identity. A zero-entry artifact means only that Linux delivered no tty RX bytes
+during the configured window.
 
 ## Linux open and termios policy
 
@@ -71,7 +82,9 @@ enumerates nor scans devices. Its open flags are:
 O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC
 ```
 
-It requests `TIOCEXCL` immediately, then uses `TIOCGEXCL` when supported. The
+It requests `TIOCEXCL` immediately, then uses `TIOCGEXCL` when supported. It
+uses `fstat(2)` on that descriptor, fails closed unless it is a character
+device, and records its major/minor separately from the requested pathname. The
 artifact distinguishes observed exclusive mode from a requested-but-
 unverifiable result. `TIOCEXCL` fences later ordinary opens; it does not prove
 that no process already had the tty open. The PTY proof checks `F_GETFL &
@@ -79,13 +92,17 @@ O_ACCMODE == O_RDONLY`, `O_NONBLOCK`, `FD_CLOEXEC`, a later `EBUSY` open (except
 the documented privileged bypass), and `EBADF` from a synthetic-only write
 attempt on the read-only slave descriptor.
 
-The code reads and records termios before configuration, applies the historical
-9600/8N1 profile, and reads back the observed result. The following are
+The code uses `TIOCGETD` before and after policy application and supports only
+Linux `N_TTY`; it never calls `TIOCSETD`. Any other line discipline fails
+closed. It reads and records termios before configuration, applies the
+historical 9600/8N1 profile, then reads back and validates every controlled
+field. The following are
 explicit **LiftAssistant local capture policy**, not KONE protocol facts:
 
-- disable `IXON`, `IXOFF`, `IXANY`, CR/LF translation, `ISTRIP`, canonical
-  input, echo, signal generation, extended input processing, output post-
-  processing, RTS/CTS flow control, and `HUPCL`;
+- disable `IGNBRK`, `BRKINT`, `IGNPAR`, `PARMRK`, `INPCK`, `IXON`, `IXOFF`,
+  `IXANY`, `IUCLC`, CR/LF translation, `ISTRIP`, canonical input, echo, signal
+  generation, extended input processing, output post-processing, RTS/CTS flow
+  control, and `HUPCL`;
 - enable `CS8`, `CREAD`, and `CLOCAL`; disable parity and two-stop-bit mode;
 - set input/output speeds to 9600 and `VMIN=0`, `VTIME=0`.
 
@@ -93,6 +110,32 @@ The acquisition code never invokes `tcflush`, `TIOCMSET`, `TIOCMBIS`,
 `TIOCMBIC`, RTS/DTR setters, or break generation. It still cannot prevent a
 Linux tty/USB serial driver from changing RTS/DTR or device state as an
 open/close side effect.
+
+## Configuration window and queued input
+
+Linux sends incoming tty bytes through the active line discipline before
+userspace `read(2)`. During `open -> TIOCEXCL -> tcgetattr -> tcsetattr`, the
+descriptor can still inherit earlier `N_TTY`/termios state. Flags such as
+`ECHO` or `IXOFF` can therefore transform or consume input, or cause
+kernel/line-discipline output, even though LiftAssistant never calls
+`write(2)`. `SOFTWARE_RX_ONLY` means only that the acquisition application
+exposes no explicit tty data-TX or modem-output operation. It does not mean
+kernel-stack-TX-free, driver-side-effect-free, or electrically passive.
+
+Immediately after the post-policy `tcgetattr` and `TIOCGETD`, the example uses
+`TIOCINQ` without flushing or draining. V2 records either `Observed { bytes }`
+or `Unavailable { raw_os_error }`. A positive count means those bytes were
+already queued and normal capture will preserve them. A zero count cannot
+prove earlier bytes were not discarded, transformed, consumed as flow control,
+or echoed under inherited state. Each entry is one userspace read chunk;
+`read_observed_at_micros` is not a UART arrival, wire, controller-send, or
+per-byte timestamp.
+
+The example intentionally performs no automatic termios restoration on close.
+Restoring inherited state while physically connected could itself re-enable
+`ECHO`, `IXOFF`, `HUPCL`, or other behavior; any adapter restoration is a HUMAN
+post-disconnect action. Driver-dependent `TIOCGICOUNT` line-error telemetry is
+possible future hardening, not part of R3A.0.1 or an R3A.1 blocker.
 
 The Linux-only example builds with:
 

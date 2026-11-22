@@ -10,13 +10,15 @@ use crate::{
     LceTranscriptEvent, transcript::MAX_INPUT_CHUNK_BYTES,
 };
 
-pub const LCE_PASSIVE_CAPTURE_FORMAT_VERSION: u16 = 1;
+pub const LCE_PASSIVE_CAPTURE_FORMAT_VERSION: u16 = 2;
 pub const MAX_PASSIVE_CAPTURE_SESSION_ID_BYTES: usize = 128;
+pub const MAX_PASSIVE_DEVICE_PATH_BYTES: usize = 4096;
 pub const MAX_PASSIVE_CAPTURE_ENTRIES: usize = 4096;
 pub const MAX_PASSIVE_CAPTURE_ENTRY_BYTES: usize = 64 * 1024;
 pub const MAX_PASSIVE_CAPTURE_RAW_BYTES: usize = 1024 * 1024;
 pub const MAX_SERIALIZED_PASSIVE_CAPTURE_BYTES: usize = 5 * 1024 * 1024;
 pub const MAX_PASSIVE_CAPTURE_DURATION_SECONDS: u16 = 300;
+pub const LINUX_N_TTY_LINE_DISCIPLINE: i32 = 0;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -30,6 +32,52 @@ pub enum LcePassiveAcquisitionLayer {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum LcePassiveAccessMode {
     ReadOnly,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum LcePassiveOpenedDeviceKind {
+    CharacterDevice,
+}
+
+/// Kernel character-device identity reported by `fstat(2)` for the already
+/// opened descriptor. It is not a persistent adapter, cable, or controller
+/// identity.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct LcePassiveOpenedDevice {
+    kind: LcePassiveOpenedDeviceKind,
+    major: u32,
+    minor: u32,
+}
+
+impl LcePassiveOpenedDevice {
+    pub const fn character_device(major: u32, minor: u32) -> Self {
+        Self {
+            kind: LcePassiveOpenedDeviceKind::CharacterDevice,
+            major,
+            minor,
+        }
+    }
+
+    pub const fn kind(self) -> LcePassiveOpenedDeviceKind {
+        self.kind
+    }
+
+    pub const fn major(self) -> u32 {
+        self.major
+    }
+
+    pub const fn minor(self) -> u32 {
+        self.minor
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "SCREAMING_SNAKE_CASE", deny_unknown_fields)]
+pub enum LcePassiveInputQueueObservation {
+    Observed { bytes: u32 },
+    Unavailable { raw_os_error: Option<i32> },
 }
 
 /// Normalized Linux open policy recorded by the experimental acquisition
@@ -97,6 +145,11 @@ pub enum LcePassiveExclusiveModeStatus {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LceNormalizedTermios {
+    pub ignbrk: bool,
+    pub brkint: bool,
+    pub ignpar: bool,
+    pub parmrk: bool,
+    pub inpck: bool,
     pub ixon: bool,
     pub ixoff: bool,
     pub ixany: bool,
@@ -104,6 +157,7 @@ pub struct LceNormalizedTermios {
     pub inlcr: bool,
     pub igncr: bool,
     pub istrip: bool,
+    pub iuclc: bool,
     pub icanon: bool,
     pub echo: bool,
     pub echoe: bool,
@@ -128,13 +182,19 @@ pub struct LceNormalizedTermios {
 
 impl LceNormalizedTermios {
     fn is_capture_policy(&self) -> bool {
-        !self.ixon
+        !self.ignbrk
+            && !self.brkint
+            && !self.ignpar
+            && !self.parmrk
+            && !self.inpck
+            && !self.ixon
             && !self.ixoff
             && !self.ixany
             && !self.icrnl
             && !self.inlcr
             && !self.igncr
             && !self.istrip
+            && !self.iuclc
             && !self.icanon
             && !self.echo
             && !self.echoe
@@ -167,14 +227,17 @@ pub enum LcePassiveRxEntryKind {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LcePassiveRxEntry {
-    offset_micros: u64,
+    read_observed_at_micros: u64,
     kind: LcePassiveRxEntryKind,
     bytes: Vec<u8>,
 }
 
 impl LcePassiveRxEntry {
-    pub const fn offset_micros(&self) -> u64 {
-        self.offset_micros
+    /// Relative monotonic time at which the acquisition loop observed this
+    /// userspace `read(2)` result. This is not a wire, UART-arrival,
+    /// controller-send, or per-byte timestamp.
+    pub const fn read_observed_at_micros(&self) -> u64 {
+        self.read_observed_at_micros
     }
 
     pub const fn kind(&self) -> LcePassiveRxEntryKind {
@@ -203,12 +266,17 @@ pub enum LcePassiveCaptureEndReason {
 pub struct LcePassiveCaptureMetadata {
     pub session_id: String,
     pub origin: LceCaptureOrigin,
+    pub requested_device_path_bytes: Vec<u8>,
+    pub opened_device: LcePassiveOpenedDevice,
     pub requested_terminal_profile: LceRuntimeTerminalProfile,
     pub requested_duration_seconds: u16,
     pub normalized_open_policy: LcePassiveOpenPolicy,
     pub normalized_termios_before: LceNormalizedTermios,
     pub normalized_termios_after: LceNormalizedTermios,
     pub exclusive_mode_status: LcePassiveExclusiveModeStatus,
+    pub line_discipline_before: i32,
+    pub line_discipline_after: i32,
+    pub pre_capture_input_queue: LcePassiveInputQueueObservation,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -218,12 +286,17 @@ struct LcePassiveCaptureBody {
     session_id: String,
     origin: LceCaptureOrigin,
     acquisition_layer: LcePassiveAcquisitionLayer,
+    requested_device_path_bytes: Vec<u8>,
+    opened_device: LcePassiveOpenedDevice,
     requested_terminal_profile: LceRuntimeTerminalProfile,
     requested_duration_seconds: u16,
     normalized_open_policy: LcePassiveOpenPolicy,
     normalized_termios_before: LceNormalizedTermios,
     normalized_termios_after: LceNormalizedTermios,
     exclusive_mode_status: LcePassiveExclusiveModeStatus,
+    line_discipline_before: i32,
+    line_discipline_after: i32,
+    pre_capture_input_queue: LcePassiveInputQueueObservation,
     entries: Vec<LcePassiveRxEntry>,
     ended_at_micros: u64,
     end_reason: LcePassiveCaptureEndReason,
@@ -234,6 +307,16 @@ struct LcePassiveCaptureBody {
 struct LcePassiveCaptureEnvelope {
     capture: LcePassiveCaptureBody,
     sha256: String,
+}
+
+#[derive(Deserialize)]
+struct LcePassiveCaptureVersionProbe {
+    capture: LcePassiveCaptureVersionBody,
+}
+
+#[derive(Deserialize)]
+struct LcePassiveCaptureVersionBody {
+    format_version: u16,
 }
 
 /// A bounded, finalized raw acquisition artifact. Its JSON shape is internal
@@ -258,6 +341,14 @@ impl FinalizedLcePassiveCapture {
         self.body.acquisition_layer
     }
 
+    pub fn requested_device_path_bytes(&self) -> &[u8] {
+        &self.body.requested_device_path_bytes
+    }
+
+    pub const fn opened_device(&self) -> LcePassiveOpenedDevice {
+        self.body.opened_device
+    }
+
     pub const fn requested_terminal_profile(&self) -> LceRuntimeTerminalProfile {
         self.body.requested_terminal_profile
     }
@@ -280,6 +371,18 @@ impl FinalizedLcePassiveCapture {
 
     pub const fn exclusive_mode_status(&self) -> LcePassiveExclusiveModeStatus {
         self.body.exclusive_mode_status
+    }
+
+    pub const fn line_discipline_before(&self) -> i32 {
+        self.body.line_discipline_before
+    }
+
+    pub const fn line_discipline_after(&self) -> i32 {
+        self.body.line_discipline_after
+    }
+
+    pub const fn pre_capture_input_queue(&self) -> LcePassiveInputQueueObservation {
+        self.body.pre_capture_input_queue
     }
 
     pub fn entries(&self) -> &[LcePassiveRxEntry] {
@@ -313,6 +416,13 @@ impl FinalizedLcePassiveCapture {
     pub fn from_json_bytes(bytes: &[u8]) -> Result<Self, LcePassiveCaptureError> {
         if bytes.len() > MAX_SERIALIZED_PASSIVE_CAPTURE_BYTES {
             return Err(LcePassiveCaptureError::SerializedCaptureTooLarge { bytes: bytes.len() });
+        }
+        let version = serde_json::from_slice::<LcePassiveCaptureVersionProbe>(bytes)
+            .map_err(|error| LcePassiveCaptureError::Serialization(error.to_string()))?
+            .capture
+            .format_version;
+        if version != LCE_PASSIVE_CAPTURE_FORMAT_VERSION {
+            return Err(LcePassiveCaptureError::UnsupportedVersion { version });
         }
         let envelope = serde_json::from_slice::<LcePassiveCaptureEnvelope>(bytes)
             .map_err(|error| LcePassiveCaptureError::Serialization(error.to_string()))?;
@@ -356,8 +466,10 @@ impl FinalizedLcePassiveCapture {
             if matches!(session.state(), LceTerminalSessionState::FailedClosed(_)) {
                 break;
             }
-            events
-                .extend(session.receive(Duration::from_micros(entry.offset_micros), &entry.bytes)?);
+            events.extend(session.receive(
+                Duration::from_micros(entry.read_observed_at_micros),
+                &entry.bytes,
+            )?);
         }
         Ok(events)
     }
@@ -367,10 +479,14 @@ impl FinalizedLcePassiveCapture {
 pub enum LcePassiveCaptureError {
     SessionIdEmpty,
     SessionIdTooLarge { bytes: usize },
+    InvalidRequestedDevicePath,
+    DevicePathTooLarge { bytes: usize },
     InvalidDuration { seconds: u16 },
     InvalidOpenPolicy,
     InvalidExclusiveStatus,
     InvalidCaptureTermios,
+    UnsupportedLineDiscipline { observed: i32 },
+    InconsistentDurationElapsed { expected: u64, actual: u64 },
     NonMonotonicTime { previous: u64, next: u64 },
     TimeBeyondRequestedDuration { micros: u64 },
     TooManyEntries,
@@ -392,6 +508,13 @@ impl fmt::Display for LcePassiveCaptureError {
                 f,
                 "passive capture session ID has {bytes} bytes; maximum is {MAX_PASSIVE_CAPTURE_SESSION_ID_BYTES}"
             ),
+            Self::InvalidRequestedDevicePath => f.write_str(
+                "passive capture requested device path must be nonempty, absolute, and contain no NUL",
+            ),
+            Self::DevicePathTooLarge { bytes } => write!(
+                f,
+                "passive capture requested device path has {bytes} bytes; maximum is {MAX_PASSIVE_DEVICE_PATH_BYTES}"
+            ),
             Self::InvalidDuration { seconds } => write!(
                 f,
                 "passive capture duration is {seconds} seconds; expected 1..={MAX_PASSIVE_CAPTURE_DURATION_SECONDS}"
@@ -404,6 +527,14 @@ impl fmt::Display for LcePassiveCaptureError {
             ),
             Self::InvalidCaptureTermios => f.write_str(
                 "passive capture observed termios does not match the explicit local capture policy",
+            ),
+            Self::UnsupportedLineDiscipline { observed } => write!(
+                f,
+                "passive capture observed unsupported tty line discipline {observed}; expected Linux N_TTY (0)"
+            ),
+            Self::InconsistentDurationElapsed { expected, actual } => write!(
+                f,
+                "DurationElapsed ended at {actual}us; expected the requested duration boundary {expected}us"
             ),
             Self::NonMonotonicTime { previous, next } => write!(
                 f,
@@ -499,7 +630,7 @@ impl Error for LcePassiveCaptureError {}
 #[derive(Debug)]
 pub struct LcePassiveCaptureRecorder {
     body: LcePassiveCaptureBody,
-    last_offset_micros: u64,
+    last_read_observed_at_micros: u64,
     raw_bytes: usize,
 }
 
@@ -510,12 +641,17 @@ impl LcePassiveCaptureRecorder {
             session_id: metadata.session_id,
             origin: metadata.origin,
             acquisition_layer: LcePassiveAcquisitionLayer::LinuxTtyDeliveredRx,
+            requested_device_path_bytes: metadata.requested_device_path_bytes,
+            opened_device: metadata.opened_device,
             requested_terminal_profile: metadata.requested_terminal_profile,
             requested_duration_seconds: metadata.requested_duration_seconds,
             normalized_open_policy: metadata.normalized_open_policy,
             normalized_termios_before: metadata.normalized_termios_before,
             normalized_termios_after: metadata.normalized_termios_after,
             exclusive_mode_status: metadata.exclusive_mode_status,
+            line_discipline_before: metadata.line_discipline_before,
+            line_discipline_after: metadata.line_discipline_after,
+            pre_capture_input_queue: metadata.pre_capture_input_queue,
             entries: Vec::new(),
             ended_at_micros: 0,
             end_reason: LcePassiveCaptureEndReason::DurationElapsed,
@@ -523,7 +659,7 @@ impl LcePassiveCaptureRecorder {
         validate_metadata(&body)?;
         Ok(Self {
             body,
-            last_offset_micros: 0,
+            last_read_observed_at_micros: 0,
             raw_bytes: 0,
         })
     }
@@ -551,18 +687,18 @@ impl LcePassiveCaptureRecorder {
         if total > MAX_PASSIVE_CAPTURE_RAW_BYTES {
             return Err(LcePassiveCaptureError::RawCaptureTooLarge { bytes: total });
         }
-        let offset_micros = duration_micros(at)?;
+        let read_observed_at_micros = duration_micros(at)?;
         validate_offset(
-            self.last_offset_micros,
-            offset_micros,
+            self.last_read_observed_at_micros,
+            read_observed_at_micros,
             self.body.requested_duration_seconds,
         )?;
         self.body.entries.push(LcePassiveRxEntry {
-            offset_micros,
+            read_observed_at_micros,
             kind: LcePassiveRxEntryKind::TtyDeliveredRx,
             bytes: bytes.to_vec(),
         });
-        self.last_offset_micros = offset_micros;
+        self.last_read_observed_at_micros = read_observed_at_micros;
         self.raw_bytes = total;
         Ok(())
     }
@@ -574,7 +710,7 @@ impl LcePassiveCaptureRecorder {
     ) -> Result<FinalizedLcePassiveCapture, LcePassiveCaptureError> {
         let ended_at_micros = duration_micros(at)?;
         validate_offset(
-            self.last_offset_micros,
+            self.last_read_observed_at_micros,
             ended_at_micros,
             self.body.requested_duration_seconds,
         )?;
@@ -597,6 +733,16 @@ fn validate_metadata(body: &LcePassiveCaptureBody) -> Result<(), LcePassiveCaptu
         return Err(LcePassiveCaptureError::SessionIdTooLarge {
             bytes: body.session_id.len(),
         });
+    }
+    if body.requested_device_path_bytes.len() > MAX_PASSIVE_DEVICE_PATH_BYTES {
+        return Err(LcePassiveCaptureError::DevicePathTooLarge {
+            bytes: body.requested_device_path_bytes.len(),
+        });
+    }
+    if body.requested_device_path_bytes.first() != Some(&b'/')
+        || body.requested_device_path_bytes.contains(&0)
+    {
+        return Err(LcePassiveCaptureError::InvalidRequestedDevicePath);
     }
     if body.requested_duration_seconds == 0
         || body.requested_duration_seconds > MAX_PASSIVE_CAPTURE_DURATION_SECONDS
@@ -627,6 +773,11 @@ fn validate_metadata(body: &LcePassiveCaptureBody) -> Result<(), LcePassiveCaptu
     if !body.normalized_termios_after.is_capture_policy() {
         return Err(LcePassiveCaptureError::InvalidCaptureTermios);
     }
+    for observed in [body.line_discipline_before, body.line_discipline_after] {
+        if observed != LINUX_N_TTY_LINE_DISCIPLINE {
+            return Err(LcePassiveCaptureError::UnsupportedLineDiscipline { observed });
+        }
+    }
     Ok(())
 }
 
@@ -650,10 +801,10 @@ fn validate_body(body: &LcePassiveCaptureBody) -> Result<(), LcePassiveCaptureEr
     for entry in &body.entries {
         validate_offset(
             previous,
-            entry.offset_micros,
+            entry.read_observed_at_micros,
             body.requested_duration_seconds,
         )?;
-        if entry.offset_micros > body.ended_at_micros {
+        if entry.read_observed_at_micros > body.ended_at_micros {
             return Err(LcePassiveCaptureError::InvalidCapture(
                 "entry timestamp exceeds capture end",
             ));
@@ -676,7 +827,7 @@ fn validate_body(body: &LcePassiveCaptureBody) -> Result<(), LcePassiveCaptureEr
         total = total
             .checked_add(entry.bytes.len())
             .ok_or(LcePassiveCaptureError::RawCaptureTooLarge { bytes: usize::MAX })?;
-        previous = entry.offset_micros;
+        previous = entry.read_observed_at_micros;
     }
     if total > MAX_PASSIVE_CAPTURE_RAW_BYTES {
         return Err(LcePassiveCaptureError::RawCaptureTooLarge { bytes: total });
@@ -686,6 +837,15 @@ fn validate_body(body: &LcePassiveCaptureBody) -> Result<(), LcePassiveCaptureEr
         body.ended_at_micros,
         body.requested_duration_seconds,
     )?;
+    if body.end_reason == LcePassiveCaptureEndReason::DurationElapsed {
+        let expected = u64::from(body.requested_duration_seconds) * 1_000_000;
+        if body.ended_at_micros != expected {
+            return Err(LcePassiveCaptureError::InconsistentDurationElapsed {
+                expected,
+                actual: body.ended_at_micros,
+            });
+        }
+    }
     Ok(())
 }
 
@@ -727,6 +887,11 @@ mod tests {
 
     fn capture_termios() -> LceNormalizedTermios {
         LceNormalizedTermios {
+            ignbrk: false,
+            brkint: false,
+            ignpar: false,
+            parmrk: false,
+            inpck: false,
             ixon: false,
             ixoff: false,
             ixany: false,
@@ -734,6 +899,7 @@ mod tests {
             inlcr: false,
             igncr: false,
             istrip: false,
+            iuclc: false,
             icanon: false,
             echo: false,
             echoe: false,
@@ -762,12 +928,17 @@ mod tests {
         LcePassiveCaptureRecorder::new(LcePassiveCaptureMetadata {
             session_id: "LIFTASSISTANT_SYNTHETIC/passive-A".to_owned(),
             origin: LceCaptureOrigin::LiftAssistantSynthetic,
+            requested_device_path_bytes: b"/dev/pts/synthetic-A".to_vec(),
+            opened_device: LcePassiveOpenedDevice::character_device(136, 7),
             requested_terminal_profile: LceRuntimeTerminalProfile::historical_9600_8n1(),
             requested_duration_seconds: 1,
             normalized_open_policy: LcePassiveOpenPolicy::linux_rx_only(true),
             normalized_termios_before: after.clone(),
             normalized_termios_after: after,
             exclusive_mode_status: LcePassiveExclusiveModeStatus::ObservedEnabled,
+            line_discipline_before: 0,
+            line_discipline_after: 0,
+            pre_capture_input_queue: LcePassiveInputQueueObservation::Observed { bytes: 0 },
         })
         .unwrap()
     }
@@ -875,6 +1046,69 @@ mod tests {
         assert_eq!(
             FinalizedLcePassiveCapture::from_json_bytes(tampered.as_bytes()),
             Err(LcePassiveCaptureError::IntegrityMismatch)
+        );
+    }
+
+    #[test]
+    fn passive_v1_is_rejected_without_compatibility_alias() {
+        assert_eq!(
+            FinalizedLcePassiveCapture::from_json_bytes(
+                br#"{"capture":{"format_version":1},"sha256":"legacy-v1"}"#
+            ),
+            Err(LcePassiveCaptureError::UnsupportedVersion { version: 1 })
+        );
+    }
+
+    #[test]
+    fn source_and_line_discipline_metadata_fail_closed() {
+        let mut invalid_path = recorder();
+        invalid_path.body.requested_device_path_bytes = b"relative/tty".to_vec();
+        invalid_path.body.end_reason = LcePassiveCaptureEndReason::EndOfFile;
+        let invalid_path_envelope = LcePassiveCaptureEnvelope {
+            sha256: body_sha256(&invalid_path.body).unwrap(),
+            capture: invalid_path.body,
+        };
+        assert_eq!(
+            FinalizedLcePassiveCapture::from_json_bytes(
+                &serde_json::to_vec(&invalid_path_envelope).unwrap()
+            ),
+            Err(LcePassiveCaptureError::InvalidRequestedDevicePath)
+        );
+
+        let mut unsupported_line_discipline = recorder();
+        unsupported_line_discipline.body.line_discipline_after = 1;
+        unsupported_line_discipline.body.end_reason = LcePassiveCaptureEndReason::EndOfFile;
+        let unsupported_line_discipline_envelope = LcePassiveCaptureEnvelope {
+            sha256: body_sha256(&unsupported_line_discipline.body).unwrap(),
+            capture: unsupported_line_discipline.body,
+        };
+        assert_eq!(
+            FinalizedLcePassiveCapture::from_json_bytes(
+                &serde_json::to_vec(&unsupported_line_discipline_envelope).unwrap()
+            ),
+            Err(LcePassiveCaptureError::UnsupportedLineDiscipline { observed: 1 })
+        );
+    }
+
+    #[test]
+    fn duration_elapsed_requires_the_exact_requested_boundary() {
+        assert_eq!(
+            recorder().finalize(
+                Duration::from_micros(999_999),
+                LcePassiveCaptureEndReason::DurationElapsed,
+            ),
+            Err(LcePassiveCaptureError::InconsistentDurationElapsed {
+                expected: 1_000_000,
+                actual: 999_999,
+            })
+        );
+        assert!(
+            recorder()
+                .finalize(
+                    Duration::from_secs(1),
+                    LcePassiveCaptureEndReason::DurationElapsed,
+                )
+                .is_ok()
         );
     }
 }

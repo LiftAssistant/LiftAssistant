@@ -449,6 +449,65 @@ V-test navigation or unlock was used. REAL_FIELD_CAPTURE absent;
 CPU561_VALIDATED=false; LCEUIO_VALIDATED=false; PHYSICALLY_PASSIVE=false/
 unproven; LIVE_LCE_QUERY=false.`
 
+### LCE-R3A.0.1 — TTY evidence fidelity and source provenance
+
+**COMPLETE — `TTY_EVIDENCE_FIDELITY_HARDENED`; HUMAN-CHECK reached.** The
+synthetic-only passive artifact is now format v2; passive v1 is explicitly
+rejected as `UnsupportedVersion`, while interpreted R2 capture remains format
+v4. V2 preserves the exact bounded requested Linux pathname bytes separately
+from `fstat` character-device major/minor, without path canonicalization,
+device scanning or a persistent-hardware-identity claim.
+
+The Linux example observes `TIOCGETD` before and after policy application and
+fails closed unless both values are `N_TTY`. It never calls `TIOCSETD`. The
+normalized before/after evidence and read-back validator now include
+`IGNBRK`, `BRKINT`, `IGNPAR`, `PARMRK`, `INPCK` and Linux `IUCLC` in addition
+to the existing transformation, flow-control, local, framing, speed and
+`VMIN`/`VTIME` fields. A kernel PTY regression deliberately inherits
+`IGNPAR`, `INPCK`, `IXOFF`, `IXANY`, `IUCLC`, `ECHO` and `ICANON`, proves those
+values appear in before evidence, and proves the complete local capture policy
+in after evidence.
+
+After post-policy `tcgetattr` and `TIOCGETD`, v2 records best-effort `TIOCINQ`
+as observed queued bytes or a typed unavailable result. It never flushes or
+hides queued input. Bytes later delivered by `read(2)` may already have been
+processed under inherited tty state during the open-to-policy window; zero
+queued bytes does not prove pristine earlier history. Each entry now uses
+`read_observed_at_micros`, meaning application observation time for one read
+chunk, not UART arrival, wire, controller-send or per-byte time. A
+`DurationElapsed` artifact is valid only at the exact requested duration
+boundary.
+
+The strongest claim remains that the LiftAssistant acquisition application
+exposes no explicit tty data-TX or modem-output operation. `O_RDONLY` does not
+prove the line discipline/kernel generated no output. Automatic inherited
+termios restoration is intentionally absent because it can itself re-enable
+`ECHO`, `IXOFF`, `HUPCL` or other behavior; any restoration is a HUMAN
+post-disconnect action. Input flush, automatic reopen, line-discipline change,
+signal framework and driver-dependent `TIOCGICOUNT` telemetry remain absent.
+
+Closing validation passes formatting, warning-free locked workspace all-target
+Clippy, 262 workspace tests with one expected ignored soak child, the exact
+Rust/Cargo 1.85.0 locked all-target workspace check, the Linux example build,
+all nine TUI scenarios and all four non-live Headless scenarios. Focused LCE
+validation reports 49 unit tests, four Linux PTY integration tests and nine
+compile-fail public-API regressions. Normal and Linux dev/example dependencies
+are unchanged; `serialport`, Tokio, async runtime, udev/device enumeration,
+Core/Engine changes and authority changes remain absent.
+
+**Next gate remains:** `LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE`,
+requiring separate HUMAN approval, verified physical RX-only construction,
+connector/signal-direction evidence, no capture TX/RTS/DTR/controller-RX
+physical path, service/process isolation, explicit tty identity and a reviewed
+acquisition policy.
+
+**Terminal boundary:** `HUMAN-CHECK — NO real /dev/tty* field capture, CPU561,
+XDB1, LCEUIO, controller, passenger equipment, real TX, V-test navigation or
+unlock was used. REAL_FIELD_CAPTURE absent; CPU561_VALIDATED=false;
+LCEUIO_VALIDATED=false; PHYSICALLY_PASSIVE=false/unproven;
+LIVE_LCE_QUERY=false; REAL_LCE_COMPATIBLE not claimed;
+LIVE_SERIAL_VALIDATED not claimed; PRODUCTION_READY not claimed.`
+
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 
 **COMPLETE (Simulator-only development slice).** This vertical slice connects

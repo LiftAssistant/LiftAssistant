@@ -507,6 +507,48 @@ control/CLOCAL/HUPCL/raw choices as local capture policy, forbids flush and
 modem-output operations, and leaves connector/pin/signal-direction proof to a
 separate HUMAN hardware gate.
 
+### LCE-R3A.0.1 tty evidence-fidelity finding
+
+The pre-field fidelity review used Linux kernel and man-pages interfaces rather
+than treating userspace `read(2)` as raw UART evidence:
+
+- Linux [`cfmakeraw(3)`](https://man7.org/linux/man-pages/man3/cfmakeraw.3.html)
+  clears a defined subset of input flags; it does not itself clear every
+  inherited error/flow/transformation flag used by the R3A policy, including
+  `IGNPAR`, `INPCK`, `IXOFF`, `IXANY`, and `IUCLC`. Those fields therefore need
+  explicit removal and read-back validation.
+- The kernel [TTY overview](https://docs.kernel.org/driver-api/tty/index.html)
+  places a selected line discipline between device input and userspace; default
+  `N_TTY` performs transformations, echo, signals, and special-character
+  processing. The kernel
+  [`N_TTY` documentation](https://docs.kernel.org/driver-api/tty/n_tty.html)
+  also shows that received input can produce line-discipline echo through
+  driver output without an application `write(2)` call.
+- Linux [`TIOCGETD`](https://man7.org/linux/man-pages/man2/TIOCGETD.2const.html)
+  observes the active line discipline without changing it. R3A records it
+  before and after policy application, accepts only `N_TTY`, and never calls
+  `TIOCSETD`.
+- Linux [`TIOCINQ`/`FIONREAD`](https://man7.org/linux/man-pages/man2/TIOCINQ.2const.html)
+  reports bytes currently available in the input buffer. It is queue evidence,
+  not physical-arrival chronology or proof that earlier bytes were untouched.
+- [`fstat(2)`](https://man7.org/linux/man-pages/man2/stat.2.html) observes the
+  object behind the already-open descriptor, while
+  [`major(3)`/`minor(3)`](https://man7.org/linux/man-pages/man3/makedev.3.html)
+  split its device number. This distinguishes an operator-supplied path from
+  the opened kernel character-device object, but does not establish permanent
+  adapter, cable, CPU561, or controller identity.
+- Linux [`termios(3)`](https://man7.org/linux/man-pages/man3/termios.3.html)
+  documents how break, parity/error, stripping, newline, case conversion and
+  software flow-control flags can discard, expand, transform, consume, signal,
+  flush, or echo input before userspace reads it.
+
+These remain `GENERIC_TRANSPORT_PRIOR`, not `KONE_PROTOCOL_EVIDENCE`,
+`CPU561_EVIDENCE`, or `LCEUIO_EVIDENCE`. The durable boundary is that
+`SOFTWARE_RX_ONLY` means the LiftAssistant acquisition application exposes no
+explicit tty data-TX or modem-output operation. It does not mean
+kernel-stack-TX-free, driver-side-effect-free, raw-UART-equivalent, or
+physically passive.
+
 
 ## M4 semantic-boundary audit findings — reported/current/desired state
 

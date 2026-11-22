@@ -13,14 +13,15 @@ use std::{
 };
 
 use liftassistant_lce::{
-    FinalizedLcePassiveCapture, LceCaptureOrigin, LceNormalizedTermios, LcePassiveCaptureEndReason,
-    LcePassiveCaptureError, LcePassiveCaptureMetadata, LcePassiveCaptureRecorder,
-    LcePassiveExclusiveModeStatus, LcePassiveOpenPolicy, LceRuntimeTerminalProfile,
-    MAX_PASSIVE_CAPTURE_ENTRY_BYTES,
+    FinalizedLcePassiveCapture, LINUX_N_TTY_LINE_DISCIPLINE, LceCaptureOrigin,
+    LceNormalizedTermios, LcePassiveCaptureEndReason, LcePassiveCaptureError,
+    LcePassiveCaptureMetadata, LcePassiveCaptureRecorder, LcePassiveExclusiveModeStatus,
+    LcePassiveInputQueueObservation, LcePassiveOpenPolicy, LcePassiveOpenedDevice,
+    LceRuntimeTerminalProfile, MAX_PASSIVE_CAPTURE_ENTRY_BYTES, MAX_PASSIVE_DEVICE_PATH_BYTES,
 };
 use rustix::{
     event::{PollFd, PollFlags, poll},
-    fs::{Mode, OFlags, fcntl_getfd, fcntl_getfl, open},
+    fs::{FileType, Mode, OFlags, fcntl_getfd, fcntl_getfl, fstat, major, minor, open},
     io::{self, Errno, FdFlags},
     rand::{GetRandomFlags, getrandom},
     termios::{
@@ -52,6 +53,10 @@ pub enum PassiveLinuxError {
     DescriptorPolicy(io::Errno),
     DescriptorNotReadOnly,
     DescriptorFlagsNotApplied,
+    DeviceMetadata(io::Errno),
+    NotCharacterDevice,
+    LineDisciplineRead(std::io::Error),
+    UnsupportedLineDiscipline { observed: i32 },
     TermiosRead(io::Errno),
     TermiosConfigure(io::Errno),
     TermiosApply(io::Errno),
@@ -75,6 +80,17 @@ impl fmt::Display for PassiveLinuxError {
             Self::DescriptorFlagsNotApplied => {
                 f.write_str("opened tty descriptor is missing O_NONBLOCK or FD_CLOEXEC")
             }
+            Self::DeviceMetadata(error) => write!(f, "fstat on opened tty failed: {error}"),
+            Self::NotCharacterDevice => {
+                f.write_str("opened tty path did not resolve to a character device")
+            }
+            Self::LineDisciplineRead(error) => {
+                write!(f, "TIOCGETD failed for opened tty: {error}")
+            }
+            Self::UnsupportedLineDiscipline { observed } => write!(
+                f,
+                "opened tty uses unsupported line discipline {observed}; expected Linux N_TTY (0)"
+            ),
             Self::TermiosRead(error) => write!(f, "tcgetattr failed: {error}"),
             Self::TermiosConfigure(error) => {
                 write!(f, "9600/8N1 termios configuration failed: {error}")
@@ -92,14 +108,18 @@ impl Error for PassiveLinuxError {
             | Self::Open(error)
             | Self::ExclusiveRequest(error)
             | Self::DescriptorPolicy(error)
+            | Self::DeviceMetadata(error)
             | Self::TermiosRead(error)
             | Self::TermiosConfigure(error)
             | Self::TermiosApply(error) => Some(error),
             Self::Capture(error) => Some(error),
+            Self::LineDisciplineRead(error) => Some(error),
             Self::InvalidDevicePath
             | Self::ExclusiveNotObserved
             | Self::DescriptorNotReadOnly
-            | Self::DescriptorFlagsNotApplied => None,
+            | Self::DescriptorFlagsNotApplied
+            | Self::NotCharacterDevice
+            | Self::UnsupportedLineDiscipline { .. } => None,
         }
     }
 }
@@ -138,9 +158,14 @@ pub fn acquire(
 #[derive(Debug)]
 pub struct PassiveLinuxTty {
     fd: OwnedFd,
+    requested_device_path_bytes: Vec<u8>,
+    opened_device: LcePassiveOpenedDevice,
     before: LceNormalizedTermios,
     after: LceNormalizedTermios,
     exclusive_status: LcePassiveExclusiveModeStatus,
+    line_discipline_before: i32,
+    line_discipline_after: i32,
+    pre_capture_input_queue: LcePassiveInputQueueObservation,
 }
 
 impl PassiveLinuxTty {
@@ -161,6 +186,15 @@ impl PassiveLinuxTty {
             },
         };
 
+        let device_stat = fstat(&fd).map_err(PassiveLinuxError::DeviceMetadata)?;
+        if FileType::from_raw_mode(device_stat.st_mode) != FileType::CharacterDevice {
+            return Err(PassiveLinuxError::NotCharacterDevice);
+        }
+        let opened_device = LcePassiveOpenedDevice::character_device(
+            major(device_stat.st_rdev),
+            minor(device_stat.st_rdev),
+        );
+
         let observed_flags = fcntl_getfl(&fd).map_err(PassiveLinuxError::DescriptorPolicy)?;
         if observed_flags & OFlags::ACCMODE != OFlags::RDONLY {
             return Err(PassiveLinuxError::DescriptorNotReadOnly);
@@ -172,18 +206,34 @@ impl PassiveLinuxTty {
             return Err(PassiveLinuxError::DescriptorFlagsNotApplied);
         }
 
+        let line_discipline_before =
+            query_line_discipline(&fd).map_err(PassiveLinuxError::LineDisciplineRead)?;
+        require_n_tty(line_discipline_before)?;
+
+        // Bytes can reach N_TTY between open and this policy change. Inherited
+        // ECHO/IXOFF/other flags may already have transformed, consumed, or
+        // generated output for them without an application `write(2)` call.
         let mut settings = tcgetattr(&fd).map_err(PassiveLinuxError::TermiosRead)?;
         let before = normalize_termios(&settings);
         apply_capture_policy(&mut settings)?;
         tcsetattr(&fd, OptionalActions::Now, &settings).map_err(PassiveLinuxError::TermiosApply)?;
         let observed = tcgetattr(&fd).map_err(PassiveLinuxError::TermiosRead)?;
         let after = normalize_termios(&observed);
+        let line_discipline_after =
+            query_line_discipline(&fd).map_err(PassiveLinuxError::LineDisciplineRead)?;
+        require_n_tty(line_discipline_after)?;
+        let pre_capture_input_queue = observe_input_queue(&fd);
 
         Ok(Self {
             fd,
+            requested_device_path_bytes: path.as_os_str().as_bytes().to_vec(),
+            opened_device,
             before,
             after,
             exclusive_status,
+            line_discipline_before,
+            line_discipline_after,
+            pre_capture_input_queue,
         })
     }
 
@@ -198,12 +248,17 @@ impl PassiveLinuxTty {
         let mut recorder = LcePassiveCaptureRecorder::new(LcePassiveCaptureMetadata {
             session_id: request.session_id.to_owned(),
             origin: request.origin,
+            requested_device_path_bytes: self.requested_device_path_bytes.clone(),
+            opened_device: self.opened_device,
             requested_terminal_profile: LceRuntimeTerminalProfile::historical_9600_8n1(),
             requested_duration_seconds: request.duration_seconds,
             normalized_open_policy: LcePassiveOpenPolicy::linux_rx_only(exclusive_observed),
             normalized_termios_before: self.before.clone(),
             normalized_termios_after: self.after.clone(),
             exclusive_mode_status: self.exclusive_status,
+            line_discipline_before: self.line_discipline_before,
+            line_discipline_after: self.line_discipline_after,
+            pre_capture_input_queue: self.pre_capture_input_queue,
         })?;
         let requested_duration = Duration::from_secs(u64::from(request.duration_seconds));
         let started = Instant::now();
@@ -309,11 +364,30 @@ impl PassiveLinuxTty {
     pub fn exclusive_status_for_test(&self) -> LcePassiveExclusiveModeStatus {
         self.exclusive_status
     }
+
+    #[cfg(test)]
+    pub fn opened_device_for_test(&self) -> LcePassiveOpenedDevice {
+        self.opened_device
+    }
+
+    #[cfg(test)]
+    pub fn line_disciplines_for_test(&self) -> (i32, i32) {
+        (self.line_discipline_before, self.line_discipline_after)
+    }
+
+    #[cfg(test)]
+    pub fn pre_capture_input_queue_for_test(&self) -> LcePassiveInputQueueObservation {
+        self.pre_capture_input_queue
+    }
 }
 
 fn validate_path(path: &OsStr) -> Result<(), PassiveLinuxError> {
     let bytes = path.as_bytes();
-    if bytes.is_empty() || bytes.contains(&0) || !Path::new(path).is_absolute() {
+    if bytes.is_empty()
+        || bytes.len() > MAX_PASSIVE_DEVICE_PATH_BYTES
+        || bytes.contains(&0)
+        || !Path::new(path).is_absolute()
+    {
         return Err(PassiveLinuxError::InvalidDevicePath);
     }
     Ok(())
@@ -331,16 +405,61 @@ fn query_exclusive(fd: &OwnedFd) -> Result<bool, std::io::Error> {
     }
 }
 
+fn query_line_discipline(fd: &OwnedFd) -> Result<i32, std::io::Error> {
+    let mut discipline = -1_i32;
+    // SAFETY: TIOCGETD writes one `int` to the valid pointer and does not
+    // consume or retain the borrowed tty descriptor.
+    let result = unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCGETD, &mut discipline) };
+    if result == -1 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(discipline)
+    }
+}
+
+fn require_n_tty(observed: i32) -> Result<(), PassiveLinuxError> {
+    if observed == LINUX_N_TTY_LINE_DISCIPLINE {
+        Ok(())
+    } else {
+        Err(PassiveLinuxError::UnsupportedLineDiscipline { observed })
+    }
+}
+
+fn observe_input_queue(fd: &OwnedFd) -> LcePassiveInputQueueObservation {
+    let mut bytes = 0_i32;
+    // SAFETY: TIOCINQ writes one `int` to the valid pointer and does not
+    // consume, flush, or retain the borrowed tty descriptor.
+    let result = unsafe { libc::ioctl(fd.as_raw_fd(), libc::TIOCINQ, &mut bytes) };
+    if result == -1 || bytes < 0 {
+        let raw_os_error = if result == -1 {
+            std::io::Error::last_os_error().raw_os_error()
+        } else {
+            None
+        };
+        LcePassiveInputQueueObservation::Unavailable { raw_os_error }
+    } else {
+        LcePassiveInputQueueObservation::Observed {
+            bytes: bytes as u32,
+        }
+    }
+}
+
 fn apply_capture_policy(settings: &mut Termios) -> Result<(), PassiveLinuxError> {
     settings.make_raw();
     settings.input_modes.remove(
-        InputModes::IXON
+        InputModes::IGNBRK
+            | InputModes::BRKINT
+            | InputModes::IGNPAR
+            | InputModes::PARMRK
+            | InputModes::INPCK
+            | InputModes::IXON
             | InputModes::IXOFF
             | InputModes::IXANY
             | InputModes::ICRNL
             | InputModes::INLCR
             | InputModes::IGNCR
-            | InputModes::ISTRIP,
+            | InputModes::ISTRIP
+            | InputModes::IUCLC,
     );
     settings.local_modes.remove(
         LocalModes::ICANON
@@ -383,6 +502,11 @@ fn normalize_termios(settings: &Termios) -> LceNormalizedTermios {
         0
     };
     LceNormalizedTermios {
+        ignbrk: settings.input_modes.contains(InputModes::IGNBRK),
+        brkint: settings.input_modes.contains(InputModes::BRKINT),
+        ignpar: settings.input_modes.contains(InputModes::IGNPAR),
+        parmrk: settings.input_modes.contains(InputModes::PARMRK),
+        inpck: settings.input_modes.contains(InputModes::INPCK),
         ixon: settings.input_modes.contains(InputModes::IXON),
         ixoff: settings.input_modes.contains(InputModes::IXOFF),
         ixany: settings.input_modes.contains(InputModes::IXANY),
@@ -390,6 +514,7 @@ fn normalize_termios(settings: &Termios) -> LceNormalizedTermios {
         inlcr: settings.input_modes.contains(InputModes::INLCR),
         igncr: settings.input_modes.contains(InputModes::IGNCR),
         istrip: settings.input_modes.contains(InputModes::ISTRIP),
+        iuclc: settings.input_modes.contains(InputModes::IUCLC),
         icanon: settings.local_modes.contains(LocalModes::ICANON),
         echo: settings.local_modes.contains(LocalModes::ECHO),
         echoe: settings.local_modes.contains(LocalModes::ECHOE),
