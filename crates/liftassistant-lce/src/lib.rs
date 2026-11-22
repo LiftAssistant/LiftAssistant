@@ -10,6 +10,7 @@
 //! native families.
 
 mod capture;
+mod passive_capture;
 mod terminal;
 mod transcript;
 
@@ -17,6 +18,15 @@ pub use capture::{
     FinalizedLceEvidenceCapture, LCE_CAPTURE_FORMAT_VERSION, LceCaptureDirection,
     LceCaptureEndReason, LceCaptureEntry, LceCaptureError, LceCaptureMarker, LceCaptureOrigin,
     LceCapturePayload,
+};
+pub use passive_capture::{
+    FinalizedLcePassiveCapture, LCE_PASSIVE_CAPTURE_FORMAT_VERSION, LceNormalizedTermios,
+    LcePassiveAccessMode, LcePassiveAcquisitionLayer, LcePassiveCaptureEndReason,
+    LcePassiveCaptureError, LcePassiveCaptureMetadata, LcePassiveCaptureRecorder,
+    LcePassiveExclusiveModeStatus, LcePassiveOpenPolicy, LcePassiveRxEntry, LcePassiveRxEntryKind,
+    MAX_PASSIVE_CAPTURE_DURATION_SECONDS, MAX_PASSIVE_CAPTURE_ENTRIES,
+    MAX_PASSIVE_CAPTURE_ENTRY_BYTES, MAX_PASSIVE_CAPTURE_RAW_BYTES,
+    MAX_PASSIVE_CAPTURE_SESSION_ID_BYTES, MAX_SERIALIZED_PASSIVE_CAPTURE_BYTES,
 };
 pub use terminal::{
     LceDataBits, LceDisconnectReason, LceInterfaceState, LceParity, LceReadOnlyQuery,

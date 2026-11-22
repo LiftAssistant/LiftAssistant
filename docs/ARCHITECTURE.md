@@ -130,7 +130,7 @@ Canonical `CarObservationUpdate` values enter Engine through one ingestion bound
 - `liftassistant-core`: deterministic vendor-neutral semantic decisions/state transitions.
 - `liftassistant-engine`: shared deterministic semantic orchestration, observation assembly/resolution, and operational state ownership.
 - `liftassistant-headless`: internal non-interactive read-only host/lifecycle and live integration proofs.
-- `liftassistant-lce`: bounded offline legacy-LCE parsing/mapping, typed observation-only terminal sessions, evidence replay and synthetic PTY validation with no real-device backend or control path.
+- `liftassistant-lce`: bounded offline legacy-LCE parsing/mapping, typed observation-only terminal sessions, raw/evaluated evidence replay, and a Linux-only experimental software-RX-only acquisition example with no device discovery or control path.
 - `liftassistant-rmf`: shared Open-RMF semantic mapping, explicit native/logical binding adapter, and Rust-native subscription-only transport.
 - `liftassistant-runtime`: semantic execution contract and runtime events.
 - `liftassistant-sim`: deterministic active simulator, native-semantic recorded/read-only backend, and recorded BACnet mapping experiment.
@@ -141,12 +141,14 @@ exists because Engine has a real second composition independent of the TUI. The 
 package exists because recorded and live paths now share protocol-specific mapping
 while transport dependencies must remain outside model, Core, and Engine. The LCE
 package remains Core/Engine-independent: its normal dependencies are model plus
-bounded capture serialization/integrity libraries, while Linux PTY support is
-test-only. Its terminal session has a closed `STA`/`CMD`/`MDE` observation
-allowlist and accepts no arbitrary TX bytes. There is no real serial backend,
+bounded capture serialization/integrity libraries, while Linux tty/PTy system
+interfaces remain example/dev-only. Its terminal session has a closed `STA`/`CMD`/`MDE` observation
+allowlist and accepts no arbitrary TX bytes. There is no production serial backend,
 device enumeration, LCEUIO/unlock behavior, bootloader profile or controller
-control path. None of these packages establishes a general service or adapter
-framework.
+control path. The separate R3A passive artifact records only exact chunks
+returned by Linux `read(2)` from an `O_RDONLY` tty plus open/termios evidence;
+it never feeds bytes into Engine or claims physical passivity. None of these
+packages establishes a general service or adapter framework.
 
 The internal LCE evidence artifact keeps construction-time interface knowledge
 as `initial_interface_state`; it is not a final or inferred state. R2.3
@@ -167,6 +169,16 @@ writes fail closed without automatic retry. `TRANSPORT_ACCEPTED_TX` is
 deliberately not named or treated as UART drain or physical-wire confirmation;
 stronger transport evidence belongs to a future real backend and must remain a
 distinct fact.
+
+The R3A Linux example is a bounded acquisition tool rather than an interpreted
+terminal session or production Host. It requires an explicit absolute path,
+opens with `O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC`, immediately requests
+`TIOCEXCL`, applies an explicit local raw-capture policy and never owns a TX,
+modem-line, reconnect, enumeration, Core, Engine or authority surface. Its
+artifact v1 names evidence `LINUX_TTY_DELIVERED_RX`; Linux open/close and driver
+side effects mean this software property is not evidence of a physically
+passive circuit. Physical RX-only construction and any first real controller
+session remain a separate HUMAN gate.
 Further packages still require real lifecycle/reuse pressure rather than speculative
 layering.
 

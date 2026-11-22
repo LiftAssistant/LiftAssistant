@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-11-21
+Updated: 2026-11-22
 
 ## Current milestone
 
@@ -385,6 +385,69 @@ not silently inherit an unstated library/OS flow-control default.
 LCEUIO, unlock, V-test navigation TX, controller probing/TX, live serial,
 passenger equipment or KONE write/control path was used or authorized. R3
 remains separate.`
+
+### LCE-R3A.0 — Software RX-only acquisition foundation
+
+**COMPLETE — `SOFTWARE_RX_ONLY_CAPTURE_FOUNDATION`; HUMAN-CHECK reached.**
+R3A.0 adds the bounded Linux acquisition software needed before a separately
+approved first field session. It does not perform or authorize that session.
+
+The Linux-only experimental example requires one explicit absolute tty path,
+uses `O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC`, immediately requests
+`TIOCEXCL`, verifies `TIOCGEXCL` when available, and checks the observed file
+status remains read-only/nonblocking/close-on-exec. It records normalized
+termios before and after applying an explicit local 9600/8N1 raw-capture policy.
+No input flush, modem-output ioctl, break, device enumeration, automatic
+reopen/reconnect, serial command, R2 typed query, Core/Engine path or authority
+change exists.
+
+The separate internal passive-capture v1 artifact preserves only bounded
+relative-time `LINUX_TTY_DELIVERED_RX` chunks returned by `read(2)`, requested
+profile/open policy, observed termios/exclusive evidence, end reason and
+SHA-256. Bounds are 128-byte session ID, 4096 entries, 64 KiB per entry, 1 MiB
+aggregate RX, 5 MiB serialized JSON and 1–300 seconds. EOF, peer hangup,
+read/poll error, duration or evidence limit ends the one-shot session without
+reconnect. SHA-256 is integrity evidence, not authentication. RX can be
+replayed offline through R1 and the existing R2.3 context classifier without
+generating TX.
+
+A real Linux kernel PTY regression proves exact banner/`?`/`VTEST1`/binary/
+CR-LF preservation, `F_GETFL & O_ACCMODE == O_RDONLY`, synthetic write
+`EBADF`, no tty echo/no peer-observed application TX, observed exclusive mode
+with a later ordinary open fenced, requested/observed 9600/8N1 raw settings,
+artifact round-trip/checksum/bounds, and offline `MainLevelBoundary` plus
+`VTestBoundary`. Compile-fail API checks cover absence of raw/string send,
+write, query, transmit and RTS/DTR methods.
+
+The field precheck records ModemManager/serial-getty/gpsd/brltty/other-opener
+risk and requires permission-limited inspection to remain `Unknown`. It never
+stops services or changes system configuration. Linux/USB serial drivers may
+still change RTS/DTR or device state during open/close, so software RX-only is
+not physical passivity.
+
+Closing local validation passes formatting, warning-free locked workspace
+all-target Clippy, 259 workspace tests with one expected ignored soak child,
+the exact Rust/Cargo 1.85.0 locked all-target workspace check, all nine TUI
+scenarios, all four non-live Headless scenarios, 46 focused LCE unit tests,
+four Linux PTY integration tests and nine compile-fail public-API regressions.
+The Linux example builds as an all-target workspace member. Normal dependencies
+are unchanged; Linux dev/example scope adds only direct `libc` for the missing
+`TIOCGEXCL` wrapper and expands existing `rustix` features for open/poll/kernel
+random/termios. `serialport`, Tokio, async runtime, udev and device enumeration
+remain absent.
+
+**Next gate:** `LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE`, requiring
+new HUMAN approval, HUMAN-verified physical RX-only signal construction,
+verified connector/pin evidence, no TX/RTS/DTR/controller-RX physical path,
+service/process isolation, explicit device selection and a re-audited open
+policy. Its first session remains observation only: no `STA`, `CMD`, `MDE`,
+V-test navigation, unlock or other serial TX.
+
+**Terminal boundary:** `HUMAN-CHECK — NO real /dev/ttyUSB* or /dev/ttyS* field
+session, CPU561, XDB1, LCEUIO, controller, passenger equipment, hardware TX,
+V-test navigation or unlock was used. REAL_FIELD_CAPTURE absent;
+CPU561_VALIDATED=false; LCEUIO_VALIDATED=false; PHYSICALLY_PASSIVE=false/
+unproven; LIVE_LCE_QUERY=false.`
 
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 

@@ -107,6 +107,25 @@ path. The historical 9600/8N1 profile and `?` boundary remain unvalidated on a
 real CPU561; see
 [`docs/LCE_RAW_TERMINAL_COMPATIBILITY.md`](docs/LCE_RAW_TERMINAL_COMPATIBILITY.md).
 
+Build and validate the Linux software-RX-only acquisition foundation without
+opening a real device:
+
+~~~bash
+cargo build -p liftassistant-lce --example lce_passive_serial_capture --locked
+cargo test -p liftassistant-lce --test passive_serial_capture --locked
+~~~
+
+The example requires an explicit absolute tty path at runtime, opens it
+`O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC`, requests exclusive mode, applies
+and records an explicit local 9600/8N1 raw-capture policy, and stores only
+bounded `TTY_DELIVERED_RX` chunks. The PTY regression proves the descriptor is
+read-only, a synthetic write fails `EBADF`, no tty echo reaches the peer, and
+offline R2.3 replay produces no query/TX. Software RX-only is not physical
+passivity: no real `/dev/tty*`, CPU561, XDB1, LCEUIO, controller, or passenger
+equipment was used, and the first real field capture remains a separate HUMAN
+gate documented in
+[`docs/LCE_R3A_PASSIVE_ACQUISITION.md`](docs/LCE_R3A_PASSIVE_ACQUISITION.md).
+
 Run the internal observation-adapter validation profiles:
 
 ~~~bash

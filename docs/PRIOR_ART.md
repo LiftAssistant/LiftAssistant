@@ -471,6 +471,42 @@ that LCE-specific gap. A future real serial transport must therefore make flow
 control an explicit evidence/configuration decision rather than silently
 inherit a platform default.
 
+### LCE-R3A.0 generic Linux tty acquisition finding
+
+R3A.0 compared the required software-RX-only property with the actual Linux
+interfaces instead of assuming that a general serial library or application
+intent establishes physical passivity:
+
+- current `serialport-rs` POSIX `TTYPort::open` uses `O_RDWR` and exposes
+  modem-line/break operations, so it is deliberately not the R3A backend:
+  https://github.com/serialport/serialport-rs/blob/main/src/posix/tty.rs
+- Linux `open(2)` distinguishes `O_RDONLY`, `O_NOCTTY`, `O_NONBLOCK`, and
+  `O_CLOEXEC`; `write(2)` returns `EBADF` for a descriptor not open for writing:
+  https://man7.org/linux/man-pages/man2/open.2.html and
+  https://man7.org/linux/man-pages/man2/write.2.html
+- Linux `TIOCEXCL` prevents later ordinary opens (subject to the documented
+  privileged exception) and `TIOCGEXCL` observes current exclusive mode. It
+  does not prove that no process opened the tty earlier:
+  https://man7.org/linux/man-pages/man2/TIOCEXCL.2const.html
+- POSIX/Linux termios configuration is valid on a terminal descriptor without
+  granting normal file-write access; the local line discipline, flow-control,
+  framing and `VMIN`/`VTIME` policy must be explicit:
+  https://man7.org/linux/man-pages/man3/tcsetattr.3.html
+- Linux tty-port open/close helpers and driver operations may manipulate
+  DTR/RTS and device state independently of application `write(2)` calls:
+  https://docs.kernel.org/driver-api/tty/tty_port.html
+- ModemManager documents eligible tty detection/probing and examples that open
+  a serial port and send `AT` probes. A separate daemon can therefore violate a
+  capture-only assumption unless the field precheck establishes isolation:
+  https://mobile-broadband.pages.freedesktop.org/docs/modemmanager/port-and-device-detection/
+
+These are `GENERIC_TRANSPORT_PRIOR`, not KONE protocol or CPU561 evidence. The
+durable design lesson is `application has no TX API != physical path is
+passive`. LiftAssistant records only `LINUX_TTY_DELIVERED_RX`, keeps flow
+control/CLOCAL/HUPCL/raw choices as local capture policy, forbids flush and
+modem-output operations, and leaves connector/pin/signal-direction proof to a
+separate HUMAN hardware gate.
+
 
 ## M4 semantic-boundary audit findings — reported/current/desired state
 

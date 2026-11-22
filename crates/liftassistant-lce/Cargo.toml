@@ -16,4 +16,5 @@ sha2 = "0.10"
 liftassistant-engine = { path = "../liftassistant-engine" }
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-rustix = { version = "0.38.44", features = ["pty", "termios"] }
+libc = "0.2"
+rustix = { version = "0.38.44", features = ["event", "fs", "pty", "rand", "termios"] }

@@ -1,4 +1,4 @@
-# LCE-R1/R2 raw terminal compatibility
+# LCE-R1/R2 interpretation and R3A acquisition compatibility
 
 Status: R1 `OFFLINE_TRANSCRIPT_PARTIAL`; R2 `PTY_READONLY_CONNECTOR_PARTIAL`
 
@@ -477,6 +477,31 @@ that context. If the controller is already in or independently exposes
 the R3 HUMAN gate. If entry into V-test is required, that navigation remains a
 new evidence/authorization decision rather than an implicit R2 behavior.
 
+## R3A.0 software RX-only acquisition boundary
+
+R3A.0 adds a separate Linux tty artifact before any field session. It does not
+put open/termios metadata into interpreted R2 capture v4. Passive capture v1
+records an explicit `O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC` policy,
+`TIOCEXCL`/`TIOCGEXCL` evidence, normalized termios before/after the local
+9600/8N1 raw policy, relative monotonic time, exact chunks returned by
+`read(2)`, bounded end reason, and SHA-256. The artifact can feed RX offline to
+R1 or R2.3, but acquisition never calls `issue_query` or owns a serial write
+handle.
+
+The Linux PTY proof establishes only software behavior: `F_GETFL` reports
+`O_RDONLY`, a synthetic-only write fails `EBADF`, no line-discipline echo
+returns to the peer, later ordinary open is fenced by exclusive mode, and
+`?`/`VTEST1` remain recognizable in RX-only offline replay. The arbitrary
+binary and CR/LF variants remain exact raw evidence. No PTY result can prove a
+physical controller cable is RX-only.
+
+The explicit no-flow-control, `CLOCAL=true`, `HUPCL=false`, raw-mode and
+`VMIN=VTIME=0` choices are `LOCAL_CAPTURE_POLICY`, not KONE requirements.
+There is no `tcflush`, modem-output ioctl, port scan, reconnect or daemon. Linux
+drivers and other userspace services may still affect the device. The full
+future field precheck and evidence limits are in
+[`LCE_R3A_PASSIVE_ACQUISITION.md`](LCE_R3A_PASSIVE_ACQUISITION.md).
+
 ## R2 result and next evidence gap
 
 R2 is complete at `PTY_READONLY_CONNECTOR_PARTIAL`. This means the typed
@@ -486,8 +511,9 @@ R1/R0/Engine path are implemented. It does not mean `REAL_LCE_COMPATIBLE`,
 `CPU561_VALIDATED`, `LCEUIO_VALIDATED`, `LIVE_SERIAL_VALIDATED` or
 `PRODUCTION_READY`.
 
-The next gate is `LCE-R3 — FIRST REAL READ-ONLY EVIDENCE ACQUISITION`. It needs
-separate HUMAN authorization and must begin with evidence preservation. Exact
+The next gate is `LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE`. It
+needs separate HUMAN authorization plus verified physical RX-only construction
+and system-service isolation. Exact
 firmware banner, prompt variants, echo, CR/LF, screen layout, timing,
 pagination, lock state and LCEUIO pass-through remain unknown. The reviewed
 historical LCE terminal profile establishes baud/data/parity/stop-bit and
@@ -498,7 +524,7 @@ unstated library or OS default.
 
 ## HUMAN gate
 
-No authorization follows from R1/R2 for real serial hardware, `/dev/tty*`,
+No authorization follows from R1/R2/R3A.0 for a real `/dev/tty*` field session,
 USB-RS232, XDB1, LCEUIO, CPU561 connection, unlock, live terminal queries,
 passenger equipment, controller probing or controller writes. Crossing any of
 those boundaries requires a separate explicit HUMAN decision.

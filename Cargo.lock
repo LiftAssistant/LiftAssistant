@@ -1344,6 +1344,7 @@ dependencies = [
 name = "liftassistant-lce"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "liftassistant-engine",
  "liftassistant-model",
  "rustix 0.38.44",

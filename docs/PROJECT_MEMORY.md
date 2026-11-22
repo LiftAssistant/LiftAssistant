@@ -328,6 +328,20 @@ session may capture and stop at main level rather than guessing how to enter a
 diagnostic context. Runtime flow control is not established by the current LCE
 evidence and must be explicit in any future real serial backend.
 
+LCE-R3A.0 establishes the final software foundation before a separately
+approved field capture. A Linux-only experimental example requires an explicit
+absolute tty path, opens it `O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC`,
+immediately requests exclusive mode, records termios before/after an explicit
+local 9600/8N1 raw-capture policy, and has no serial TX, modem-line, discovery,
+reconnect, Core, Engine or authority surface. A separate bounded artifact v1
+stores only relative-time `LINUX_TTY_DELIVERED_RX` chunks returned by
+`read(2)` and can replay RX offline through R1 or the R2.3 context classifier
+without issuing a query. SHA-256 is integrity only. Linux tty open/close and
+driver behavior can still affect RTS/DTR or device state, so software RX-only
+does not establish physical passivity. Any real CPU561/XDB1/LCEUIO/controller
+session still requires HUMAN-verified physical RX-only wiring, service/process
+isolation, and separate R3A.1 approval.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.
