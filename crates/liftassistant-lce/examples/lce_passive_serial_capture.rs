@@ -58,13 +58,10 @@ fn run() -> Result<(), Box<dyn Error>> {
     output.write_all(&bytes)?;
     output.sync_all()?;
     eprintln!(
-        "captured {} TTY_DELIVERED_RX entries ({} bytes), end={:?}, sha256={}",
+        "captured {} TTY_DELIVERED_RX entries ({} bytes), outcome={:?}, end={:?}, sha256={}",
         capture.entries().len(),
-        capture
-            .entries()
-            .iter()
-            .map(|entry| entry.bytes().len())
-            .sum::<usize>(),
+        capture.total_rx_bytes(),
+        capture.outcome(),
         capture.end_reason(),
         capture.sha256()
     );

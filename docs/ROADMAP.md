@@ -248,6 +248,29 @@ This milestone does not make LiftAssistant the safety controller. The lower vali
 
 Passenger-production write deployment remains HUMAN-REVIEW and may require external regulatory/safety assessment.
 
+## Independent LCE passive-evidence track
+
+This research track does not reopen M7 authority and does not inherit any
+write authorization from the production intent-gateway work. Its order is:
+
+1. **LCE-R3A.0.1 — Software RX-only artifact and tty evidence fidelity** —
+   complete using synthetic/Linux PTY evidence only;
+2. **LCE-R3A.0.2 — XDB1 serial-path evidence freeze** — complete; separates
+   direct KONE facts, high-confidence inference, unknowns and non-claims;
+3. **LCE-R3A.0.3 — Physical RX-only design contract** — design established;
+   no candidate construction or validation performed;
+4. **LCE-R3A.0.4 — Isolated bench validation** — future, not READY and
+   separately HUMAN-authorized;
+5. **HUMAN gate** — review the exact candidate, bench evidence, connector/
+   direction evidence and field conditions;
+6. **LCE-R3A.1 — First real passive capture** — future, not authorized.
+
+R3A.0.4 must use an isolated non-passenger bench and demonstrate the physical
+one-way property across lifecycle and reviewed fault cases. R3A.1 cannot be
+made READY merely because software tests or the design document pass. No stage
+in this track authorizes LCEUIO emulation, unlock, terminal navigation, active
+querying, baud probing or controller writes.
+
 ## M8 — Production Hardening
 
 Goal: make deployment, recovery, updates, compatibility and field debugging robust enough for sustained operation.

@@ -508,6 +508,21 @@ services may still affect the device. The full future field precheck and
 evidence limits are in
 [`LCE_R3A_PASSIVE_ACQUISITION.md`](LCE_R3A_PASSIVE_ACQUISITION.md).
 
+R3A.0.2 now freezes the CPU561/XDB1 evidence separately in
+[`LCE_R3A_XDB1_EVIDENCE.md`](LCE_R3A_XDB1_EVIDENCE.md). The frozen direct facts
+cover the documented CPU561 RS-232/XDB1 identity, the scoped three-conductor
+LCE CPU serial cable evidence, LCEUIO's active unlock behavior, the LOPCB-only
+switch distinction and the classic terminal's scoped 9600/8N1 profile. Exact
+CPU561 per-pin direction, universal baud and useful idle unsolicited output
+remain inference or unknown. Consequently a duration-complete zero-byte
+artifact is `PassiveSilent` and inconclusive, not a failed controller verdict.
+
+R3A.0.3 establishes only the
+[`physical RX-only design contract`](LCE_R3A_PHYSICAL_RX_ONLY_DESIGN.md). It
+requires a physical one-way boundary independent of application intent and
+defines future isolated bench evidence; it is not a schematic, field cable or
+authorization to connect passenger equipment.
+
 ## R2 result and next evidence gap
 
 R2 is complete at `PTY_READONLY_CONNECTOR_PARTIAL`. This means the typed
@@ -517,9 +532,9 @@ R1/R0/Engine path are implemented. It does not mean `REAL_LCE_COMPATIBLE`,
 `CPU561_VALIDATED`, `LCEUIO_VALIDATED`, `LIVE_SERIAL_VALIDATED` or
 `PRODUCTION_READY`.
 
-The next gate is `LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE`. It
-needs separate HUMAN authorization plus verified physical RX-only construction
-and system-service isolation. Exact
+The ordered pre-field gates are R3A.0.3 design contract, separately authorized
+R3A.0.4 isolated bench validation, then another HUMAN decision before
+`LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE`. Exact
 firmware banner, prompt variants, echo, CR/LF, screen layout, timing,
 pagination, lock state and LCEUIO pass-through remain unknown. The reviewed
 historical LCE terminal profile establishes baud/data/parity/stop-bit and
@@ -530,7 +545,8 @@ unstated library or OS default.
 
 ## HUMAN gate
 
-No authorization follows from R1/R2/R3A.0 for a real `/dev/tty*` field session,
-USB-RS232, XDB1, LCEUIO, CPU561 connection, unlock, live terminal queries,
-passenger equipment, controller probing or controller writes. Crossing any of
-those boundaries requires a separate explicit HUMAN decision.
+No authorization follows from R1/R2/R3A.0/R3A.0.2/R3A.0.3 for bench work, a
+real `/dev/tty*` field session, USB-RS232, XDB1, LCEUIO, CPU561 connection,
+unlock, live terminal queries, passenger equipment, controller probing or
+controller writes. Crossing any of those boundaries requires a separate
+explicit HUMAN decision.

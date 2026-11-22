@@ -185,6 +185,21 @@ mean this software property is not evidence of a kernel-TX-free or physically
 passive circuit. The example neither flushes input nor restores inherited tty
 state automatically. Physical RX-only construction and any first real
 controller session remain a separate HUMAN gate.
+
+The LCE pre-field physical boundary is now staged independently from the tty
+backend. R3A.0.2 freezes source-scoped CPU561/XDB1 facts without promoting the
+inferred per-pin direction or assuming unsolicited traffic. R3A.0.3 defines a
+physical one-way invariant: no host data, modem-control or power path may have
+intentional electrical capability to drive the controller-side receive path.
+That boundary must remain effective even if software writes, the OS probes a
+device, or an adapter toggles during initialization. It is upstream of the
+Linux backend and parser, and no parser or semantic layer can weaken it.
+R3A.0.3 is a design contract only; a candidate construction, isolated bench
+validation and any first real controller session remain separately
+HUMAN-authorized gates. A complete zero-byte passive interval is an
+inconclusive `PassiveSilent` evidence outcome, never an equipment or protocol
+fault by itself.
+
 Further packages still require real lifecycle/reuse pressure rather than speculative
 layering.
 

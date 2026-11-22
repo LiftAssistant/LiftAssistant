@@ -120,10 +120,12 @@ The example requires an explicit absolute tty path at runtime, opens it
 and records an explicit local 9600/8N1 raw-capture policy, and stores only
 bounded `TTY_DELIVERED_RX` chunks. The PTY regression proves the descriptor is
 read-only, a synthetic write fails `EBADF`, no tty echo reaches the peer, and
-offline R2.3 replay produces no query/TX. Software RX-only is not physical
-passivity: no real `/dev/tty*`, CPU561, XDB1, LCEUIO, controller, or passenger
-equipment was used, and the first real field capture remains a separate HUMAN
-gate documented in
+offline R2.3 replay produces no query/TX. A duration-complete zero-byte artifact
+is explicitly `PassiveSilent` and inconclusive. Software RX-only is not
+physical passivity: no real `/dev/tty*`, CPU561, XDB1, LCEUIO, controller, or
+passenger equipment was used. The XDB1 evidence freeze, physical RX-only design
+contract, future isolated bench validation and first real capture remain
+separate gates documented from
 [`docs/LCE_R3A_PASSIVE_ACQUISITION.md`](docs/LCE_R3A_PASSIVE_ACQUISITION.md).
 
 Run the internal observation-adapter validation profiles:

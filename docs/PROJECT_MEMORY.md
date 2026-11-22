@@ -355,6 +355,24 @@ was pristine. The path/device metadata is provenance evidence, not permanent
 adapter/controller identity. V1 is rejected, input is never flushed, and
 inherited tty state is not automatically restored.
 
+LCE-R3A.0.2 freezes the CPU561/XDB1 evidence before physical design. KONE
+sources directly establish a CPU561 RS-232 path, XDB1's serial-port identity,
+the scoped three-conductor LCE CPU cable evidence, LCEUIO's active unlock/
+communication role, the LOPCB-specific switch distinction and a classic
+terminal 9600/8N1 context. They do not directly establish the exact CPU561
+per-pin direction, a universal baud rate or useful unsolicited idle traffic.
+The conventional pin-direction reading remains a high-confidence inference,
+and passive silence remains inconclusive.
+
+LCE-R3A.0.3 is a design-only physical RX boundary. A future candidate must
+prevent host TX, modem-control and unintended power paths from reaching the
+controller-side receive path independently of software intent, and must
+survive reviewed lifecycle and fault cases in an isolated bench gate. No
+schematic or field wiring is approved; R3A.0.4 bench validation and R3A.1 first
+capture each require later HUMAN authorization. Passive artifact v2 remains
+unchanged; a derived `PassiveSilent` outcome means only that the full requested
+interval completed with no nonempty userspace read result.
+
 ## License
 
 No license selected. This remains a HUMAN-REVIEW decision.

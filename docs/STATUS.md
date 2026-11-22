@@ -436,12 +436,10 @@ are unchanged; Linux dev/example scope adds only direct `libc` for the missing
 random/termios. `serialport`, Tokio, async runtime, udev and device enumeration
 remain absent.
 
-**Next gate:** `LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE`, requiring
-new HUMAN approval, HUMAN-verified physical RX-only signal construction,
-verified connector/pin evidence, no TX/RTS/DTR/controller-RX physical path,
-service/process isolation, explicit device selection and a re-audited open
-policy. Its first session remains observation only: no `STA`, `CMD`, `MDE`,
-V-test navigation, unlock or other serial TX.
+**Subsequent gate refinement:** later HUMAN review inserted R3A.0.2 evidence
+freeze, R3A.0.3 design contract and separately authorized R3A.0.4 isolated
+bench validation before R3A.1 can be considered. R3A.0 itself did not authorize
+any of those physical stages.
 
 **Terminal boundary:** `HUMAN-CHECK — NO real /dev/ttyUSB* or /dev/ttyS* field
 session, CPU561, XDB1, LCEUIO, controller, passenger equipment, hardware TX,
@@ -495,11 +493,10 @@ compile-fail public-API regressions. Normal and Linux dev/example dependencies
 are unchanged; `serialport`, Tokio, async runtime, udev/device enumeration,
 Core/Engine changes and authority changes remain absent.
 
-**Next gate remains:** `LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE`,
-requiring separate HUMAN approval, verified physical RX-only construction,
-connector/signal-direction evidence, no capture TX/RTS/DTR/controller-RX
-physical path, service/process isolation, explicit tty identity and a reviewed
-acquisition policy.
+**Subsequent gate refinement:** R3A.0.2 must freeze connector/path evidence,
+R3A.0.3 must establish a physical RX-only design contract, and a separately
+authorized R3A.0.4 isolated bench must validate the exact candidate before a
+HUMAN may consider R3A.1. Software RX-only remains insufficient.
 
 **Terminal boundary:** `HUMAN-CHECK — NO real /dev/tty* field capture, CPU561,
 XDB1, LCEUIO, controller, passenger equipment, real TX, V-test navigation or
@@ -507,6 +504,63 @@ unlock was used. REAL_FIELD_CAPTURE absent; CPU561_VALIDATED=false;
 LCEUIO_VALIDATED=false; PHYSICALLY_PASSIVE=false/unproven;
 LIVE_LCE_QUERY=false; REAL_LCE_COMPATIBLE not claimed;
 LIVE_SERIAL_VALIDATED not claimed; PRODUCTION_READY not claimed.`
+
+### LCE-R3A.0.2 — XDB1 serial-path evidence freeze
+
+**COMPLETE — `EVIDENCE_FROZEN`; NO REAL-HARDWARE AUTHORIZATION.** The
+[authoritative matrix](LCE_R3A_XDB1_EVIDENCE.md) now separates `DIRECTLY
+CONFIRMED`, `STRONGLY SUPPORTED / HIGH-CONFIDENCE INFERENCE`, `UNKNOWN / NOT
+DEMONSTRATED` and `OUT OF SCOPE` claims before any physical design is accepted.
+
+KONE-origin evidence directly establishes an LCECPU561 RS-232 path, CPU561
+XDB1's serial-port identity, the scoped LCE CPU cable's conductors 2/3/5,
+LCEUIO's active unlock/communication role, the LOPCB-specific switch
+distinction and a classic LCE Terminal 9600/8N1 context. It does not directly
+establish a CPU561/XDB1-specific per-pin direction table. The conventional
+pin-2 CPU-RX / pin-3 CPU-TX / pin-5 signal-ground reading therefore remains a
+high-confidence inference, not a field wiring fact.
+
+Useful unsolicited idle traffic and a universal CPU561 XDB1 baud rate remain
+not demonstrated. A full requested interval with no nonempty userspace read now
+derives `PassiveSilent`; it is valid, inconclusive evidence and cannot diagnose
+wiring, baud, lock state, controller behavior or protocol shape. Early
+EOF/HUP/error with no bytes remains `EndedWithoutPayload`, while setup and
+artifact-integrity failures remain typed errors. This is derived from passive
+artifact v2 and does not alter its serialized format.
+
+### LCE-R3A.0.3 — Physical RX-only design contract
+
+**DESIGN CONTRACT ESTABLISHED — `BENCH_VALIDATION_NOT_PERFORMED`.** The
+[contract](LCE_R3A_PHYSICAL_RX_ONLY_DESIGN.md) defines one invariant: no host
+data, modem-control or unintended power path may have intentional electrical
+capability to drive the controller-side receive path. The physical boundary is
+separate from the Linux backend, raw artifact, offline analysis and canonical
+model, so a parser or software permission cannot create a transmit path.
+
+The threat model covers host UART/USB TX, DTR/RTS, adapter initialization,
+background probing, accidental writes, ground potential, unexpected power,
+adapter/component/cable faults, connector orientation, pin-interpretation
+error and future software regression. It defines only requirements and future
+isolated bench evidence. It provides no schematic, component selection, pin
+connection recipe, approved construction or live-elevator procedure.
+
+**Next possible stage:** `LCE-R3A.0.4 — ISOLATED BENCH VALIDATION`, separately
+HUMAN-authorized and currently **NOT READY**. R3A.1 remains behind another
+HUMAN gate after the exact candidate and bench evidence are reviewed.
+
+Closing validation passes format, locked warning-free workspace all-target
+Clippy, 264 workspace tests with one expected ignored soak child, the exact
+Rust/Cargo 1.85.0 locked all-target workspace check, the Linux example build,
+all nine TUI scenarios and all four non-live Headless scenarios. Focused LCE
+validation reports 51 unit tests, four Linux PTY integration tests and nine
+compile-fail public-API regressions. Dependency files, passive artifact v2,
+Core, Engine and authority are unchanged.
+
+**Terminal boundary:** `HUMAN-CHECK — NO real /dev/tty* access, USB-RS232,
+CPU561, XDB1, LCEUIO, controller, passenger equipment, controller or
+site-network interaction, hardware TX, terminal query, baud probe, V-test
+navigation or unlock was used. R3A.0.4 and R3A.1 were not started;
+PHYSICALLY_PASSIVE remains false/unproven.`
 
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 

@@ -549,6 +549,38 @@ explicit tty data-TX or modem-output operation. It does not mean
 kernel-stack-TX-free, driver-side-effect-free, raw-UART-equivalent, or
 physically passive.
 
+### LCE-R3A.0.2 XDB1 evidence-scope finding
+
+The pre-physical-design review used document identity and interface scope
+rather than filling gaps with generic RS-232 convention:
+
+- KONE *LCEUIO Dongle User Manual*, EDMS `884634en.A.2`, first issue
+  2006-02-28, sections 1–3, directly identifies an RS-232 connection to
+  LCECPU561 and makes LCEUIO an active interface-opening/communication tool:
+  <https://file.globalso.com/file_manage/1579/20240913/kone-service-tool.pdf>
+- KONE AM-11.65.040-USK (2022-09-27) independently names CPU561 XDB1 as the
+  serial port. This establishes connector identity, not a pinout.
+- later KONE LCEUIO material scopes the RS232-enable switch operation to
+  LOPCB rather than making it a CPU561 prerequisite. The publicly retrievable
+  JX15138 instruction provides corroborating conditional LOPCB steps:
+  <https://www.donati.it/sites/default/files/commerce_product/product/attachment/JX15138_Kone%20advanced%20Tool%28LCEUIO%29%20Instruction.pdf>
+- HUMAN-reviewed 2011 KONE CHN UIO/HyperTerminal training evidence identifies
+  conductors 2, 3 and 5 and the straight-through/crossed cable segments. The
+  source is recorded but not copied into Git.
+- the historical KONE-branded terminal instructions scope 9600/8N1, 2/3
+  crossing and PC-convention D-type signals to classic LCE Terminal use:
+  <https://www.scribd.com/document/379489546/LCE-Terminal-using-instructions-with-logo-KONE-pdf>
+
+The durable distinction is `documented connector/cable context != a
+CPU561-specific directional pin table`. The conventional reading of pin 2 as
+CPU receive, pin 3 as CPU transmit and pin 5 as signal ground remains a
+high-confidence inference until a CPU561/XDB1-specific source or qualified
+isolated measurement confirms it. The sources also do not demonstrate useful
+unsolicited idle output or a universal baud rate. Therefore a complete
+zero-byte passive capture is valid, inconclusive evidence rather than a reason
+to probe, unlock or diagnose a fault. The full claim/source matrix is in
+[`LCE_R3A_XDB1_EVIDENCE.md`](LCE_R3A_XDB1_EVIDENCE.md).
+
 
 ## M4 semantic-boundary audit findings — reported/current/desired state
 

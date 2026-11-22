@@ -261,6 +261,21 @@ pub enum LcePassiveCaptureEndReason {
     AggregateByteLimit,
 }
 
+/// A derived interpretation of a finalized passive acquisition.
+///
+/// This is deliberately not serialized into the versioned artifact. Setup
+/// failures occur before an artifact exists, and integrity failures occur
+/// while loading one. `PassiveSilent` means only that the complete requested
+/// interval elapsed without a nonempty userspace `read(2)` result. It does not
+/// diagnose wiring, baud rate, controller state, protocol behavior, or whether
+/// the physical source emitted anything.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LcePassiveCaptureOutcome {
+    BytesCaptured { entries: usize, bytes: usize },
+    PassiveSilent,
+    EndedWithoutPayload { reason: LcePassiveCaptureEndReason },
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct LcePassiveCaptureMetadata {
@@ -387,6 +402,31 @@ impl FinalizedLcePassiveCapture {
 
     pub fn entries(&self) -> &[LcePassiveRxEntry] {
         &self.body.entries
+    }
+
+    pub fn total_rx_bytes(&self) -> usize {
+        self.body
+            .entries
+            .iter()
+            .map(|entry| entry.bytes.len())
+            .sum()
+    }
+
+    pub fn outcome(&self) -> LcePassiveCaptureOutcome {
+        let bytes = self.total_rx_bytes();
+        if bytes != 0 {
+            return LcePassiveCaptureOutcome::BytesCaptured {
+                entries: self.body.entries.len(),
+                bytes,
+            };
+        }
+        if self.body.end_reason == LcePassiveCaptureEndReason::DurationElapsed {
+            LcePassiveCaptureOutcome::PassiveSilent
+        } else {
+            LcePassiveCaptureOutcome::EndedWithoutPayload {
+                reason: self.body.end_reason,
+            }
+        }
     }
 
     pub const fn ended_at_micros(&self) -> u64 {
@@ -965,6 +1005,13 @@ mod tests {
         let decoded = FinalizedLcePassiveCapture::from_json_bytes(&bytes).unwrap();
         assert_eq!(capture, decoded);
         assert_eq!(capture.sha256().len(), 64);
+        assert_eq!(
+            capture.outcome(),
+            LcePassiveCaptureOutcome::BytesCaptured {
+                entries: 3,
+                bytes: 23,
+            }
+        );
         let events = decoded.replay_r2_context().unwrap();
         assert!(
             events
@@ -975,6 +1022,39 @@ mod tests {
             events
                 .iter()
                 .any(|event| matches!(event, LceTerminalSessionEvent::VTestBoundary))
+        );
+    }
+
+    #[test]
+    fn completed_zero_byte_capture_is_passive_silent_not_failure() {
+        let capture = recorder()
+            .finalize(
+                Duration::from_secs(1),
+                LcePassiveCaptureEndReason::DurationElapsed,
+            )
+            .unwrap();
+        assert!(capture.entries().is_empty());
+        assert_eq!(capture.total_rx_bytes(), 0);
+        assert_eq!(capture.outcome(), LcePassiveCaptureOutcome::PassiveSilent);
+
+        let encoded = capture.to_json_bytes().unwrap();
+        assert!(!String::from_utf8_lossy(&encoded).contains("outcome"));
+        let decoded = FinalizedLcePassiveCapture::from_json_bytes(&encoded).unwrap();
+        assert_eq!(decoded, capture);
+        assert_eq!(decoded.outcome(), LcePassiveCaptureOutcome::PassiveSilent);
+        assert!(decoded.replay_r1().is_empty());
+    }
+
+    #[test]
+    fn early_zero_byte_end_is_not_promoted_to_passive_silent() {
+        let capture = recorder()
+            .finalize(Duration::ZERO, LcePassiveCaptureEndReason::EndOfFile)
+            .unwrap();
+        assert_eq!(
+            capture.outcome(),
+            LcePassiveCaptureOutcome::EndedWithoutPayload {
+                reason: LcePassiveCaptureEndReason::EndOfFile,
+            }
         );
     }
 

@@ -70,8 +70,12 @@ SHA-256 provides mutation detection only. It is not source authentication, a
 signature, or chain-of-custody proof. Major/minor identifies only the kernel
 character-device object represented by the opened descriptor during this
 acquisition; it is not permanent adapter, cable, CPU561, or controller
-identity. A zero-entry artifact means only that Linux delivered no tty RX bytes
-during the configured window.
+identity. A duration-complete zero-entry artifact derives the outcome
+`PassiveSilent`; this means only that Linux delivered no tty RX bytes during
+the configured window. An early EOF/HUP/error with no payload instead derives
+`EndedWithoutPayload`. Neither outcome diagnoses wiring, baud, interface lock,
+controller behavior or protocol shape. Setup failures and artifact-integrity
+failures remain errors outside a finalized-capture outcome.
 
 ## Linux open and termios policy
 
@@ -147,6 +151,18 @@ Its runtime arguments are exactly `--device <absolute-path> --output
 <new-file> --duration-seconds <1..300>`. The output is create-new. Running it
 against a real `/dev/tty*` was not authorized or performed in R3A.0.
 
+## Pre-field gates
+
+The [R3A.0.2 evidence freeze](LCE_R3A_XDB1_EVIDENCE.md) separates direct KONE
+facts from CPU561 pin-direction inference and unknown idle-output behavior. The
+[R3A.0.3 physical RX-only design contract](LCE_R3A_PHYSICAL_RX_ONLY_DESIGN.md)
+defines the one-way invariant and future verification requirements without
+providing a field wiring recipe. Neither document authorizes bench work or a
+real controller connection.
+
+R3A.0.4 remains a separately authorized isolated bench-validation stage. Only
+after a reviewed candidate survives that gate may a HUMAN consider R3A.1.
+
 ## FIELD_PRECHECK for a future R3A.1 session
 
 Before a real field open, a HUMAN must separately confirm all of the following:
@@ -176,7 +192,8 @@ device.
 ## Future HUMAN gate
 
 `LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE` requires separate
-HUMAN approval after the physical and system prechecks above. Its first session
-is observation only: no `STA`, `CMD`, `MDE`, V-test navigation, RETURN, Escape,
-Ctrl-C serial byte, unlock, or other TX. Silence, banner text, `?`, `VTEST1`,
-unknown bytes, and disconnect are all valid evidence outcomes.
+HUMAN approval after R3A.0.4 isolated bench validation and the physical/system
+prechecks above. Its first session is observation only: no `STA`, `CMD`, `MDE`,
+V-test navigation, RETURN, Escape, Ctrl-C serial byte, unlock, or other TX.
+Silence, banner text, `?`, `VTEST1`, unknown bytes, and disconnect are all valid
+evidence outcomes.
