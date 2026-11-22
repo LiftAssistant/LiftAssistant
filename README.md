@@ -113,15 +113,30 @@ opening a real device:
 ~~~bash
 cargo build -p liftassistant-lce --example lce_passive_serial_capture --locked
 cargo test -p liftassistant-lce --test passive_serial_capture --locked
+cargo run -p liftassistant-lce --example lce_passive_serial_capture --locked -- \
+  --plan \
+  --assurance software-rx-only \
+  --profile historical-9600-8n1 \
+  --device /deliberately/nonexistent/lce-plan-tty \
+  --output /tmp/lce-passive-capture.json \
+  --duration-seconds 30
 ~~~
 
-The example requires an explicit absolute tty path at runtime, opens it
+The example requires explicit `--assurance software-rx-only` and
+`--profile historical-9600-8n1` acknowledgements as well as an absolute tty
+path. `--plan` validates and prints the configuration without opening a device,
+creating the output, generating a session, issuing an ioctl, or probing the
+host. Real execution prints the weaker software-only assurance boundary before
+reserving a create-new output name and opening the tty. It then opens the tty
 `O_RDONLY | O_NOCTTY | O_NONBLOCK | O_CLOEXEC`, requests exclusive mode, applies
 and records an explicit local 9600/8N1 raw-capture policy, and stores only
 bounded `TTY_DELIVERED_RX` chunks. The PTY regression proves the descriptor is
 read-only, a synthetic write fails `EBADF`, no tty echo reaches the peer, and
 offline R2.3 replay produces no query/TX. A duration-complete zero-byte artifact
-is explicitly `PassiveSilent` and inconclusive. Software RX-only is not
+is explicitly `PassiveSilent` and inconclusive. A normal pre-commit error
+removes the reserved incomplete output; SIGKILL, abort, kernel crash, or power
+loss may still leave an empty or partial file, and only artifact parsing and
+integrity verification establish validity. Software RX-only is not
 physical passivity: no real `/dev/tty*`, CPU561, XDB1, LCEUIO, controller, or
 passenger equipment was used. The XDB1 evidence freeze is common to two
 explicit assurance paths: a separately HUMAN-approved software-RX-only field

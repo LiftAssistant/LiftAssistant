@@ -105,6 +105,28 @@ The project must not automatically stop services, kill processes, change udev
 rules, reconfigure the host, or alter controller configuration to satisfy these
 preconditions.
 
+## Hardened runner acknowledgement and planning
+
+The Linux runner requires the exact command-line acknowledgements
+`--assurance software-rx-only` and `--profile historical-9600-8n1` for both
+planning and execution. No physical-passivity value, generic serial profile,
+baud scan, fallback, or hardware discovery is available. `--plan` validates
+the normal arguments and prints the proposed path, output, duration, profile,
+and assurance without opening hardware, creating an artifact, issuing an
+ioctl, or inspecting services.
+
+Before real acquisition the runner prints
+`PHYSICALLY_PASSIVE=false/unproven`, reserves the output path without overwrite,
+and then enters the existing reviewed backend. Ordinary errors before complete
+artifact write and `sync_all` remove the reservation. This is evidence hygiene,
+not crash-atomic persistence: SIGKILL, abort, kernel crash, or power loss may
+leave an empty or partial file, which must fail or pass the normal artifact
+parser/integrity checks on its own merits.
+
+These guardrails establish `FIELD_RUNNER_HARDENED`; they do not authorize an
+R3A.1 session, approve any adapter/cable/tty, prove CPU561 compatibility, or
+upgrade the physical assurance level.
+
 ## First-session evidence semantics
 
 A future R3A.1 session under this contract is observation only.

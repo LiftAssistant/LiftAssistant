@@ -587,6 +587,46 @@ nothing may respond to silence by transmitting.
 approved `LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE` without first
 completing R3A.0.4. No real hardware access is authorized by this commit.
 
+### LCE-R3A software-RX-only field runner hardening
+
+**COMPLETE — `FIELD_RUNNER_HARDENED`; R3A.1 remains HUMAN_PENDING.** The
+Linux-only example now requires the exact acknowledgements `--assurance
+software-rx-only` and `--profile historical-9600-8n1`. Its `--plan` mode parses
+the full normal configuration and reports the assurance boundary while doing
+no session generation, output creation, tty open, ioctl, device enumeration,
+service inspection, or host mutation. Real execution prints
+`SOFTWARE_RX_ONLY=true`, `ACTIVE_PROTOCOL_TX=false`, and
+`PHYSICALLY_PASSIVE=false/unproven` before backend acquisition.
+
+Create-new/no-overwrite semantics remain ahead of the tty open. A local guard
+removes the reserved output after ordinary setup/acquisition/serialization/
+write/sync failure and commits only after complete write plus `sync_all`.
+SIGKILL, abort, kernel crash, and power loss remain outside that guarantee and
+may leave an empty or partial file; artifact v2 parsing and integrity remain
+authoritative. The acquisition backend, `PassiveSilent`, passive artifact v2,
+R2 artifact v4, dependencies, Core, Engine, authority, and the stronger
+R3A.0.3/R3A.0.4 path are unchanged.
+
+PTY/synthetic regressions cover required and invalid assurance/profile values,
+absolute path and duration validation, no-I/O plan behavior with a nonexistent
+absolute tty, no output creation in plan mode, incomplete-output cleanup,
+no-overwrite preservation, and the existing O_RDONLY/no-TX/no-echo/offline
+replay contract. No real `/dev/tty*`, USB-RS232, CPU561, XDB1, LCEUIO,
+controller, passenger equipment, or site network was accessed.
+
+Closing validation passes format, locked warning-free workspace all-target
+Clippy, 269 workspace tests with one expected ignored soak child, current
+toolchain locked all-target check, the exact Rust/Cargo 1.85.0 locked all-target
+check, 51 focused LCE unit tests, seven passive-runner/PTY integration tests,
+two typed-session PTY tests, nine compile-fail no-TX API regressions, the Linux
+example build, a manual no-I/O plan run, and diff/transport/dependency/artifact
+audits.
+
+**State:** `LCE SOFTWARE-RX-ONLY FIELD RUNNER HARDENED — R3A.1 REAL FIELD
+CAPTURE HUMAN_PENDING / NOT AUTHORIZED; SOFTWARE_RX_ONLY=true;
+ACTIVE_PROTOCOL_TX=false; PHYSICALLY_PASSIVE=false/unproven;
+REAL_LCE_COMPATIBLE=unproven.`
+
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 
 **COMPLETE (Simulator-only development slice).** This vertical slice connects

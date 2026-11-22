@@ -2,11 +2,15 @@
 
 #[path = "../examples/support/passive_linux.rs"]
 mod passive_linux;
+#[path = "../examples/support/passive_runner.rs"]
+mod passive_runner;
 
 use std::{
     ffi::CStr,
+    fs,
     os::unix::ffi::OsStrExt,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     thread,
     time::Duration,
 };
@@ -26,6 +30,168 @@ use rustix::{
 
 const SYNTHETIC_RX: &[u8] =
     b"synthetic banner\r\n?\r\nVTEST1\r\n\x00\xff\x11\x13binary\rline\nlast\r\n";
+static TEST_PATH_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn unique_test_path(label: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "liftassistant-lce-{label}-{}-{}",
+        std::process::id(),
+        TEST_PATH_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+fn runner_arguments() -> Vec<String> {
+    [
+        "--assurance",
+        "software-rx-only",
+        "--profile",
+        "historical-9600-8n1",
+        "--device",
+        "/nonexistent/liftassistant-lce-tty",
+        "--output",
+        "/tmp/liftassistant-lce-capture.json",
+        "--duration-seconds",
+        "1",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect()
+}
+
+fn remove_argument_pair(arguments: &mut Vec<String>, name: &str) {
+    let index = arguments
+        .iter()
+        .position(|argument| argument == name)
+        .unwrap();
+    arguments.drain(index..=index + 1);
+}
+
+fn replace_argument_value(arguments: &mut [String], name: &str, value: &str) {
+    let index = arguments
+        .iter()
+        .position(|argument| argument == name)
+        .unwrap();
+    arguments[index + 1] = value.to_owned();
+}
+
+#[test]
+fn runner_requires_the_single_software_assurance_and_historical_profile() {
+    let mut missing_assurance = runner_arguments();
+    remove_argument_pair(&mut missing_assurance, "--assurance");
+    assert!(
+        passive_runner::parse_arguments(missing_assurance)
+            .unwrap_err()
+            .to_string()
+            .contains("missing --assurance")
+    );
+
+    let mut invalid_assurance = runner_arguments();
+    replace_argument_value(&mut invalid_assurance, "--assurance", "physical-rx-only");
+    assert!(
+        passive_runner::parse_arguments(invalid_assurance)
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported --assurance")
+    );
+
+    let mut missing_profile = runner_arguments();
+    remove_argument_pair(&mut missing_profile, "--profile");
+    assert!(
+        passive_runner::parse_arguments(missing_profile)
+            .unwrap_err()
+            .to_string()
+            .contains("missing --profile")
+    );
+
+    let mut invalid_profile = runner_arguments();
+    replace_argument_value(&mut invalid_profile, "--profile", "115200-8n1");
+    assert!(
+        passive_runner::parse_arguments(invalid_profile)
+            .unwrap_err()
+            .to_string()
+            .contains("unsupported --profile")
+    );
+}
+
+#[test]
+fn runner_keeps_absolute_device_and_duration_bounds() {
+    let mut relative_device = runner_arguments();
+    replace_argument_value(&mut relative_device, "--device", "ttyUSB0");
+    assert!(
+        passive_runner::parse_arguments(relative_device)
+            .unwrap_err()
+            .to_string()
+            .contains("absolute path")
+    );
+
+    for invalid_duration in ["0", "301"] {
+        let mut arguments = runner_arguments();
+        replace_argument_value(&mut arguments, "--duration-seconds", invalid_duration);
+        assert!(
+            passive_runner::parse_arguments(arguments)
+                .unwrap_err()
+                .to_string()
+                .contains("1..=300")
+        );
+    }
+}
+
+#[test]
+fn runner_plan_validates_configuration_without_opening_or_creating_files() {
+    let output_path = unique_test_path("plan");
+    let mut arguments = runner_arguments();
+    replace_argument_value(
+        &mut arguments,
+        "--device",
+        "/deliberately/nonexistent/lce-plan-tty",
+    );
+    replace_argument_value(&mut arguments, "--output", output_path.to_str().unwrap());
+    arguments.push("--plan".to_owned());
+
+    let parsed = passive_runner::parse_arguments(arguments.clone()).unwrap();
+    let plan = passive_runner::plan_summary(&parsed);
+    assert!(plan.contains("mode: PLAN_ONLY"));
+    assert!(plan.contains("profile: historical-9600-8n1"));
+    assert!(plan.contains("assurance: SOFTWARE_RX_ONLY"));
+    assert!(plan.contains("active_protocol_tx: false"));
+    assert!(plan.contains("physically_passive: false/unproven"));
+    assert!(plan.contains("real_hardware_opened: false"));
+
+    passive_runner::run_with_arguments(arguments).unwrap();
+    assert!(!output_path.exists());
+}
+
+#[test]
+fn runner_removes_reserved_output_after_normal_acquisition_error() {
+    let output_path = unique_test_path("cleanup");
+    let mut arguments = runner_arguments();
+    replace_argument_value(
+        &mut arguments,
+        "--device",
+        "/deliberately/nonexistent/lce-execution-tty",
+    );
+    replace_argument_value(&mut arguments, "--output", output_path.to_str().unwrap());
+
+    assert!(passive_runner::run_with_arguments(arguments).is_err());
+    assert!(!output_path.exists());
+}
+
+#[test]
+fn runner_preserves_existing_output_before_acquisition() {
+    let output_path = unique_test_path("no-overwrite");
+    fs::write(&output_path, b"existing evidence").unwrap();
+    let mut arguments = runner_arguments();
+    replace_argument_value(
+        &mut arguments,
+        "--device",
+        "/deliberately/nonexistent/lce-execution-tty",
+    );
+    replace_argument_value(&mut arguments, "--output", output_path.to_str().unwrap());
+
+    assert!(passive_runner::run_with_arguments(arguments).is_err());
+    assert_eq!(fs::read(&output_path).unwrap(), b"existing evidence");
+    fs::remove_file(output_path).unwrap();
+}
 
 fn write_all(fd: &impl std::os::fd::AsFd, mut bytes: &[u8]) {
     while !bytes.is_empty() {

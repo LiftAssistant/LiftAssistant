@@ -160,8 +160,24 @@ cargo build -p liftassistant-lce --example lce_passive_serial_capture --locked
 ```
 
 Its runtime arguments are exactly `--device <absolute-path> --output
-<new-file> --duration-seconds <1..300>`. The output is create-new. Running it
-against a real `/dev/tty*` was not authorized or performed in R3A.0.
+<new-file> --duration-seconds <1..300> --assurance software-rx-only --profile
+historical-9600-8n1`, plus the optional `--plan` flag. Both plan and execution
+require the assurance and profile acknowledgements; there are no other
+assurance/profile values, generic serial settings, fallback, or auto-detection.
+Plan mode validates and prints the complete configuration but does not create
+the output, generate a session, open a tty, issue an ioctl, enumerate devices,
+or run host/service checks.
+
+Real execution prints `SOFTWARE_RX_ONLY=true`, `ACTIVE_PROTOCOL_TX=false`, and
+`PHYSICALLY_PASSIVE=false/unproven` before backend acquisition. It reserves the
+output with create-new semantics before opening the tty. A local cleanup guard
+removes that reserved path when an ordinary setup, acquisition, serialization,
+write, or sync error returns before commit; successful commit follows complete
+write plus `sync_all`. This is not crash-atomic: SIGKILL, process abort, kernel
+crash, or power loss can leave an empty or partial file. File existence is not
+capture validity; bounded parsing and SHA-256 integrity verification remain
+authoritative. Running the example against a real `/dev/tty*` was not
+authorized or performed in R3A.0 or this hardening pass.
 
 ## Pre-field assurance split
 
