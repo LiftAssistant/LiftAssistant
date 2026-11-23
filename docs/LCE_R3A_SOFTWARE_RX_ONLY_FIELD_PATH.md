@@ -16,7 +16,8 @@ assurance statement for this path is:
 
 ```text
 SOFTWARE_RX_ONLY=true
-ACTIVE_PROTOCOL_TX=false
+APPLICATION_PROTOCOL_TX_REQUESTED=false
+KERNEL_DRIVER_TX_FREE=false/unproven
 PHYSICALLY_PASSIVE=false/unproven
 REAL_LCE_COMPATIBLE=unproven
 ```
@@ -115,17 +116,20 @@ the normal arguments and prints the proposed path, output, duration, profile,
 and assurance without opening hardware, creating an artifact, issuing an
 ioctl, or inspecting services.
 
-Before real acquisition the runner prints
-`PHYSICALLY_PASSIVE=false/unproven`, reserves the output path without overwrite,
-and then enters the existing reviewed backend. Ordinary errors before complete
-artifact write and `sync_all` remove the reservation. This is evidence hygiene,
-not crash-atomic persistence: SIGKILL, abort, kernel crash, or power loss may
-leave an empty or partial file, which must fail or pass the normal artifact
-parser/integrity checks on its own merits.
+Before real acquisition the runner states that the LiftAssistant application
+requested no controller protocol TX while
+`KERNEL_DRIVER_TX_FREE=false/unproven` and
+`PHYSICALLY_PASSIVE=false/unproven`. It reserves the output path without
+overwrite and then enters the existing reviewed backend. Ordinary errors
+before complete artifact write and `sync_all` remove the reservation. This is
+evidence hygiene, not crash-atomic persistence: SIGKILL, abort, kernel crash,
+or power loss may leave an empty or partial file, which must fail or pass the
+normal artifact parser/integrity checks on its own merits.
 
-These guardrails establish `FIELD_RUNNER_HARDENED`; they do not authorize an
-R3A.1 session, approve any adapter/cable/tty, prove CPU561 compatibility, or
-upgrade the physical assurance level.
+These guardrails and the final bounded software correctness pass establish
+`PRE_FIELD_SOFTWARE_CORRECTNESS_COMPLETE`; they do not authorize an R3A.1
+session, approve any adapter/cable/tty, prove CPU561 compatibility, or upgrade
+the physical assurance level.
 
 ## First-session evidence semantics
 

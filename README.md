@@ -136,10 +136,13 @@ offline R2.3 replay produces no query/TX. A duration-complete zero-byte artifact
 is explicitly `PassiveSilent` and inconclusive. A normal pre-commit error
 removes the reserved incomplete output; SIGKILL, abort, kernel crash, or power
 loss may still leave an empty or partial file, and only artifact parsing and
-integrity verification establish validity. Software RX-only is not
-physical passivity: no real `/dev/tty*`, CPU561, XDB1, LCEUIO, controller, or
-passenger equipment was used. The XDB1 evidence freeze is common to two
-explicit assurance paths: a separately HUMAN-approved software-RX-only field
+integrity verification establish validity. The precise assurance claim is that
+the LiftAssistant application requested no controller protocol TX;
+kernel/line-discipline or USB-serial driver TX freedom remains unproven.
+Software RX-only is not physical passivity: no real `/dev/tty*`, CPU561, XDB1,
+LCEUIO, controller, or passenger equipment was used. The XDB1 evidence freeze
+is common to two explicit assurance paths: a separately HUMAN-approved
+software-RX-only field
 observation may use a reviewed normal RS-232 interface while retaining
 `PHYSICALLY_PASSIVE=false/unproven`; the R3A.0.3/R3A.0.4 physical RX-only
 design/bench path remains the stronger prerequisite for a physical-passivity

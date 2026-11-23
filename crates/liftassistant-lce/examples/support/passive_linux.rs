@@ -282,16 +282,20 @@ impl PassiveLinuxTty {
                 &self.fd,
                 PollFlags::IN | PollFlags::HUP | PollFlags::ERR,
             )];
-            if let Err(error) = poll(&mut poll_fds, timeout_millis) {
-                let at = started.elapsed().min(requested_duration);
-                return recorder
-                    .finalize(
-                        at,
-                        LcePassiveCaptureEndReason::ReadError {
-                            raw_os_error: Some(error.raw_os_error()),
-                        },
-                    )
-                    .map_err(Into::into);
+            match poll(&mut poll_fds, timeout_millis) {
+                Ok(_) => {}
+                Err(Errno::INTR) => continue,
+                Err(error) => {
+                    let at = started.elapsed().min(requested_duration);
+                    return recorder
+                        .finalize(
+                            at,
+                            LcePassiveCaptureEndReason::ReadError {
+                                raw_os_error: Some(error.raw_os_error()),
+                            },
+                        )
+                        .map_err(Into::into);
+                }
             }
 
             if started.elapsed() >= requested_duration {

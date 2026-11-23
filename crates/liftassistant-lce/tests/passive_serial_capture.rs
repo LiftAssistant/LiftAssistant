@@ -12,12 +12,12 @@ use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use liftassistant_lce::{
-    FinalizedLcePassiveCapture, LINUX_N_TTY_LINE_DISCIPLINE, LceCaptureOrigin,
-    LcePassiveAccessMode, LcePassiveCaptureEndReason, LcePassiveCaptureError,
+    FinalizedLcePassiveCapture, LCE_PASSIVE_CAPTURE_FORMAT_VERSION, LINUX_N_TTY_LINE_DISCIPLINE,
+    LceCaptureOrigin, LcePassiveAccessMode, LcePassiveCaptureEndReason, LcePassiveCaptureError,
     LcePassiveExclusiveModeStatus, LcePassiveInputQueueObservation, LceTerminalSessionEvent,
 };
 use passive_linux::{PassiveLinuxRequest, PassiveLinuxTty};
@@ -114,6 +114,50 @@ fn runner_requires_the_single_software_assurance_and_historical_profile() {
 }
 
 #[test]
+fn runner_rejects_duplicates_of_every_singleton_argument() {
+    let duplicate_values = [
+        ("--assurance", "software-rx-only"),
+        ("--profile", "historical-9600-8n1"),
+        ("--device", "/nonexistent/second-liftassistant-lce-tty"),
+        ("--output", "/tmp/second-liftassistant-lce-capture.json"),
+        ("--duration-seconds", "2"),
+    ];
+    for (argument, value) in duplicate_values {
+        let mut arguments = runner_arguments();
+        arguments.extend([argument.to_owned(), value.to_owned()]);
+        assert_eq!(
+            passive_runner::parse_arguments(arguments)
+                .unwrap_err()
+                .to_string(),
+            format!("duplicate argument {argument:?}")
+        );
+    }
+
+    let mut contradictory_assurance = runner_arguments();
+    replace_argument_value(
+        &mut contradictory_assurance,
+        "--assurance",
+        "physical-rx-only",
+    );
+    contradictory_assurance.extend(["--assurance".to_owned(), "software-rx-only".to_owned()]);
+    assert_eq!(
+        passive_runner::parse_arguments(contradictory_assurance)
+            .unwrap_err()
+            .to_string(),
+        "duplicate argument \"--assurance\""
+    );
+
+    let mut duplicate_plan = runner_arguments();
+    duplicate_plan.extend(["--plan".to_owned(), "--plan".to_owned()]);
+    assert_eq!(
+        passive_runner::parse_arguments(duplicate_plan)
+            .unwrap_err()
+            .to_string(),
+        "duplicate argument \"--plan\""
+    );
+}
+
+#[test]
 fn runner_keeps_absolute_device_and_duration_bounds() {
     let mut relative_device = runner_arguments();
     replace_argument_value(&mut relative_device, "--device", "ttyUSB0");
@@ -153,8 +197,11 @@ fn runner_plan_validates_configuration_without_opening_or_creating_files() {
     assert!(plan.contains("mode: PLAN_ONLY"));
     assert!(plan.contains("profile: historical-9600-8n1"));
     assert!(plan.contains("assurance: SOFTWARE_RX_ONLY"));
-    assert!(plan.contains("active_protocol_tx: false"));
-    assert!(plan.contains("physically_passive: false/unproven"));
+    assert!(plan.contains("SOFTWARE_RX_ONLY=true"));
+    assert!(plan.contains("APPLICATION_PROTOCOL_TX_REQUESTED=false"));
+    assert!(plan.contains("KERNEL_DRIVER_TX_FREE=false/unproven"));
+    assert!(plan.contains("PHYSICALLY_PASSIVE=false/unproven"));
+    assert!(plan.contains("REAL_LCE_COMPATIBLE=unproven"));
     assert!(plan.contains("real_hardware_opened: false"));
 
     passive_runner::run_with_arguments(arguments).unwrap();
@@ -190,6 +237,63 @@ fn runner_preserves_existing_output_before_acquisition() {
 
     assert!(passive_runner::run_with_arguments(arguments).is_err());
     assert_eq!(fs::read(&output_path).unwrap(), b"existing evidence");
+    fs::remove_file(output_path).unwrap();
+}
+
+#[test]
+fn runner_commits_a_parseable_passive_artifact_from_a_synthetic_pty() {
+    const RUNNER_RX: &[u8] = b"LIFTASSISTANT_SYNTHETIC runner evidence\r\n";
+
+    let (master, slave_path) = pty_master_and_path();
+    let output_path = unique_test_path("runner-success");
+    let mut arguments = runner_arguments();
+    replace_argument_value(&mut arguments, "--device", slave_path.to_str().unwrap());
+    replace_argument_value(&mut arguments, "--output", output_path.to_str().unwrap());
+
+    let runner = thread::spawn(move || passive_runner::run_with_arguments(arguments).unwrap());
+    let policy_deadline = Instant::now() + Duration::from_millis(500);
+    loop {
+        let settings = tcgetattr(&master).unwrap();
+        if !settings
+            .local_modes
+            .contains(LocalModes::ECHO | LocalModes::ICANON)
+            && settings.input_speed() == 9600
+            && settings.output_speed() == 9600
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < policy_deadline,
+            "runner did not apply its capture policy before the PTY test deadline"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    write_all(&master, RUNNER_RX);
+    thread::sleep(Duration::from_millis(50));
+    let mut unexpected_tx = [0_u8; 128];
+    assert_eq!(
+        rustix::io::read(&master, &mut unexpected_tx),
+        Err(Errno::AGAIN)
+    );
+    runner.join().unwrap();
+
+    let encoded = fs::read(&output_path).unwrap();
+    let encoded_value = serde_json::from_slice::<serde_json::Value>(&encoded).unwrap();
+    assert_eq!(
+        encoded_value["capture"]["format_version"],
+        LCE_PASSIVE_CAPTURE_FORMAT_VERSION
+    );
+    let capture = FinalizedLcePassiveCapture::from_json_bytes(&encoded).unwrap();
+    assert_eq!(capture.origin(), LceCaptureOrigin::FieldEvidenceCandidate);
+    assert_eq!(
+        capture
+            .entries()
+            .iter()
+            .flat_map(|entry| entry.bytes().iter().copied())
+            .collect::<Vec<_>>(),
+        RUNNER_RX
+    );
     fs::remove_file(output_path).unwrap();
 }
 

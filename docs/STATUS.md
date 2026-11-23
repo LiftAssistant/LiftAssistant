@@ -587,16 +587,29 @@ nothing may respond to silence by transmitting.
 approved `LCE-R3A.1 — FIRST REAL SOFTWARE-RX-ONLY FIELD CAPTURE` without first
 completing R3A.0.4. No real hardware access is authorized by this commit.
 
-### LCE-R3A software-RX-only field runner hardening
+### LCE-R3A final pre-field software correctness
 
-**COMPLETE — `FIELD_RUNNER_HARDENED`; R3A.1 remains HUMAN_PENDING.** The
+**COMPLETE — `PRE_FIELD_SOFTWARE_CORRECTNESS_COMPLETE`; R3A.1 remains
+HUMAN_PENDING.** The
 Linux-only example now requires the exact acknowledgements `--assurance
 software-rx-only` and `--profile historical-9600-8n1`. Its `--plan` mode parses
 the full normal configuration and reports the assurance boundary while doing
 no session generation, output creation, tty open, ioctl, device enumeration,
-service inspection, or host mutation. Real execution prints
-`SOFTWARE_RX_ONLY=true`, `ACTIVE_PROTOCOL_TX=false`, and
-`PHYSICALLY_PASSIVE=false/unproven` before backend acquisition.
+service inspection, or host mutation. All six singleton options (`--assurance`,
+`--profile`, `--device`, `--output`, `--duration-seconds`, and `--plan`) reject
+a second occurrence immediately, so a later valid value cannot hide an earlier
+contradictory one.
+
+Real execution now states the evidence scope exactly:
+`SOFTWARE_RX_ONLY=true`, `APPLICATION_PROTOCOL_TX_REQUESTED=false`,
+`KERNEL_DRIVER_TX_FREE=false/unproven`,
+`PHYSICALLY_PASSIVE=false/unproven`, and `REAL_LCE_COMPATIBLE=unproven`.
+This says the application requested no controller protocol TX; it does not
+claim kernel, line-discipline, USB-serial driver, or wire silence. Interrupted
+`poll(2)` waits retry on the same monotonic interval and deadline; other poll
+errors keep the existing bounded `ReadError` finalization. The EINTR branch is
+kept direct rather than adding a poll abstraction or fragile process-signal
+timing solely for test injection.
 
 Create-new/no-overwrite semantics remain ahead of the tty open. A local guard
 removes the reserved output after ordinary setup/acquisition/serialization/
@@ -608,23 +621,28 @@ R2 artifact v4, dependencies, Core, Engine, authority, and the stronger
 R3A.0.3/R3A.0.4 path are unchanged.
 
 PTY/synthetic regressions cover required and invalid assurance/profile values,
-absolute path and duration validation, no-I/O plan behavior with a nonexistent
-absolute tty, no output creation in plan mode, incomplete-output cleanup,
-no-overwrite preservation, and the existing O_RDONLY/no-TX/no-echo/offline
-replay contract. No real `/dev/tty*`, USB-RS232, CPU561, XDB1, LCEUIO,
-controller, passenger equipment, or site network was accessed.
+duplicates of every singleton option, absolute path and duration validation,
+no-I/O plan behavior with a nonexistent absolute tty, no output creation in
+plan mode, incomplete-output cleanup, no-overwrite preservation, and the
+existing O_RDONLY/no-TX/no-echo/offline replay contract. A runner-level PTY
+success test now covers parsing through fresh session, acquisition, finalized
+artifact serialization, complete write, sync, commit, v2 parse/integrity
+verification, exact synthetic RX, and absence of unexpected master-side bytes.
+No real `/dev/tty*`, USB-RS232, CPU561, XDB1, LCEUIO, controller, passenger
+equipment, or site network was accessed.
 
 Closing validation passes format, locked warning-free workspace all-target
-Clippy, 269 workspace tests with one expected ignored soak child, current
+Clippy, 271 workspace tests with one expected ignored soak child, current
 toolchain locked all-target check, the exact Rust/Cargo 1.85.0 locked all-target
-check, 51 focused LCE unit tests, seven passive-runner/PTY integration tests,
+check, 51 focused LCE unit tests, nine passive-runner/PTY integration tests,
 two typed-session PTY tests, nine compile-fail no-TX API regressions, the Linux
 example build, a manual no-I/O plan run, and diff/transport/dependency/artifact
 audits.
 
-**State:** `LCE SOFTWARE-RX-ONLY FIELD RUNNER HARDENED — R3A.1 REAL FIELD
-CAPTURE HUMAN_PENDING / NOT AUTHORIZED; SOFTWARE_RX_ONLY=true;
-ACTIVE_PROTOCOL_TX=false; PHYSICALLY_PASSIVE=false/unproven;
+**State:** `LCE PRE-FIELD SOFTWARE CORRECTNESS PASS COMPLETE — OFF-ELEVATOR
+ADAPTER/PLATFORM VALIDATION NEXT; R3A.1 REAL FIELD CAPTURE HUMAN_PENDING / NOT
+AUTHORIZED; SOFTWARE_RX_ONLY=true; APPLICATION_PROTOCOL_TX_REQUESTED=false;
+KERNEL_DRIVER_TX_FREE=false/unproven; PHYSICALLY_PASSIVE=false/unproven;
 REAL_LCE_COMPATIBLE=unproven.`
 
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow

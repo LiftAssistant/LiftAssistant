@@ -168,16 +168,22 @@ Plan mode validates and prints the complete configuration but does not create
 the output, generate a session, open a tty, issue an ioctl, enumerate devices,
 or run host/service checks.
 
-Real execution prints `SOFTWARE_RX_ONLY=true`, `ACTIVE_PROTOCOL_TX=false`, and
-`PHYSICALLY_PASSIVE=false/unproven` before backend acquisition. It reserves the
-output with create-new semantics before opening the tty. A local cleanup guard
-removes that reserved path when an ordinary setup, acquisition, serialization,
-write, or sync error returns before commit; successful commit follows complete
-write plus `sync_all`. This is not crash-atomic: SIGKILL, process abort, kernel
-crash, or power loss can leave an empty or partial file. File existence is not
-capture validity; bounded parsing and SHA-256 integrity verification remain
-authoritative. Running the example against a real `/dev/tty*` was not
-authorized or performed in R3A.0 or this hardening pass.
+Real execution prints `SOFTWARE_RX_ONLY=true`,
+`APPLICATION_PROTOCOL_TX_REQUESTED=false`,
+`KERNEL_DRIVER_TX_FREE=false/unproven`,
+`PHYSICALLY_PASSIVE=false/unproven`, and
+`REAL_LCE_COMPATIBLE=unproven` before backend acquisition. This means only that
+the LiftAssistant application requested no controller protocol TX; it neither
+proves nor asserts that the kernel, line discipline, USB-serial driver, or wire
+emitted nothing. The runner reserves the output with create-new semantics
+before opening the tty. A local cleanup guard removes that reserved path when
+an ordinary setup, acquisition, serialization, write, or sync error returns
+before commit; successful commit follows complete write plus `sync_all`. This
+is not crash-atomic: SIGKILL, process abort, kernel crash, or power loss can
+leave an empty or partial file. File existence is not capture validity;
+bounded parsing and SHA-256 integrity verification remain authoritative.
+Running the example against a real `/dev/tty*` was not authorized or performed
+in R3A.0 or these hardening passes.
 
 ## Pre-field assurance split
 
@@ -208,9 +214,11 @@ Before a real field open, a HUMAN must separately confirm all of the following:
 2. the adapter is a real RS-232 interface appropriate to the documented port,
    not a TTL-UART-level adapter, and its exact identity is recorded;
 3. the operator explicitly accepts the residual assurance state
-   `SOFTWARE_RX_ONLY=true`, `PHYSICALLY_PASSIVE=false/unproven`: the adapter
-   may have a connected TX line, idle line-driver state, modem-control behavior,
-   and driver/open/close side effects even though LiftAssistant exposes no TX;
+   `SOFTWARE_RX_ONLY=true`, `APPLICATION_PROTOCOL_TX_REQUESTED=false`,
+   `KERNEL_DRIVER_TX_FREE=false/unproven`, and
+   `PHYSICALLY_PASSIVE=false/unproven`: the adapter may have a connected TX
+   line, idle line-driver state, modem-control behavior, and driver/open/close
+   side effects even though LiftAssistant requests no controller protocol TX;
 4. the exact target device path is selected explicitly without discovery,
    active baud scanning or automatic fallback;
 5. ModemManager, serial-getty, gpsd, brltty and other processes are not owning

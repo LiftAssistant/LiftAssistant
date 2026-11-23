@@ -75,20 +75,43 @@ pub(crate) fn parse_arguments(
     let mut duration_seconds = None;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
-        if argument == "--plan" {
-            mode = RunnerMode::PlanOnly;
-            continue;
-        }
-
-        let value = arguments
-            .next()
-            .ok_or_else(|| format!("missing value for {argument}"))?;
         match argument.as_str() {
-            "--assurance" => assurance = Some(value),
-            "--profile" => profile = Some(value),
-            "--device" => device = Some(PathBuf::from(value)),
-            "--output" => output = Some(PathBuf::from(value)),
+            "--plan" => {
+                if mode == RunnerMode::PlanOnly {
+                    return Err(format!("duplicate argument {argument:?}").into());
+                }
+                mode = RunnerMode::PlanOnly;
+            }
+            "--assurance" => {
+                assurance = Some(singleton_value(
+                    &mut arguments,
+                    &argument,
+                    assurance.is_some(),
+                )?);
+            }
+            "--profile" => {
+                profile = Some(singleton_value(
+                    &mut arguments,
+                    &argument,
+                    profile.is_some(),
+                )?);
+            }
+            "--device" => {
+                device = Some(PathBuf::from(singleton_value(
+                    &mut arguments,
+                    &argument,
+                    device.is_some(),
+                )?));
+            }
+            "--output" => {
+                output = Some(PathBuf::from(singleton_value(
+                    &mut arguments,
+                    &argument,
+                    output.is_some(),
+                )?));
+            }
             "--duration-seconds" => {
+                let value = singleton_value(&mut arguments, &argument, duration_seconds.is_some())?;
                 duration_seconds = Some(value.parse::<u16>()?);
             }
             _ => return Err(format!("unsupported argument {argument:?}").into()),
@@ -126,11 +149,26 @@ pub(crate) fn parse_arguments(
     })
 }
 
+fn singleton_value(
+    arguments: &mut impl Iterator<Item = String>,
+    argument: &str,
+    already_seen: bool,
+) -> Result<String, Box<dyn Error>> {
+    if already_seen {
+        return Err(format!("duplicate argument {argument:?}").into());
+    }
+    arguments
+        .next()
+        .ok_or_else(|| format!("missing value for {argument}").into())
+}
+
 pub(crate) fn plan_summary(arguments: &Arguments) -> String {
     format!(
         "mode: PLAN_ONLY\ndevice: {}\noutput: {}\nduration: {}s\nprofile: \
-         {HISTORICAL_9600_8N1_PROFILE}\nassurance: SOFTWARE_RX_ONLY\nactive_protocol_tx: \
-         false\nphysically_passive: false/unproven\nreal_hardware_opened: false",
+         {HISTORICAL_9600_8N1_PROFILE}\nassurance: SOFTWARE_RX_ONLY\nSOFTWARE_RX_ONLY=true\n\
+         APPLICATION_PROTOCOL_TX_REQUESTED=false\nKERNEL_DRIVER_TX_FREE=false/unproven\n\
+         PHYSICALLY_PASSIVE=false/unproven\nREAL_LCE_COMPATIBLE=unproven\n\
+         real_hardware_opened: false",
         arguments.device.display(),
         arguments.output.display(),
         arguments.duration_seconds
@@ -140,8 +178,9 @@ pub(crate) fn plan_summary(arguments: &Arguments) -> String {
 fn execution_banner(arguments: &Arguments) -> String {
     format!(
         "LCE software-RX-only capture\ndevice: {}\noutput: {}\nduration: {}s\nprofile: \
-         {HISTORICAL_9600_8N1_PROFILE}\nSOFTWARE_RX_ONLY=true\nACTIVE_PROTOCOL_TX=false\n\
-         PHYSICALLY_PASSIVE=false/unproven",
+         {HISTORICAL_9600_8N1_PROFILE}\nSOFTWARE_RX_ONLY=true\n\
+         APPLICATION_PROTOCOL_TX_REQUESTED=false\nKERNEL_DRIVER_TX_FREE=false/unproven\n\
+         PHYSICALLY_PASSIVE=false/unproven\nREAL_LCE_COMPATIBLE=unproven",
         arguments.device.display(),
         arguments.output.display(),
         arguments.duration_seconds
