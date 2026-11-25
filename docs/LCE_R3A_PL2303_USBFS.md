@@ -150,6 +150,47 @@ If the interface can be claimed, the program:
 A zero-byte duration-complete result remains valid adapter/platform evidence;
 it says nothing about whether CPU561/XDB1 emits unsolicited traffic.
 
+## Executed off-elevator evidence — 2026-11-25
+
+A real execution was completed on the current Android/DroidSpaces host with the
+loose CableCreation adapter and no CPU561/elevator connection. The program ran
+for a requested 3 seconds and completed normally:
+
+~~~text
+CAPTURE_STARTED duration=3s bulk_in=0x83 serial_payload_tx=false
+CAPTURE_COMPLETE end_reason=DURATION_ELAPSED raw_bytes=0
+~~~
+
+The generated artifact independently verified as:
+
+~~~text
+purpose = OFF_ELEVATOR_ADAPTER_PLATFORM_VALIDATION
+end_reason = DURATION_ELAPSED
+raw_bytes = 0
+vid:pid = 067b:23c3
+bcdDevice = 0305
+topology_verified = True
+line_before = [128, 37, 0, 0, 0, 0, 8]
+line_after  = [128, 37, 0, 0, 0, 0, 8]
+flow_none = True
+bulk_out_used = False
+serial_payload_tx = False
+modem_control = False
+break = False
+device_reset = False
+SHA_MATCH = True
+~~~
+
+Because `line_before == line_after == 9600/8N1`, the conditional
+`SET_LINE_CODING` control-OUT path was not used in this run. The observed
+execution therefore consisted of descriptor/configuration reads, interface
+claim, control-IN state reads, and bounded bulk-IN waits. `raw_bytes=0` is
+expected with the loose DB9 connector and is not evidence that the physical
+RS-232 RX path works or that CPU561/XDB1 is silent.
+
+Result:
+`OFF-ELEVATOR_PL2303GT_ADAPTER_PLATFORM_VALIDATION=PASS`.
+
 ## Field boundary
 
 This code does not authorize connecting to the passenger elevator. A future
