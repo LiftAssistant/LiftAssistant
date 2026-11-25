@@ -17,10 +17,7 @@ mod linux {
         fs::{File, OpenOptions, remove_file},
         io::{Read, Write},
         mem::size_of,
-        os::{
-            fd::AsRawFd,
-            unix::fs::OpenOptionsExt,
-        },
+        os::{fd::AsRawFd, unix::fs::OpenOptionsExt},
         path::{Path, PathBuf},
         process::ExitCode,
         time::{Duration, Instant},
@@ -45,14 +42,10 @@ mod linux {
     const MAX_RAW_BYTES: usize = 1024 * 1024;
     const MAX_SERIALIZED_BYTES: usize = 5 * 1024 * 1024;
 
-    const USBDEVFS_CONTROL: libc::c_ulong =
-        ioc_readwrite::<UsbdevfsCtrlTransfer>(b'U', 0);
-    const USBDEVFS_BULK: libc::c_ulong =
-        ioc_readwrite::<UsbdevfsBulkTransfer>(b'U', 2);
-    const USBDEVFS_CLAIMINTERFACE: libc::c_ulong =
-        ioc_read::<libc::c_uint>(b'U', 15);
-    const USBDEVFS_RELEASEINTERFACE: libc::c_ulong =
-        ioc_read::<libc::c_uint>(b'U', 16);
+    const USBDEVFS_CONTROL: libc::c_ulong = ioc_readwrite::<UsbdevfsCtrlTransfer>(b'U', 0);
+    const USBDEVFS_BULK: libc::c_ulong = ioc_readwrite::<UsbdevfsBulkTransfer>(b'U', 2);
+    const USBDEVFS_CLAIMINTERFACE: libc::c_ulong = ioc_read::<libc::c_uint>(b'U', 15);
+    const USBDEVFS_RELEASEINTERFACE: libc::c_ulong = ioc_read::<libc::c_uint>(b'U', 16);
 
     #[repr(C)]
     struct UsbdevfsCtrlTransfer {
@@ -193,10 +186,7 @@ mod linux {
             .ok_or("missing --duration-seconds")?
             .parse::<u16>()?;
         if duration_seconds == 0 || duration_seconds > MAX_DURATION_SECONDS {
-            return Err(format!(
-                "--duration-seconds must be in 1..={MAX_DURATION_SECONDS}"
-            )
-            .into());
+            return Err(format!("--duration-seconds must be in 1..={MAX_DURATION_SECONDS}").into());
         }
 
         Ok(Args {
@@ -258,14 +248,7 @@ mod linux {
         let line_before = control_in(&file, 0xa1, 0x21, 0, INTERFACE as u16, 7)?;
         let line_changed = line_before.as_slice() != LINE_9600_8N1;
         if line_changed {
-            control_out(
-                &file,
-                0x21,
-                0x20,
-                0,
-                INTERFACE as u16,
-                &LINE_9600_8N1,
-            )?;
+            control_out(&file, 0x21, 0x20, 0, INTERFACE as u16, &LINE_9600_8N1)?;
         }
 
         let line_after = control_in(&file, 0xa1, 0x21, 0, INTERFACE as u16, 7)?;
@@ -295,9 +278,7 @@ mod linux {
             }
 
             let remaining = requested - elapsed;
-            let timeout_ms = remaining
-                .as_millis()
-                .clamp(1, u128::from(u32::MAX)) as u32;
+            let timeout_ms = remaining.as_millis().clamp(1, u128::from(u32::MAX)) as u32;
             let mut buffer = [0_u8; 64];
 
             match bulk_in(&file, BULK_IN, &mut buffer, timeout_ms) {
@@ -309,7 +290,9 @@ mod linux {
                         end_reason = "ENTRY_LIMIT".into();
                         break;
                     }
-                    let next = raw_bytes.checked_add(read).ok_or("RX byte count overflow")?;
+                    let next = raw_bytes
+                        .checked_add(read)
+                        .ok_or("RX byte count overflow")?;
                     if next > MAX_RAW_BYTES {
                         end_reason = "AGGREGATE_BYTE_LIMIT".into();
                         break;
@@ -569,12 +552,7 @@ mod linux {
         fn create(path: &Path) -> std::io::Result<Self> {
             Ok(Self {
                 path: path.to_owned(),
-                file: Some(
-                    OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(path)?,
-                ),
+                file: Some(OpenOptions::new().write(true).create_new(true).open(path)?),
                 committed: false,
             })
         }
