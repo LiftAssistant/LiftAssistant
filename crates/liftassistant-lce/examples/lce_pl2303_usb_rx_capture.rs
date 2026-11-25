@@ -112,6 +112,10 @@ mod linux {
         }
 
         let mut output = ReservedOutput::create(&args.output)?;
+        println!(
+            "CAPTURE_STARTED duration={}s bulk_in=0x{BULK_IN:02x} serial_payload_tx=false",
+            args.duration_seconds
+        );
         let capture = acquire(&args)?;
         let capture_bytes = serde_json::to_vec(&capture)?;
         let envelope = json!({
@@ -125,7 +129,21 @@ mod linux {
 
         output.file_mut().write_all(&encoded)?;
         output.file_mut().sync_all()?;
+
+        let end_reason = capture
+            .get("end_reason")
+            .and_then(Value::as_str)
+            .unwrap_or("UNKNOWN");
+        let raw_bytes = capture
+            .get("raw_bytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let output_path = args.output.display().to_string();
+
         output.commit();
+        println!(
+            "CAPTURE_COMPLETE end_reason={end_reason} raw_bytes={raw_bytes} output={output_path}"
+        );
         Ok(())
     }
 
