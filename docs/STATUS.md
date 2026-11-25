@@ -1,6 +1,6 @@
 # Project status
 
-Updated: 2026-11-22
+Updated: 2026-11-25
 
 ## Current milestone
 
@@ -670,8 +670,25 @@ configuration may require a USB control-OUT request. Therefore
 and `REAL_LCE_COMPATIBLE=unproven` remain explicit. The existing tty R3A
 artifact/backend and the R3A.1 HUMAN gate are unchanged.
 
-**State:** `OFF-ELEVATOR PL2303GT USBFS BACKEND IMPLEMENTED — ADAPTER/PLATFORM
-EXECUTION NEXT; CPU561/XDB1 FIELD USE HUMAN_PENDING / NOT AUTHORIZED.`
+A real off-elevator execution on the current Android/DroidSpaces host completed
+on 2026-11-25 against the loose CableCreation adapter at
+`/dev/bus/usb/001/002`. The artifact reports `067b:23c3`,
+`bcdDevice=0305`, verified interface/endpoint topology, unchanged
+`9600/8N1` line coding before/after, HXN flow-control NONE, zero serial
+payload TX, zero bulk-OUT use, zero modem-control/break/reset requests,
+`DURATION_ELAPSED`, and `raw_bytes=0`. The stored SHA-256 exactly matched
+an independent recomputation. Because line coding was already
+`[0x80,0x25,0,0,0,0,8]`, the allowed `SET_LINE_CODING` control-OUT path was
+not exercised in this run.
+
+This closes the adapter/platform execution gate for this exact host/adapter
+combination. It does **not** validate the DB9 electrical receive path, prove
+physical passivity, establish unsolicited CPU561/XDB1 output, or authorize
+controller connection.
+
+**State:** `OFF-ELEVATOR PL2303GT USBFS ADAPTER/PLATFORM VALIDATION PASS —
+DB9 PHYSICAL RX PATH UNVALIDATED; CPU561/XDB1 FIELD USE HUMAN_PENDING / NOT
+AUTHORIZED.`
 
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 
