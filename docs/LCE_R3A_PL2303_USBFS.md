@@ -14,8 +14,9 @@ The first implementation is intentionally narrow:
 - USB VID:PID `067b:23c3`
 - observed `bcdDevice=0305`
 - Prolific PL2303GT / HXN-family behavior
-- interface `0`
-- bulk IN endpoint `0x83`
+- interface `0`, vendor-specific class `0xff/0/0`
+- observed endpoint topology: `0x81` interrupt IN (10 bytes), `0x02` bulk OUT
+  (64 bytes, presence verified but never used), `0x83` bulk IN (64 bytes)
 - historical runtime profile `9600/8N1`
 
 It does not perform VID/PID discovery, serial-port discovery, baud scanning,
@@ -39,6 +40,7 @@ APPLICATION_PROTOCOL_TX_REQUESTED=false
 SERIAL_PAYLOAD_TX_REQUESTED=false
 USB_CONTROL_OUT_ADAPTER_CONFIGURATION=9600_8N1_ONLY_IF_NEEDED
 USB_BULK_OUT_ENDPOINT_USED=false
+USB_CONFIGURATION_TOPOLOGY_REQUIRED=interface0:0x81-int,0x02-bulk-out-present-unused,0x83-bulk-in
 MODEM_CONTROL_REQUESTED=false
 BREAK_REQUESTED=false
 DEVICE_RESET_REQUESTED=false
@@ -79,6 +81,8 @@ Primary references:
   https://github.com/torvalds/linux/blob/master/include/uapi/linux/usbdevice_fs.h
 - Linux PL2303 driver:
   https://github.com/torvalds/linux/blob/master/drivers/usb/serial/pl2303.c
+- Prolific PL2303GT data sheet (descriptor configuration is OTP-customizable):
+  https://prolificusa.com/wp-content/uploads/2019/06/DS-23181001_PL2303GT.pdf
 - usb-serial-for-android Prolific implementation:
   https://github.com/mik3y/usb-serial-for-android/blob/master/usbSerialForAndroid/src/main/java/com/hoho/android/usbserial/driver/ProlificSerialDriver.java
 
@@ -130,12 +134,18 @@ unknown claimant.
 If the interface can be claimed, the program:
 
 1. reads the device descriptor and requires `067b:23c3 / bcdDevice 0305`;
-2. reads current PL2303 line coding;
-3. sets 9600/8N1 only if needed, then reads it back;
-4. reads HXN flow-control register `0x0a` and refuses to modify it if it is not
+2. reads the sole configuration descriptor and fails closed unless interface 0
+   and the observed `0x81 / 0x02 / 0x83` endpoint topology match the reviewed
+   PL2303GT layout; endpoint `0x02` is checked only as identity/topology evidence
+   and is never submitted to;
+3. claims interface 0 without detaching or force-releasing another claimant;
+4. reads current PL2303 line coding;
+5. sets 9600/8N1 only if needed, then reads it back;
+6. reads HXN flow-control register `0x0a` and refuses to modify it if it is not
    already the `NONE` state under the Linux driver's `0x1c` mask;
-5. performs bounded `USBDEVFS_BULK` reads only from endpoint `0x83`;
-6. writes a create-new JSON evidence artifact with a SHA-256 envelope.
+7. performs bounded `USBDEVFS_BULK` reads only from endpoint `0x83`, using a
+   250 ms maximum wait slice so the bounded duration is observed promptly;
+8. writes a create-new JSON evidence artifact with a SHA-256 envelope.
 
 A zero-byte duration-complete result remains valid adapter/platform evidence;
 it says nothing about whether CPU561/XDB1 emits unsolicited traffic.

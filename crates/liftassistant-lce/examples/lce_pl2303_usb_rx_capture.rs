@@ -199,7 +199,7 @@ mod linux {
 
     fn banner(args: &Args, plan: bool) -> String {
         format!(
-            "mode: {}\ncontext: {CONTEXT}\nusb_node: {}\noutput: {}\nduration: {}s\nprofile: {PROFILE}\nassurance: {ASSURANCE}\nUSBFS_FD_ACCESS=READ_WRITE_REQUIRED_BY_USBFS\nAPPLICATION_PROTOCOL_TX_REQUESTED=false\nSERIAL_PAYLOAD_TX_REQUESTED=false\nUSB_CONTROL_OUT_ADAPTER_CONFIGURATION=9600_8N1_ONLY_IF_NEEDED\nUSB_BULK_OUT_ENDPOINT_USED=false\nMODEM_CONTROL_REQUESTED=false\nBREAK_REQUESTED=false\nDEVICE_RESET_REQUESTED=false\nENDPOINT_RESET_REQUESTED=false\nFLOW_CONTROL_WRITE_REQUESTED=false\nAUTO_DISCOVERY=false\nBAUD_SCAN=false\nUNLOCK_OR_TERMINAL_NAVIGATION=false\nPHYSICALLY_PASSIVE=false/unproven\nREAL_LCE_COMPATIBLE=unproven\nREAL_CONTROLLER_USE_AUTHORIZED=false\nreal_hardware_opened: {}",
+            "mode: {}\ncontext: {CONTEXT}\nusb_node: {}\noutput: {}\nduration: {}s\nprofile: {PROFILE}\nassurance: {ASSURANCE}\nUSBFS_FD_ACCESS=READ_WRITE_REQUIRED_BY_USBFS\nAPPLICATION_PROTOCOL_TX_REQUESTED=false\nSERIAL_PAYLOAD_TX_REQUESTED=false\nUSB_CONTROL_OUT_ADAPTER_CONFIGURATION=9600_8N1_ONLY_IF_NEEDED\nUSB_BULK_OUT_ENDPOINT_USED=false\nUSB_CONFIGURATION_TOPOLOGY_REQUIRED=interface0:0x81-int,0x02-bulk-out-present-unused,0x83-bulk-in\nMODEM_CONTROL_REQUESTED=false\nBREAK_REQUESTED=false\nDEVICE_RESET_REQUESTED=false\nENDPOINT_RESET_REQUESTED=false\nFLOW_CONTROL_WRITE_REQUESTED=false\nAUTO_DISCOVERY=false\nBAUD_SCAN=false\nUNLOCK_OR_TERMINAL_NAVIGATION=false\nPHYSICALLY_PASSIVE=false/unproven\nREAL_LCE_COMPATIBLE=unproven\nREAL_CONTROLLER_USE_AUTHORIZED=false\nreal_hardware_opened: {}",
             if plan { "PLAN_ONLY" } else { "EXECUTE" },
             args.usb_node.display(),
             args.output.display(),
@@ -228,6 +228,9 @@ mod linux {
             )
             .into());
         }
+
+        let configuration = read_single_configuration(&mut file, descriptor[17])?;
+        let topology = validate_pl2303gt_topology(&configuration)?;
 
         let mut claim = INTERFACE;
         ioctl_ptr(
@@ -278,7 +281,10 @@ mod linux {
             }
 
             let remaining = requested - elapsed;
-            let timeout_ms = remaining.as_millis().clamp(1, u128::from(u32::MAX)) as u32;
+            let timeout_ms = remaining
+                .min(Duration::from_millis(250))
+                .as_millis()
+                .clamp(1, u128::from(u32::MAX)) as u32;
             let mut buffer = [0_u8; 64];
 
             match bulk_in(&file, BULK_IN, &mut buffer, timeout_ms) {
@@ -343,6 +349,7 @@ mod linux {
                 "device_subclass": descriptor[5],
                 "device_protocol": descriptor[6],
             },
+            "configuration_topology": topology,
             "interface_number": INTERFACE,
             "bulk_in_endpoint": BULK_IN,
             "usbfs_fd_access": "READ_WRITE_REQUIRED_BY_USBFS",
@@ -389,6 +396,160 @@ mod linux {
             .into());
         }
         Ok(descriptor)
+    }
+
+    fn read_single_configuration(
+        file: &mut File,
+        configuration_count: u8,
+    ) -> Result<Vec<u8>, Box<dyn Error>> {
+        if configuration_count != 1 {
+            return Err(format!(
+                "expected exactly one USB configuration, observed {configuration_count}"
+            )
+            .into());
+        }
+
+        let mut header = [0_u8; 9];
+        file.read_exact(&mut header)?;
+        if header[0] != 9 || header[1] != 2 {
+            return Err(format!(
+                "unexpected USB configuration descriptor header: {:02x?}",
+                &header[..2]
+            )
+            .into());
+        }
+
+        let total_length = usize::from(u16::from_le_bytes([header[2], header[3]]));
+        if !(9..=4096).contains(&total_length) {
+            return Err(format!(
+                "invalid USB configuration descriptor length {total_length}"
+            )
+            .into());
+        }
+
+        let mut bytes = vec![0_u8; total_length];
+        bytes[..header.len()].copy_from_slice(&header);
+        file.read_exact(&mut bytes[header.len()..])?;
+        Ok(bytes)
+    }
+
+    fn validate_pl2303gt_topology(configuration: &[u8]) -> Result<Value, Box<dyn Error>> {
+        if configuration.len() < 9
+            || configuration[0] != 9
+            || configuration[1] != 2
+            || usize::from(u16::from_le_bytes([configuration[2], configuration[3]]))
+                != configuration.len()
+        {
+            return Err("invalid USB configuration descriptor envelope".into());
+        }
+        if configuration[4] != 1 {
+            return Err(format!(
+                "expected one PL2303GT interface, observed {}",
+                configuration[4]
+            )
+            .into());
+        }
+
+        let mut offset = 9usize;
+        let mut target_interface = false;
+        let mut interface_verified = false;
+        let mut endpoints = Vec::<(u8, u8, u16, u8)>::new();
+
+        while offset < configuration.len() {
+            let length = usize::from(configuration[offset]);
+            if length < 2 || offset + length > configuration.len() {
+                return Err(format!(
+                    "malformed USB descriptor at configuration offset {offset}"
+                )
+                .into());
+            }
+
+            match configuration[offset + 1] {
+                4 => {
+                    if length < 9 {
+                        return Err("short USB interface descriptor".into());
+                    }
+                    let interface_number = configuration[offset + 2];
+                    let alternate_setting = configuration[offset + 3];
+                    target_interface = interface_number == 0 && alternate_setting == 0;
+                    if target_interface {
+                        let endpoint_count = configuration[offset + 4];
+                        let class = configuration[offset + 5];
+                        let subclass = configuration[offset + 6];
+                        let protocol = configuration[offset + 7];
+                        if endpoint_count != 3 || class != 0xff || subclass != 0 || protocol != 0 {
+                            return Err(format!(
+                                "unexpected PL2303GT interface 0 descriptor: endpoints={endpoint_count}, class={class:#04x}, subclass={subclass:#04x}, protocol={protocol:#04x}"
+                            )
+                            .into());
+                        }
+                        interface_verified = true;
+                    }
+                }
+                5 if target_interface => {
+                    if length < 7 {
+                        return Err("short USB endpoint descriptor".into());
+                    }
+                    endpoints.push((
+                        configuration[offset + 2],
+                        configuration[offset + 3] & 0x03,
+                        u16::from_le_bytes([
+                            configuration[offset + 4],
+                            configuration[offset + 5],
+                        ]),
+                        configuration[offset + 6],
+                    ));
+                }
+                _ => {}
+            }
+
+            offset += length;
+        }
+
+        if !interface_verified {
+            return Err("PL2303GT interface 0 alternate setting 0 was not found".into());
+        }
+
+        endpoints.sort_unstable();
+        let expected = vec![
+            (0x02, 0x02, 64, 0),
+            (0x81, 0x03, 10, 1),
+            (0x83, 0x02, 64, 0),
+        ];
+        if endpoints != expected {
+            return Err(format!(
+                "unexpected PL2303GT endpoint topology: {endpoints:02x?}"
+            )
+            .into());
+        }
+
+        Ok(json!({
+            "verified": true,
+            "interface": 0,
+            "interface_class": 255,
+            "interface_subclass": 0,
+            "interface_protocol": 0,
+            "endpoints": [
+                {
+                    "address": 0x81,
+                    "transfer_type": "INTERRUPT_IN",
+                    "max_packet_size": 10,
+                    "interval": 1
+                },
+                {
+                    "address": 0x02,
+                    "transfer_type": "BULK_OUT_PRESENT_BUT_UNUSED",
+                    "max_packet_size": 64,
+                    "interval": 0
+                },
+                {
+                    "address": 0x83,
+                    "transfer_type": "BULK_IN_RX",
+                    "max_packet_size": 64,
+                    "interval": 0
+                }
+            ]
+        }))
     }
 
     fn control_in(
@@ -638,6 +799,33 @@ mod linux {
             ] {
                 assert!(text.contains(expected));
             }
+        }
+
+        #[test]
+        fn topology_validation_accepts_the_observed_pl2303gt_layout() {
+            let configuration = [
+                9, 2, 39, 0, 1, 1, 0, 0xa0, 50,
+                9, 4, 0, 0, 3, 0xff, 0, 0, 0,
+                7, 5, 0x81, 3, 10, 0, 1,
+                7, 5, 0x02, 2, 64, 0, 0,
+                7, 5, 0x83, 2, 64, 0, 0,
+            ];
+            let topology = validate_pl2303gt_topology(&configuration).unwrap();
+            assert_eq!(topology["verified"], true);
+            assert_eq!(topology["endpoints"][2]["address"], 0x83);
+        }
+
+        #[test]
+        fn topology_validation_fails_closed_on_endpoint_drift() {
+            let mut configuration = [
+                9, 2, 39, 0, 1, 1, 0, 0xa0, 50,
+                9, 4, 0, 0, 3, 0xff, 0, 0, 0,
+                7, 5, 0x81, 3, 10, 0, 1,
+                7, 5, 0x02, 2, 64, 0, 0,
+                7, 5, 0x83, 2, 64, 0, 0,
+            ];
+            configuration[32] = 0x84;
+            assert!(validate_pl2303gt_topology(&configuration).is_err());
         }
 
         #[test]
