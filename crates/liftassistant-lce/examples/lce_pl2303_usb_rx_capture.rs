@@ -807,11 +807,8 @@ mod linux {
         #[test]
         fn topology_validation_fails_closed_on_endpoint_drift() {
             let mut configuration = [
-                9, 2, 39, 0, 1, 1, 0, 0xa0, 50,
-                9, 4, 0, 0, 3, 0xff, 0, 0, 0,
-                7, 5, 0x81, 3, 10, 0, 1,
-                7, 5, 0x02, 2, 64, 0, 0,
-                7, 5, 0x83, 2, 64, 0, 0,
+                9, 2, 39, 0, 1, 1, 0, 0xa0, 50, 9, 4, 0, 0, 3, 0xff, 0, 0, 0, 7, 5, 0x81, 3, 10, 0,
+                1, 7, 5, 0x02, 2, 64, 0, 0, 7, 5, 0x83, 2, 64, 0, 0,
             ];
             configuration[34] = 0x84;
             assert!(validate_pl2303gt_topology(&configuration).is_err());
