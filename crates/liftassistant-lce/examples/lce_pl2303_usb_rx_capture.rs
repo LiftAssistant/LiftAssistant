@@ -421,10 +421,9 @@ mod linux {
 
         let total_length = usize::from(u16::from_le_bytes([header[2], header[3]]));
         if !(9..=4096).contains(&total_length) {
-            return Err(format!(
-                "invalid USB configuration descriptor length {total_length}"
-            )
-            .into());
+            return Err(
+                format!("invalid USB configuration descriptor length {total_length}").into(),
+            );
         }
 
         let mut bytes = vec![0_u8; total_length];
@@ -458,10 +457,9 @@ mod linux {
         while offset < configuration.len() {
             let length = usize::from(configuration[offset]);
             if length < 2 || offset + length > configuration.len() {
-                return Err(format!(
-                    "malformed USB descriptor at configuration offset {offset}"
-                )
-                .into());
+                return Err(
+                    format!("malformed USB descriptor at configuration offset {offset}").into(),
+                );
             }
 
             match configuration[offset + 1] {
@@ -493,10 +491,7 @@ mod linux {
                     endpoints.push((
                         configuration[offset + 2],
                         configuration[offset + 3] & 0x03,
-                        u16::from_le_bytes([
-                            configuration[offset + 4],
-                            configuration[offset + 5],
-                        ]),
+                        u16::from_le_bytes([configuration[offset + 4], configuration[offset + 5]]),
                         configuration[offset + 6],
                     ));
                 }
@@ -517,10 +512,7 @@ mod linux {
             (0x83, 0x02, 64, 0),
         ];
         if endpoints != expected {
-            return Err(format!(
-                "unexpected PL2303GT endpoint topology: {endpoints:02x?}"
-            )
-            .into());
+            return Err(format!("unexpected PL2303GT endpoint topology: {endpoints:02x?}").into());
         }
 
         Ok(json!({
@@ -804,11 +796,8 @@ mod linux {
         #[test]
         fn topology_validation_accepts_the_observed_pl2303gt_layout() {
             let configuration = [
-                9, 2, 39, 0, 1, 1, 0, 0xa0, 50,
-                9, 4, 0, 0, 3, 0xff, 0, 0, 0,
-                7, 5, 0x81, 3, 10, 0, 1,
-                7, 5, 0x02, 2, 64, 0, 0,
-                7, 5, 0x83, 2, 64, 0, 0,
+                9, 2, 39, 0, 1, 1, 0, 0xa0, 50, 9, 4, 0, 0, 3, 0xff, 0, 0, 0, 7, 5, 0x81, 3, 10, 0,
+                1, 7, 5, 0x02, 2, 64, 0, 0, 7, 5, 0x83, 2, 64, 0, 0,
             ];
             let topology = validate_pl2303gt_topology(&configuration).unwrap();
             assert_eq!(topology["verified"], true);
@@ -824,7 +813,7 @@ mod linux {
                 7, 5, 0x02, 2, 64, 0, 0,
                 7, 5, 0x83, 2, 64, 0, 0,
             ];
-            configuration[32] = 0x84;
+            configuration[34] = 0x84;
             assert!(validate_pl2303gt_topology(&configuration).is_err());
         }
 
