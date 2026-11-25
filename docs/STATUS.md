@@ -645,6 +645,34 @@ AUTHORIZED; SOFTWARE_RX_ONLY=true; APPLICATION_PROTOCOL_TX_REQUESTED=false;
 KERNEL_DRIVER_TX_FREE=false/unproven; PHYSICALLY_PASSIVE=false/unproven;
 REAL_LCE_COMPATIBLE=unproven.`
 
+
+### LCE-R3A PL2303GT raw-USB off-elevator backend
+
+**IMPLEMENTED AS AN OFF-ELEVATOR EXPERIMENT; REAL CONTROLLER USE REMAINS
+HUMAN_PENDING / NOT AUTHORIZED.** The Linux example
+`lce_pl2303_usb_rx_capture` provides a second acquisition path for the
+already-observed CableCreation `067b:23c3 / bcdDevice 0305` PL2303GT when
+Android/DroidSpaces exposes `/dev/bus/usb` but the Android kernel has no
+`CONFIG_USB_SERIAL_PL2303` tty driver.
+
+The path uses Linux usbfs directly and adds no new dependency. It validates
+the raw USB device descriptor, claims interface 0 without detaching another
+owner, reads current line coding, sets 9600/8N1 only if needed, verifies HXN
+flow control is already NONE without modifying it, then performs bounded bulk
+IN only on endpoint `0x83`. It does not use bulk OUT, DTR/RTS, BREAK, device
+reset, endpoint reset, flow-control writes, discovery, baud scanning, terminal
+navigation, unlock, or controller commands.
+
+The assurance is deliberately named `pl2303-serial-payload-rx-only`, not
+`USB_RX_ONLY`: usbfs requires an RW file descriptor and adapter line-coding
+configuration may require a USB control-OUT request. Therefore
+`SERIAL_PAYLOAD_TX_REQUESTED=false` while `PHYSICALLY_PASSIVE=false/unproven`
+and `REAL_LCE_COMPATIBLE=unproven` remain explicit. The existing tty R3A
+artifact/backend and the R3A.1 HUMAN gate are unchanged.
+
+**State:** `OFF-ELEVATOR PL2303GT USBFS BACKEND IMPLEMENTED — ADAPTER/PLATFORM
+EXECUTION NEXT; CPU561/XDB1 FIELD USE HUMAN_PENDING / NOT AUTHORIZED.`
+
 ### Operator Surface Foundation — Reconnect-safe Simulator ServeFloor Workflow
 
 **COMPLETE (Simulator-only development slice).** This vertical slice connects

@@ -151,6 +151,31 @@ claim. Neither path authorizes active query, unlock or control. See
 and
 [`docs/LCE_R3A_SOFTWARE_RX_ONLY_FIELD_PATH.md`](docs/LCE_R3A_SOFTWARE_RX_ONLY_FIELD_PATH.md).
 
+
+Validate the already-observed CableCreation PL2303GT raw-USB path off-elevator:
+
+~~~bash
+cargo run -p liftassistant-lce --example lce_pl2303_usb_rx_capture --locked -- \
+  --plan \
+  --assurance pl2303-serial-payload-rx-only \
+  --context off-elevator-adapter-validation \
+  --profile historical-9600-8n1 \
+  --usb-node /dev/bus/usb/001/002 \
+  --output /tmp/lce-pl2303-usb.json \
+  --duration-seconds 10
+~~~
+
+This experimental Linux usbfs backend is intentionally specific to the
+observed `067b:23c3 / bcdDevice 0305` PL2303GT/HXN adapter. It exists for
+off-elevator adapter/platform validation when the host exposes `/dev/bus/usb`
+but has no PL2303 tty driver. It may configure 9600/8N1 through a USB control
+request if needed, then performs only bulk-IN reads from endpoint `0x83`; it
+does not use bulk OUT, DTR/RTS, BREAK, device/endpoint reset, flow-control
+writes, terminal navigation, unlock, baud scanning, or elevator commands.
+`PHYSICALLY_PASSIVE` and real LCE compatibility remain unproven, and real
+controller use remains HUMAN-gated. See
+[`docs/LCE_R3A_PL2303_USBFS.md`](docs/LCE_R3A_PL2303_USBFS.md).
+
 Run the internal observation-adapter validation profiles:
 
 ~~~bash
